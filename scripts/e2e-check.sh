@@ -33,4 +33,15 @@ rm -f "$BIG_FILE"
 S=$(curl -s -o /dev/null -w "%{http_code}" "$BASE/s/nonexistent-token-xxx")
 [ "$S" = "404" ] || { echo "FAIL: 失效链接应 404，实际 $S"; exit 1; }
 
-echo "✓ 子计划 1 端到端通过（上传→免登录查看→401/413/404 错误场景）"
+echo "→ 验证路径穿越防护（name 与 path 都过 parsePath）"
+S=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/api/v1/documents" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"name":"../../../evil.md","content":"x"}')
+[ "$S" = "400" ] || { echo "FAIL: 穿越 name 应 400，实际 $S"; exit 1; }
+
+S=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/api/v1/documents" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"name":"ok.md","content":"x","path":"../escape"}')
+[ "$S" = "400" ] || { echo "FAIL: 穿越 path 应 400，实际 $S"; exit 1; }
+
+echo "✓ 子计划 1 端到端通过（上传→免登录查看→401/413/404/400 穿越防护）"
