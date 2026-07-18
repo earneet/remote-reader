@@ -4,11 +4,12 @@ import { db, schema } from '$server/db';
 import { verifyPassword } from '$server/auth';
 import { setSessionCookie } from '$server/session';
 import { checkRateLimit } from '$server/ratelimit';
+import { envInt } from '$server/env';
 import { eq } from 'drizzle-orm';
 
 const LOGIN_RATE_LIMIT = {
-    max: Number(process.env.LOGIN_RATE_LIMIT_MAX ?? 10),
-    windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS ?? 60_000)
+    max: envInt('LOGIN_RATE_LIMIT_MAX', 10),
+    windowMs: envInt('RATE_LIMIT_WINDOW_MS', 60_000)
 };
 
 export const load: PageServerLoad = async ({ locals }) => {

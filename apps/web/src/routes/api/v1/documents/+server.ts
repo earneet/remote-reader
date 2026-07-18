@@ -4,11 +4,12 @@ import { authenticateApiToken } from '$server/apitoken-auth';
 import { checkRateLimit } from '$server/ratelimit';
 import { uploadDocument } from '$server/documents';
 import { parsePath } from '@remote-reader/shared/paths';
+import { envInt } from '$server/env';
 
-const MAX_BYTES = Number(process.env.MAX_UPLOAD_BYTES ?? 5 * 1024 * 1024);
+const MAX_BYTES = envInt('MAX_UPLOAD_BYTES', 5 * 1024 * 1024);
 const RATE_LIMIT = {
-    max: Number(process.env.RATE_LIMIT_MAX ?? 60),
-    windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS ?? 60_000)
+    max: envInt('RATE_LIMIT_MAX', 60),
+    windowMs: envInt('RATE_LIMIT_WINDOW_MS', 60_000)
 };
 
 export const POST: RequestHandler = async ({ request }) => {

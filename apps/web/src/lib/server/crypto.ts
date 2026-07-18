@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import { envInt } from './env';
 
 function readSecret(): string {
     const s = process.env.SESSION_SECRET;
@@ -20,7 +21,7 @@ interface Payload {
 }
 
 function maxAgeMs(): number {
-    return Number(process.env.SESSION_MAX_AGE ?? 2592000) * 1000;
+    return envInt('SESSION_MAX_AGE', 2_592_000) * 1000;
 }
 
 function signBody(body: string): string {

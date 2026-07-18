@@ -47,14 +47,7 @@ test('缺 exp（签名有效）→ null', () => {
     expect(verify(token)).toBeNull();
 });
 
-test('过期 token → null', () => {
-    const prev = process.env.SESSION_MAX_AGE;
-    process.env.SESSION_MAX_AGE = '-1';
-    try {
-        const token = sign({ userId: 'u' });
-        expect(verify(token)).toBeNull();
-    } finally {
-        if (prev === undefined) delete process.env.SESSION_MAX_AGE;
-        else process.env.SESSION_MAX_AGE = prev;
-    }
+test('过期 token（exp 在过去）→ null', () => {
+    const token = forge({ userId: 'u', exp: Date.now() - 1000 });
+    expect(verify(token)).toBeNull();
 });

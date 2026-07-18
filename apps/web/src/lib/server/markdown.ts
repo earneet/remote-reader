@@ -25,7 +25,12 @@ let highlighterPromise: Promise<Highlighter> | null = null;
 
 function getHighlighter(): Promise<Highlighter> {
     if (!highlighterPromise) {
-        highlighterPromise = createHighlighter({ langs: LANGS, themes: [THEME] });
+        highlighterPromise = createHighlighter({ langs: LANGS, themes: [THEME] }).catch(
+            (e) => {
+                highlighterPromise = null;
+                throw e;
+            }
+        );
     }
     return highlighterPromise;
 }
@@ -39,7 +44,8 @@ export async function renderMarkdown(src: string): Promise<string> {
         highlight: (code, lang) => {
             try {
                 return hl.codeToHtml(code, { lang: lang || 'text', theme: THEME });
-            } catch {
+            } catch (e) {
+                console.error('[markdown] shiki highlight failed for lang', lang, e);
                 return '';
             }
         }

@@ -1,8 +1,9 @@
 import type { Cookies } from '@sveltejs/kit';
 import { sign, verify } from './crypto';
+import { envInt } from './env';
 
 const COOKIE_NAME = 'session';
-const MAX_AGE = Number(process.env.SESSION_MAX_AGE ?? 60 * 60 * 24 * 30);
+const MAX_AGE = envInt('SESSION_MAX_AGE', 60 * 60 * 24 * 30);
 
 export function setSessionCookie(cookies: Cookies, payload: { userId: string }): void {
     const token = sign(payload);
