@@ -1,15 +1,16 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID, randomBytes } from 'node:crypto';
+import { hash as argon2Hash, verify as argon2Verify, Algorithm } from '@node-rs/argon2';
 
 export async function hashPassword(password: string): Promise<string> {
-    return Bun.password.hash(password, { algorithm: 'argon2id' });
+    return argon2Hash(password, { algorithm: Algorithm.Argon2id });
 }
 
-export async function verifyPassword(password: string, hash: string): Promise<boolean> {
-    return Bun.password.verify(password, hash);
+export async function verifyPassword(password: string, hashStr: string): Promise<boolean> {
+    return argon2Verify(hashStr, password);
 }
 
 export function generateId(): string {
-    return crypto.randomUUID() + Date.now().toString(36);
+    return randomUUID() + Date.now().toString(36);
 }
 
 export function sha256Hex(input: string): string {
@@ -21,8 +22,6 @@ export function hashToken(plaintext: string): string {
 }
 
 export async function generateApiToken(): Promise<{ plaintext: string; hash: string }> {
-    const bytes = new Uint8Array(32);
-    crypto.getRandomValues(bytes);
-    const plaintext = 'rr_' + Buffer.from(bytes).toString('base64url');
+    const plaintext = 'rr_' + randomBytes(32).toString('base64url');
     return { plaintext, hash: hashToken(plaintext) };
 }

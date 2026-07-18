@@ -1,6 +1,9 @@
 <script lang="ts">
-    // 文件管理器在子计划 3 实现
+    let { data } = $props();
 </script>
 
 <h1>Remote Reader</h1>
-<p>Web 应用核心已就绪。文件管理器将在后续计划实现。</p>
+<p>当前用户：{data.user?.email ?? '未登录'}</p>
+<p>
+    <a href="/login">登录</a> · <a href="/register">注册</a>
+</p>
