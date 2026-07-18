@@ -1,0 +1,16 @@
+{
+  "lockfileVersion": 1,
+  "configVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "remote-reader",
+    },
+    "packages/shared": {
+      "name": "@remote-reader/shared",
+      "version": "0.0.1",
+    },
+  },
+  "packages": {
+    "@remote-reader/shared": ["@remote-reader/shared@workspace:packages/shared"],
+  }
+}

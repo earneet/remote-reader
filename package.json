@@ -1,0 +1,10 @@
+{
+  "name": "remote-reader",
+  "private": true,
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "dev": "bun --filter remote-reader-web dev",
+    "build": "bun --filter remote-reader-web build",
+    "test": "bun test"
+  }
+}

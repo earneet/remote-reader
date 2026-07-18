@@ -1,0 +1,2 @@
+# bun test 默认从项目根递归扫描 *.test.ts（自动跳过 node_modules），
+# 因此 packages/shared 与 apps/web 下的测试都会被 `bun test` 覆盖。
