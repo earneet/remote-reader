@@ -98,7 +98,6 @@ export async function uploadDocument(
     }
 
     const id = generateId();
-    await writeFile(diskPath, content);
     db.insert(schema.documents).values({
         id,
         ownerId,
@@ -111,6 +110,12 @@ export async function uploadDocument(
         createdAt: now,
         updatedAt: now
     }).run();
+    try {
+        await writeFile(diskPath, content);
+    } catch (e) {
+        db.delete(schema.documents).where(eq(schema.documents.id, id)).run();
+        throw e;
+    }
     const url = await ensureShareUrl(id);
     return { id, url };
 }
