@@ -9,12 +9,13 @@
     "preview": "vite preview",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate"
+    "db:migrate": "mkdir -p data && drizzle-kit migrate"
   },
   "devDependencies": {
     "@sveltejs/adapter-node": "^5.2.0",
     "@sveltejs/kit": "^2.8.0",
     "@sveltejs/vite-plugin-svelte": "^4.0.0",
+    "better-sqlite3": "^12.11.1",
     "drizzle-kit": "^0.28.0",
     "svelte": "^5.0.0",
     "svelte-check": "^4.0.0",
