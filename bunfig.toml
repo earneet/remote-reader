@@ -1,2 +1,2 @@
-# bun test 默认从项目根递归扫描 *.test.ts（自动跳过 node_modules），
-# 因此 packages/shared 与 apps/web 下的测试都会被 `bun test` 覆盖。
+# 测试由 vitest 在 node 下运行（见根 vitest.config.ts），覆盖 packages/shared 与 apps/web。
+# bunfig.toml 此处仅作 bun 配置占位（install/test 不再依赖 bun test）。

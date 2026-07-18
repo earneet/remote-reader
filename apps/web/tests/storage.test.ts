@@ -1,4 +1,4 @@
-import { test, expect, afterEach } from 'bun:test';
+import { test, expect, afterEach } from 'vitest';
 import { rmSync, existsSync } from 'node:fs';
 import { writeFile, readFile, ensureDir } from '../src/lib/server/storage';
 

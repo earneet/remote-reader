@@ -1,4 +1,4 @@
-import { test, expect } from 'bun:test';
+import { test, expect } from 'vitest';
 import { parsePath } from './paths';
 
 test('单文件名合法', () => {

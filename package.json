@@ -5,6 +5,9 @@
   "scripts": {
     "dev": "bun --filter remote-reader-web dev",
     "build": "bun --filter remote-reader-web build",
-    "test": "bun test"
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.10"
   }
 }
