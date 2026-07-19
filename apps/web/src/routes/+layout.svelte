@@ -1,11 +1,11 @@
 <script lang="ts">
-    import { page } from '$app/stores';
+    import { page } from '$app/state';
     let { data, children } = $props();
     const showNav = $derived(
         !!data.user &&
-        !($page.url.pathname === '/login' ||
-          $page.url.pathname === '/register' ||
-          $page.url.pathname.startsWith('/s/'))
+        !(page.url.pathname === '/login' ||
+          page.url.pathname === '/register' ||
+          page.url.pathname.startsWith('/s/'))
     );
 </script>
 
