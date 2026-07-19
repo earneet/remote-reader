@@ -1,6 +1,7 @@
 import { eq, and, isNull, inArray } from 'drizzle-orm';
 import { join } from 'node:path';
 import { rmSync } from 'node:fs';
+import { unlink } from 'node:fs/promises';
 import { db, schema } from './db';
 import { generateId, sha256Hex } from './auth';
 import { writeFile } from './storage';
@@ -101,22 +102,26 @@ export async function uploadDocument(
     }
 
     const id = generateId();
-    db.insert(schema.documents).values({
-        id,
-        ownerId,
-        parentId,
-        name,
-        type: 'file',
-        storagePath: diskPath,
-        contentHash,
-        sizeBytes: Buffer.byteLength(content),
-        createdAt: now,
-        updatedAt: now
-    }).run();
+    // H2: 先写盘后落库——崩溃窗口只留孤儿磁盘文件（可清理），不留孤儿 DB 行（会让查看/管理页 500）。
+    // writeFile 已原子（tmp→rename），不会损坏已有内容。
+    await writeFile(diskPath, content);
     try {
-        await writeFile(diskPath, content);
+        db.insert(schema.documents).values({
+            id,
+            ownerId,
+            parentId,
+            name,
+            type: 'file',
+            storagePath: diskPath,
+            contentHash,
+            sizeBytes: Buffer.byteLength(content),
+            createdAt: now,
+            updatedAt: now
+        }).run();
     } catch (e) {
-        db.delete(schema.documents).where(eq(schema.documents.id, id)).run();
+        try {
+            await unlink(diskPath);
+        } catch {}
         throw e;
     }
     const url = await ensureShareUrl(id);
