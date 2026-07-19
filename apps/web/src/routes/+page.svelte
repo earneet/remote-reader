@@ -68,7 +68,10 @@
                         {/if}
                         <form class="inline" method="POST" action="?/delete"
                             use:enhance={({ cancel }) => {
-                                if (!confirm('确认删除？文件夹会级联删除全部内容，且不可恢复。')) { cancel(); return; }
+                                const msg = item.type === 'folder'
+                                    ? '确认删除该文件夹？将级联删除其全部内容，且不可恢复。'
+                                    : '确认删除该文件？此操作不可恢复。';
+                                if (!confirm(msg)) { cancel(); return; }
                                 return async ({ result }) => { if (result.type === 'success') await invalidateAll(); };
                             }}
                         >

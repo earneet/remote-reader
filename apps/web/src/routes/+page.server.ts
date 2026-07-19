@@ -44,7 +44,7 @@ export const actions: Actions = {
         const id = String(form.get('id') ?? '');
         const name = String(form.get('name') ?? '').trim();
         if (!id || !name) error(400, '参数缺失');
-        renameNode(locals.user.id, id, name);
+        if (!renameNode(locals.user.id, id, name)) error(404, '文档不存在');
         return { ok: true };
     },
     move: async ({ request, locals }) => {
