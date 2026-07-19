@@ -213,3 +213,28 @@ test('deleteNode 非 owner 不删', async () => {
 test('deleteNode 不存在的 id 静默返回', () => {
     expect(() => deleteNode(ownerId, 'nonexistent-id')).not.toThrow();
 });
+
+test('moveNode 遇到 parentId 环（DB 损坏）触发深度上限，安全拒绝', async () => {
+    await uploadDocument(ownerId, 'a.md', 'x', ['p1']);
+    await uploadDocument(ownerId, 'b.md', 'y', ['p2']);
+    const p1 = folderByName('p1')!;
+    const p2 = folderByName('p2')!;
+    db.update(schema.documents).set({ parentId: p2.id }).where(eq(schema.documents.id, p1.id)).run();
+    db.update(schema.documents).set({ parentId: p1.id }).where(eq(schema.documents.id, p2.id)).run();
+    await uploadDocument(ownerId, 'c.md', 'z', []);
+    const c = docByName('c.md')!;
+    const r = moveNode(ownerId, c.id, p1.id);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBeTruthy();
+});
+
+test('deleteNode 遇到 parentId 环（DB 损坏）触发深度上限，不无限循环', async () => {
+    await uploadDocument(ownerId, 'a.md', 'x', ['p1']);
+    await uploadDocument(ownerId, 'b.md', 'y', ['p2']);
+    const p1 = folderByName('p1')!;
+    const p2 = folderByName('p2')!;
+    db.update(schema.documents).set({ parentId: p2.id }).where(eq(schema.documents.id, p1.id)).run();
+    db.update(schema.documents).set({ parentId: p1.id }).where(eq(schema.documents.id, p2.id)).run();
+    expect(() => deleteNode(ownerId, p1.id)).not.toThrow();
+    expect(db.select().from(schema.documents).where(eq(schema.documents.id, p1.id)).get()).toBeUndefined();
+});

@@ -6,6 +6,8 @@ import { generateId, sha256Hex } from './auth';
 import { writeFile } from './storage';
 import { createShareLink } from './shares';
 
+const MAX_TREE_DEPTH = 1000;
+
 function findNode(
     ownerId: string,
     parentId: string | null,
@@ -184,7 +186,9 @@ export function moveNode(
         if (!target) return { ok: false, reason: '目标文件夹不存在' };
 
         let cursor: string | null = newParentId;
+        let depth = 0;
         while (cursor !== null) {
+            if (depth++ > MAX_TREE_DEPTH) return { ok: false, reason: '路径过深或存在环路' };
             if (cursor === id) return { ok: false, reason: '不能移入自身子孙' };
             const parent = db.select().from(schema.documents)
                 .where(eq(schema.documents.id, cursor))
@@ -195,7 +199,10 @@ export function moveNode(
 
     db.update(schema.documents)
         .set({ parentId: newParentId, updatedAt: Date.now() })
-        .where(eq(schema.documents.id, id))
+        .where(and(
+            eq(schema.documents.id, id),
+            eq(schema.documents.ownerId, ownerId)
+        ))
         .run();
     return { ok: true };
 }
@@ -208,7 +215,9 @@ export function deleteNode(ownerId: string, id: string): void {
 
     const subtreeIds: string[] = [id];
     let frontier: string[] = [id];
+    let depth = 0;
     while (frontier.length > 0) {
+        if (depth++ > MAX_TREE_DEPTH) break;
         const children = db.select({ id: schema.documents.id })
             .from(schema.documents)
             .where(and(
