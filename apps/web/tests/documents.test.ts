@@ -11,7 +11,7 @@ import {
     moveNode,
     deleteNode
 } from '../src/lib/server/documents';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, isNull } from 'drizzle-orm';
 
 let ownerId: string;
 const TMP_DOCS = `./data/test-docs-${Date.now().toString(36)}`;
@@ -128,15 +128,37 @@ function docByName(name: string) {
 
 test('renameNode 修改名称', async () => {
     const r = await uploadDocument(ownerId, 'a.md', 'x', []);
-    expect(renameNode(ownerId, r.id, 'renamed.md')).toBe(true);
+    expect(renameNode(ownerId, r.id, 'renamed.md').ok).toBe(true);
     const row = db.select().from(schema.documents).where(eq(schema.documents.id, r.id)).get();
     expect(row?.name).toBe('renamed.md');
 });
 
-test('renameNode 非 owner 返回 false 不生效', async () => {
+test('renameNode 非 owner 返回 not_found 不生效', async () => {
     const r = await uploadDocument(ownerId, 'a.md', 'x', []);
-    expect(renameNode('other', r.id, 'renamed.md')).toBe(false);
+    const res = renameNode('other', r.id, 'renamed.md');
+    expect(res.ok).toBe(false);
+    expect(res.code).toBe('not_found');
     expect(db.select().from(schema.documents).where(eq(schema.documents.id, r.id)).get()?.name).toBe('a.md');
+});
+
+test('renameNode 拒绝同父同名冲突（M9）', async () => {
+    await uploadDocument(ownerId, 'a.md', 'x', []);
+    const b = await uploadDocument(ownerId, 'b.md', 'y', []);
+    const res = renameNode(ownerId, b.id, 'a.md');
+    expect(res.ok).toBe(false);
+    expect(res.code).toBe('conflict');
+});
+
+test('moveNode 拒绝目标位置同名冲突（M9）', async () => {
+    await uploadDocument(ownerId, 'f.md', 'v1', ['dst']);
+    await uploadDocument(ownerId, 'f.md', 'v2', []);
+    const dst = folderByName('dst')!;
+    const rootF = db.select().from(schema.documents)
+        .where(and(eq(schema.documents.name, 'f.md'), eq(schema.documents.type, 'file'), isNull(schema.documents.parentId)))
+        .get()!;
+    const res = moveNode(ownerId, rootF.id, dst.id);
+    expect(res.ok).toBe(false);
+    expect(res.code).toBe('conflict');
 });
 
 test('moveNode 移到另一 folder', async () => {

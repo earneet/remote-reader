@@ -1,4 +1,4 @@
-import { eq, and, isNull, inArray } from 'drizzle-orm';
+import { eq, and, isNull, inArray, ne } from 'drizzle-orm';
 import { join } from 'node:path';
 import { rmSync } from 'node:fs';
 import { unlink } from 'node:fs/promises';
@@ -157,22 +157,38 @@ export function getOwnedDocument(id: string, ownerId: string) {
         .get();
 }
 
-export function renameNode(ownerId: string, id: string, newName: string): boolean {
-    const result = db.update(schema.documents)
-        .set({ name: newName, updatedAt: Date.now() })
+export function renameNode(
+    ownerId: string,
+    id: string,
+    newName: string
+): { ok: boolean; reason?: string; code?: 'not_found' | 'conflict' } {
+    const node = db.select().from(schema.documents)
+        .where(and(eq(schema.documents.id, id), eq(schema.documents.ownerId, ownerId)))
+        .get();
+    if (!node) return { ok: false, reason: '节点不存在或无权操作', code: 'not_found' };
+    if (node.name === newName) return { ok: true };
+    // M9: 拒绝同父同名同类型，避免 findNode 幂等失效与覆盖混淆
+    const dup = db.select().from(schema.documents)
         .where(and(
-            eq(schema.documents.id, id),
-            eq(schema.documents.ownerId, ownerId)
+            eq(schema.documents.ownerId, ownerId),
+            node.parentId === null ? isNull(schema.documents.parentId) : eq(schema.documents.parentId, node.parentId),
+            eq(schema.documents.name, newName),
+            eq(schema.documents.type, node.type),
+            ne(schema.documents.id, id)
         ))
+        .get();
+    if (dup) return { ok: false, reason: '同名节点已存在', code: 'conflict' };
+    db.update(schema.documents).set({ name: newName, updatedAt: Date.now() })
+        .where(and(eq(schema.documents.id, id), eq(schema.documents.ownerId, ownerId)))
         .run();
-    return result.changes > 0;
+    return { ok: true };
 }
 
 export function moveNode(
     ownerId: string,
     id: string,
     newParentId: string | null
-): { ok: boolean; reason?: string } {
+): { ok: boolean; reason?: string; code?: 'not_found' | 'invalid' | 'conflict' } {
     const node = db.select().from(schema.documents)
         .where(and(eq(schema.documents.id, id), eq(schema.documents.ownerId, ownerId)))
         .get();
@@ -201,6 +217,18 @@ export function moveNode(
             cursor = parent?.parentId ?? null;
         }
     }
+
+    // M9: 目标位置已有同名同类型节点则拒绝（避免 findNode 幂等失效）
+    const dup = db.select().from(schema.documents)
+        .where(and(
+            eq(schema.documents.ownerId, ownerId),
+            newParentId === null ? isNull(schema.documents.parentId) : eq(schema.documents.parentId, newParentId),
+            eq(schema.documents.name, node.name),
+            eq(schema.documents.type, node.type),
+            ne(schema.documents.id, id)
+        ))
+        .get();
+    if (dup) return { ok: false, reason: '目标位置存在同名节点', code: 'conflict' };
 
     db.update(schema.documents)
         .set({ parentId: newParentId, updatedAt: Date.now() })
