@@ -8,13 +8,15 @@ Remote Reader 让远程工作的 Agent 通过 MCP 上传 Markdown 文档，用�
 
 ## 当前状态
 
-**子计划 1/2/3 全部已实现并 merge `master`**：Web 上传 API（`POST /api/v1/documents`，token 认证 + content_hash 幂等）+ 免登录查看页 `/s/<token>`（markdown-it + Shiki SSR + Mermaid + KaTeX）+ 注册/登录/session/logout；本地 MCP 桥（`apps/mcp-bridge`，stdio，`upload_document` 工具）；文件管理器（双栏列表/预览/删除）+ `/d/<id>` owner 查看页 + API token 管理 UI（`/settings/tokens`，创建/撤销 + 一次性 reveal）+ 分享 token 管理 UI（`/settings/shares`，撤销）；速率限制（上传/登录，见 `apps/web/src/lib/server/ratelimit.ts`）；Docker（多阶段 Dockerfile + docker-compose，非 root 运行）。100+ 单测 + svelte-check 0/0 + 桥 tsc 0 错 + Docker 构建冒烟全过。
+**子计划 1/2/3 全部已实现并 merge `master`**：Web 上传 API（`POST /api/v1/documents`，token 认证 + content_hash 幂等）+ 免登录查看页 `/s/<token>`（markdown-it + Shiki SSR + Mermaid + KaTeX）+ 注册/登录/session/logout；本地 MCP 桥（`apps/mcp-bridge`，stdio，`upload_document` 工具）；文件管理器（双栏列表/预览/删除）+ `/d/<id>` owner 查看页 + API token 管理 UI（`/settings/tokens`，创建/撤销 + 一次性 reveal）+ 分享 token 管理 UI（`/settings/shares`，撤销）；速率限制（上传/登录，见 `apps/web/src/lib/server/ratelimit.ts`）；Docker（多阶段 Dockerfile + docker-compose，非 root 运行）。159 单测 + svelte-check 0/0 + 桥 tsc 0 错 + Docker 构建冒烟全过。
 
 - 子计划 1：✅ 完成（`docs/superpowers/plans/2026-07-18-web-core.md`）
 - 子计划 2：✅ 完成（`docs/superpowers/specs/2026-07-19-mcp-bridge-design.md` + `docs/superpowers/plans/2026-07-19-mcp-bridge.md`）
 - 子计划 3：✅ 完成（`docs/superpowers/specs/2026-07-19-sub3-management-ui-docker-design.md` + `docs/superpowers/plans/2026-07-19-sub3-management-ui-docker.md`：管理 UI + md 增强 + Docker）
 
-**下一步（低优先）**：spec §12 Phase 3 扩展（远程 MCP server / 多文档批量上传等），详见 spec §15.3 待做。
+**安全审核修复（2026-07-19，多 Agent 审核 + 3-lens 交叉复核）**：数据完整性（C1 运行时建表 / H1-H2 写盘原子 / H3 `foreign_keys=ON` / M9 重名校验）、认证加固（H4 invite fail-fast + 注册限流 / M3 SESSION_SECRET 强度 / M7 firstUser 事务 / 登录时序恒定）、客户端安全（H6 CSP report-only / H7 referrer no-referrer / M1 cache-control no-store）、性能（M12 索引 / M13 markdown 单例+缓存 / ratelimit Map 回收）、部署（M14 BASE_URL 不硬编码 / M15 /api/health healthcheck）、代码质量（删死代码 / 单源 env / 去 any）。测试 102→159。
+
+**下一步（低优先）**：spec §12 Phase 3 扩展（远程 MCP server / 多文档批量上传等），详见 spec §15.3 待做；CSP 由 report-only 转 enforcing（需线上观察 mermaid/katex 违规）；session 服务端撤销表 / 审计日志（设计级，未做）。
 
 **桥运行时**：无原生依赖（纯 fetch + MCP SDK）→ `bun apps/mcp-bridge/src/index.ts` 直跑；`tsc --noEmit` 类型检查（`bun --filter remote-reader-mcp-bridge check`）。配置 = `~/.config/remote-reader/config.json`（XDG）默认 + `REMOTE_READER_URL`/`REMOTE_READER_TOKEN` env 覆盖。
 
