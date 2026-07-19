@@ -11,5 +11,13 @@ services:
       - NODE_ENV=production
       - DATABASE_PATH=/app/data/app.db
       - DATA_DIR=/app/data/documents
-      - BASE_URL=http://localhost:3000
+      # BASE_URL 不在此硬编码 localhost:3000（否则上传返回的查看链接外发不可达）；
+      # 由 .env 的 BASE_URL 注入为真实外网可达地址。
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    mem_limit: 512m
+    cpus: "1.0"

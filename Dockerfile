@@ -37,9 +37,9 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 ENV NODE_ENV=production
 ENV PORT=3000
 EXPOSE 3000
-# / redirects (302) when up; any <500 means the process is alive and answering.
+# 查 /api/health（含 DB SELECT 1），DB/磁盘故障时 503 → healthcheck 失败（M15）
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-    CMD node -e "fetch('http://127.0.0.1:'+process.env.PORT+'/').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))"
+    CMD node -e "fetch('http://127.0.0.1:'+process.env.PORT+'/api/health').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))"
 # Container starts as root so the entrypoint can chown the bind-mounted data dir
 # (host may create it root-owned), then drops to the node user to run the server.
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
