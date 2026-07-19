@@ -9,6 +9,12 @@ export interface ApiClient {
     uploadDocument(input: { name: string; content: string; path?: string }): Promise<{ id: string; url: string }>;
 }
 
+interface UploadResponse {
+    id?: string;
+    url?: string;
+    error?: { message?: string };
+}
+
 function mapMessage(status: number, msg: string | undefined): string {
     switch (status) {
         case 400:
@@ -42,17 +48,16 @@ export function createApiClient(opts: { baseUrl: string; token: string }): ApiCl
                 throw new ApiError(0, `无法连接服务器：${(e as Error).message}`);
             }
             const text = await res.text();
-            let body: any = {};
+            let body: UploadResponse = {};
             try {
-                body = text ? JSON.parse(text) : {};
+                body = text ? (JSON.parse(text) as UploadResponse) : {};
             } catch {
                 body = {};
             }
             if (!res.ok) {
-                const msg = typeof body?.error?.message === 'string' ? body.error.message : undefined;
-                throw new ApiError(res.status, mapMessage(res.status, msg));
+                throw new ApiError(res.status, mapMessage(res.status, body.error?.message));
             }
-            if (typeof body?.id !== 'string' || typeof body?.url !== 'string') {
+            if (typeof body.id !== 'string' || typeof body.url !== 'string') {
                 throw new ApiError(res.status, '上传成功但响应格式异常');
             }
             return { id: body.id, url: body.url };

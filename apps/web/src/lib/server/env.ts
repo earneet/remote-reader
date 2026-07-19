@@ -7,3 +7,11 @@ export function envInt(key: string, def: number): number {
     }
     return n;
 }
+
+export function getBaseUrl(): string {
+    return process.env.BASE_URL ?? 'http://localhost:5173';
+}
+
+export function getSessionMaxAgeSeconds(): number {
+    return envInt('SESSION_MAX_AGE', 2_592_000);
+}

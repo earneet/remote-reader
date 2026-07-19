@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { eq, and, desc } from 'drizzle-orm';
 import { db, schema } from './db';
 import { generateId } from './auth';
+import { getBaseUrl } from './env';
 
 export function generateShareToken(): string {
     return randomBytes(16).toString('base64url');
@@ -9,7 +10,6 @@ export function generateShareToken(): string {
 
 export async function createShareLink(documentId: string): Promise<{ token: string; url: string }> {
     const token = generateShareToken();
-    const baseUrl = process.env.BASE_URL ?? 'http://localhost:5173';
     db.insert(schema.shareLinks).values({
         id: generateId(),
         documentId,
@@ -17,7 +17,7 @@ export async function createShareLink(documentId: string): Promise<{ token: stri
         expiresAt: null,
         createdAt: Date.now()
     }).run();
-    return { token, url: `${baseUrl}/s/${token}` };
+    return { token, url: `${getBaseUrl()}/s/${token}` };
 }
 
 export function getDocumentIdByShareToken(token: string): string | null {

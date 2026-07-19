@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { envInt } from './env';
+import { getSessionMaxAgeSeconds } from './env';
 
 let cachedSecret: string | null = null;
 
@@ -24,7 +24,7 @@ interface Payload {
 }
 
 function maxAgeMs(): number {
-    return envInt('SESSION_MAX_AGE', 2_592_000) * 1000;
+    return getSessionMaxAgeSeconds() * 1000;
 }
 
 function signBody(body: string): string {

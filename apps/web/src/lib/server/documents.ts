@@ -1,11 +1,14 @@
 import { eq, and, isNull, inArray, ne } from 'drizzle-orm';
-import { join } from 'node:path';
-import { rmSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { renameSync, rmSync } from 'node:fs';
 import { unlink } from 'node:fs/promises';
 import { db, schema } from './db';
 import { generateId, sha256Hex } from './auth';
 import { writeFile } from './storage';
 import { createShareLink } from './shares';
+import { getBaseUrl } from './env';
+
+type DocumentRow = typeof schema.documents.$inferSelect;
 
 const MAX_TREE_DEPTH = 1000;
 
@@ -14,7 +17,7 @@ function findNode(
     parentId: string | null,
     name: string,
     type: 'file' | 'folder'
-) {
+): DocumentRow | undefined {
     return db.select().from(schema.documents)
         .where(and(
             eq(schema.documents.ownerId, ownerId),
@@ -59,8 +62,7 @@ async function ensureShareUrl(documentId: string): Promise<string> {
         .where(eq(schema.shareLinks.documentId, documentId))
         .get();
     if (existing) {
-        const baseUrl = process.env.BASE_URL ?? 'http://localhost:5173';
-        return `${baseUrl}/s/${existing.token}`;
+        return `${getBaseUrl()}/s/${existing.token}`;
     }
     const { url } = await createShareLink(documentId);
     return url;
@@ -128,7 +130,7 @@ export async function uploadDocument(
     return { id, url };
 }
 
-export function listChildren(ownerId: string, parentId: string | null) {
+export function listChildren(ownerId: string, parentId: string | null): DocumentRow[] {
     return db.select().from(schema.documents)
         .where(and(
             eq(schema.documents.ownerId, ownerId),
@@ -139,7 +141,7 @@ export function listChildren(ownerId: string, parentId: string | null) {
         .all();
 }
 
-export function listFolders(ownerId: string) {
+export function listFolders(ownerId: string): DocumentRow[] {
     return db.select().from(schema.documents)
         .where(and(
             eq(schema.documents.ownerId, ownerId),
@@ -148,7 +150,7 @@ export function listFolders(ownerId: string) {
         .all();
 }
 
-export function getOwnedDocument(id: string, ownerId: string) {
+export function getOwnedDocument(id: string, ownerId: string): DocumentRow | undefined {
     return db.select().from(schema.documents)
         .where(and(
             eq(schema.documents.id, id),
@@ -161,7 +163,7 @@ export function renameNode(
     ownerId: string,
     id: string,
     newName: string
-): { ok: boolean; reason?: string; code?: 'not_found' | 'conflict' } {
+): { ok: boolean; reason?: string; code?: 'not_found' | 'conflict' | 'invalid' } {
     const node = db.select().from(schema.documents)
         .where(and(eq(schema.documents.id, id), eq(schema.documents.ownerId, ownerId)))
         .get();
@@ -178,9 +180,22 @@ export function renameNode(
         ))
         .get();
     if (dup) return { ok: false, reason: '同名节点已存在', code: 'conflict' };
-    db.update(schema.documents).set({ name: newName, updatedAt: Date.now() })
-        .where(and(eq(schema.documents.id, id), eq(schema.documents.ownerId, ownerId)))
-        .run();
+    // #42: 文件重命名同步磁盘文件与 storagePath，避免 DB 名字与磁盘路径错位、覆盖上传留孤儿
+    if (node.type === 'file' && node.storagePath) {
+        const newPath = join(dirname(node.storagePath), newName);
+        try {
+            renameSync(node.storagePath, newPath);
+        } catch {
+            return { ok: false, reason: '磁盘重命名失败', code: 'invalid' };
+        }
+        db.update(schema.documents).set({ name: newName, storagePath: newPath, updatedAt: Date.now() })
+            .where(and(eq(schema.documents.id, id), eq(schema.documents.ownerId, ownerId)))
+            .run();
+    } else {
+        db.update(schema.documents).set({ name: newName, updatedAt: Date.now() })
+            .where(and(eq(schema.documents.id, id), eq(schema.documents.ownerId, ownerId)))
+            .run();
+    }
     return { ok: true };
 }
 
