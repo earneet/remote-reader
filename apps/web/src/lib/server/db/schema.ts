@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, index } from 'drizzle-orm/sqlite-core';
 
 export const users = sqliteTable('users', {
     id: text('id').primaryKey(),
@@ -15,7 +15,10 @@ export const apiTokens = sqliteTable('api_tokens', {
     tokenHash: text('token_hash').notNull(),
     lastUsedAt: integer('last_used_at'),
     createdAt: integer('created_at').notNull()
-});
+}, (t) => [
+    index('api_tokens_user_id_idx').on(t.userId),
+    index('api_tokens_token_hash_idx').on(t.tokenHash)
+]);
 
 export const documents = sqliteTable('documents', {
     id: text('id').primaryKey(),
@@ -28,7 +31,10 @@ export const documents = sqliteTable('documents', {
     sizeBytes: integer('size_bytes'),
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull()
-});
+}, (t) => [
+    index('documents_owner_parent_idx').on(t.ownerId, t.parentId),
+    index('documents_owner_parent_name_type_idx').on(t.ownerId, t.parentId, t.name, t.type)
+]);
 
 export const shareLinks = sqliteTable('share_links', {
     id: text('id').primaryKey(),
@@ -36,4 +42,6 @@ export const shareLinks = sqliteTable('share_links', {
     token: text('token').notNull().unique(),
     expiresAt: integer('expires_at'),
     createdAt: integer('created_at').notNull()
-});
+}, (t) => [
+    index('share_links_document_id_idx').on(t.documentId)
+]);

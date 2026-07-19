@@ -1,8 +1,5 @@
-import { test, expect, beforeAll, beforeEach, afterEach } from 'vitest';
+import { test, expect, beforeEach, afterEach } from 'vitest';
 import { rmSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
-import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { db, schema } from '../src/lib/server/db';
 import { hashPassword, generateId, sha256Hex } from '../src/lib/server/auth';
 import {
@@ -16,15 +13,8 @@ import {
 } from '../src/lib/server/documents';
 import { eq, and } from 'drizzle-orm';
 
-const here = dirname(fileURLToPath(import.meta.url));
-const migrationsFolder = join(here, '../src/lib/server/db/migrations');
-
 let ownerId: string;
 const TMP_DOCS = `./data/test-docs-${Date.now().toString(36)}`;
-
-beforeAll(() => {
-    migrate(db, { migrationsFolder });
-});
 
 beforeEach(async () => {
     process.env.DATA_DIR = TMP_DOCS;

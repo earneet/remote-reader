@@ -8,6 +8,13 @@
       "when": 1784378613062,
       "tag": "0000_bright_pyro",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1784474130597,
+      "tag": "0001_add_performance_indexes",
+      "breakpoints": true
     }
   ]
 }

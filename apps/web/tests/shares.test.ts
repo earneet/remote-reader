@@ -1,7 +1,4 @@
-import { test, expect, beforeAll, beforeEach } from 'vitest';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
-import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
+import { test, expect, beforeEach } from 'vitest';
 import { db, schema } from '../src/lib/server/db';
 import { generateId } from '../src/lib/server/auth';
 import {
@@ -12,15 +9,8 @@ import {
     revokeShare
 } from '../src/lib/server/shares';
 
-const here = dirname(fileURLToPath(import.meta.url));
-const migrationsFolder = join(here, '../src/lib/server/db/migrations');
-
 let docId: string;
 let userId: string;
-
-beforeAll(() => {
-    migrate(db, { migrationsFolder });
-});
 
 beforeEach(() => {
     db.delete(schema.shareLinks).run();

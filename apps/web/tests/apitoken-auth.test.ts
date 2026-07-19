@@ -1,22 +1,12 @@
-import { test, expect, beforeAll, beforeEach } from 'vitest';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
-import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
+import { test, expect, beforeEach } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '../src/lib/server/db';
 import { generateApiToken, generateId, hashPassword } from '../src/lib/server/auth';
 import { authenticateApiToken } from '../src/lib/server/apitoken-auth';
 
-const here = dirname(fileURLToPath(import.meta.url));
-const migrationsFolder = join(here, '../src/lib/server/db/migrations');
-
 let plaintext: string;
 let userId: string;
 let tokenId: string;
-
-beforeAll(() => {
-    migrate(db, { migrationsFolder });
-});
 
 beforeEach(async () => {
     db.delete(schema.apiTokens).run();
