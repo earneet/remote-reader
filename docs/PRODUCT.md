@@ -49,7 +49,7 @@ Agent                    本地 MCP 桥             Web 应用                �
 
 ## 5. 功能清单
 
-### ✅ 当前已实现（子计划 1 · Web 核心）
+### ✅ 当前已实现（子计划 1 · Web 核心 + 子计划 2 · MCP 桥）
 
 - **上传 API**：`POST /api/v1/documents`，API token 认证，content_hash 幂等，自动生成查看链接。
 - **免登录查看页** `/s/<token>`：服务端渲染 Markdown（GFM 表格、Shiki 代码高亮 ~15 语言、链接化），默认不渲染原始 HTML（XSS 防护）。
@@ -57,10 +57,10 @@ Agent                    本地 MCP 桥             Web 应用                �
 - **安全会话**：HMAC-SHA256 + 常量时间比较 + 过期校验；生产缺密钥启动期 fail-fast。
 - **路径安全**：上传的 `path` 与 `name` 都经 `parsePath` 过滤，防目录穿越。
 - **多用户隔离**：文档按 owner 存在独立目录树；SQLite 外键约束保数据完整。
+- **本地 MCP 桥**（`apps/mcp-bridge`）：stdio MCP server，暴露 `upload_document` 工具，本地持有 token 转发到 Web API；Agent 无需手写 HTTP。配置 = 文件默认 + env 覆盖。
 
 ### 🚧 规划中
 
-- **子计划 2 · 本地 MCP 桥**：让 Agent 以 MCP 工具（而非裸 curl）调用上传；桥持有 token，不暴露给 Agent。**——这是核心流程缺失的另一半。**
 - **子计划 3 · 管理 UI**：文件管理器（浏览/删除/移动/重命名）、分享撤销管理页、API token 管理 UI、登出。
 - **Phase 3**：远程 MCP server（免本地桥）、文档标签、全文搜索、指定用户分享、Docker 部署完善。
 
@@ -76,7 +76,7 @@ Agent                    本地 MCP 桥             Web 应用                �
 | 阶段 | 内容 | 状态 |
 |---|---|---|
 | **Phase 1 · MVP** | Web 核心（上传 API + 免登录查看页 + 认证） | ✅ 子计划 1 完成，merge master |
-| **Phase 1 · MVP** | 本地 MCP 桥（1 个 `upload_document` 工具） | 🚧 子计划 2，待做 |
+| **Phase 1 · MVP** | 本地 MCP 桥（1 个 `upload_document` 工具） | ✅ 子计划 2 完成 |
 | **Phase 2** | 文件管理器完整 + token/分享管理 UI + md 增强（Mermaid/KaTeX） | 📋 子计划 3，待做 |
 | **Phase 3** | 远程 MCP server、标签、搜索、指定分享、Docker | 📋 低优先级 |
 

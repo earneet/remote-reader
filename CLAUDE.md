@@ -8,13 +8,15 @@ Remote Reader 让远程工作的 Agent 通过 MCP 上传 Markdown 文档，用�
 
 ## 当前状态
 
-**子计划 1（Web 应用核心）已实现并 merge `master`**：上传 API（`POST /api/v1/documents`，token 认证 + content_hash 幂等）+ 免登录查看页 `/s/<token>`（markdown-it + Shiki SSR）+ 注册/登录/session。58 单测 + svelte-check 0 错 + 生产冒烟（`node apps/web/build/index.js`）+ e2e 全过。
+**子计划 1（Web 核心）+ 子计划 2（本地 MCP 桥）已实现并 merge `master`**：Web 上传 API（`POST /api/v1/documents`，token 认证 + content_hash 幂等）+ 免登录查看页 `/s/<token>`（markdown-it + Shiki SSR）+ 注册/登录/session；本地 MCP 桥（`apps/mcp-bridge`，stdio，`upload_document` 工具，转发到 Web API）。74 单测 + svelte-check + 桥 tsc 0 错 + Web 生产冒烟 + 桥→Web 集成冒烟全过。
 
-- 子计划 1：✅ 完成（实现计划 `docs/superpowers/plans/2026-07-18-web-core.md`，已执行完毕）
-- 子计划 2（本地 MCP 桥 `apps/mcp-bridge`）：🚧 未开始——核心流程缺失的另一半
-- 子计划 3（文件管理器 UI + 分享/token 管理 + Docker）：📋 未开始
+- 子计划 1：✅ 完成（`docs/superpowers/plans/2026-07-18-web-core.md`）
+- 子计划 2：✅ 完成（`docs/superpowers/specs/2026-07-19-mcp-bridge-design.md` + `docs/superpowers/plans/2026-07-19-mcp-bridge.md`）
+- 子计划 3（文件管理器 UI + 分享/token 管理 UI + logout + Docker）：📋 未开始
 
-产品/使用/设计文档：`docs/PRODUCT.md`、`docs/USER_GUIDE.md`、`docs/superpowers/specs/2026-07-18-remote-reader-design.md`（含 §15 实现现状）。**改动架构前必读 spec。**
+**桥运行时**：无原生依赖（纯 fetch + MCP SDK）→ `bun apps/mcp-bridge/src/index.ts` 直跑；`tsc --noEmit` 类型检查（`bun --filter remote-reader-mcp-bridge check`）。配置 = `~/.config/remote-reader/config.json`（XDG）默认 + `REMOTE_READER_URL`/`REMOTE_READER_TOKEN` env 覆盖。
+
+产品/使用/设计文档：`docs/PRODUCT.md`、`docs/USER_GUIDE.md`、`docs/superpowers/specs/`（含 §15 实现现状）。**改动架构前必读 spec。**
 
 ## 架构（Big Picture）
 

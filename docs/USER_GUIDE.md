@@ -2,7 +2,7 @@
 
 本手册按角色组织：**部署者 / 管理员**、**Agent 操作者**、**阅读者**。按需跳读。
 
-> 状态：子计划 1（Web 核心）已实现；本地 MCP 桥（子计划 2）与文件管理 UI（子计划 3）规划中。文中明确标注「✅ 已实现」与「🚧 规划中」。
+> 状态：子计划 1（Web 核心）+ 子计划 2（本地 MCP 桥）已实现；文件管理 UI（子计划 3）规划中。文中明确标注「✅ 已实现」与「🚧 规划中」。
 
 ---
 
@@ -136,9 +136,33 @@ Response 200: { "id": "...", "url": "https://<host>/s/<share-token>" }
 | 413 | 内容超 `MAX_UPLOAD_BYTES`（默认 5MB） | 拆分或精简文档 |
 | 429 | 触发速率限制（每 token 默认 60/min） | 退避后重试 |
 
-### 2.4 规划中：本地 MCP 桥 🚧
+### 2.4 本地 MCP 桥 ✅
 
-子计划 2 将提供一个本地 stdio MCP server（`apps/mcp-bridge`），暴露 `upload_document` 工具。Agent（如 Claude Code）把它配为 MCP server 即可，无需手写 HTTP——桥在本地持有 token，不暴露给 Agent。届时本节更新为桥的配置说明。
+桥已实现（`apps/mcp-bridge`）——一个 stdio MCP server，暴露 `upload_document` 工具，本地持有 token 转发到 Web API。Agent 无需手写 HTTP。桥无原生依赖，用 bun 直接跑：`bun apps/mcp-bridge/src/index.ts`。
+
+两种配置方式（env 优先于文件）：
+
+**方式一：环境变量**（推荐，配合 MCP client 一次性传入）
+
+```bash
+claude mcp add remote-reader bun apps/mcp-bridge/src/index.ts \
+  -e REMOTE_READER_URL=https://your-host \
+  -e REMOTE_READER_TOKEN=rr_xxx
+```
+
+**方式二：配置文件**
+
+写 `~/.config/remote-reader/config.json`（或 `$XDG_CONFIG_HOME/remote-reader/config.json`）：
+
+```json
+{ "baseUrl": "https://your-host", "token": "rr_xxx" }
+```
+
+然后只注册命令：`claude mcp add remote-reader bun apps/mcp-bridge/src/index.ts`。
+
+配置缺失（既无 env 又无文件）桥启动即退（exit 1）并打印指引。配置好后，Agent 即可调用 `upload_document({name, content, path?})`，拿到 `已上传（id=...）。查看链接：https://.../s/<token>` 的工具结果。
+
+> 调试可用 MCP inspector：`npx @modelcontextprotocol/inspector bun apps/mcp-bridge/src/index.ts`，或仓库内的 `bun apps/mcp-bridge/scripts/smoke-client.ts <url> <token>`（需 Web 应用在跑）。
 
 ---
 

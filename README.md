@@ -40,6 +40,19 @@ bun --filter remote-reader-web dev          # http://localhost:5173（被占会�
    ```
 4. 打开返回的 `url`（形如 `/s/<token>`）直接查看——**免登录**，渲染 markdown + Shiki 代码高亮 + GFM 表格。
 
+## 通过 MCP 桥上传（Agent）
+
+本地 MCP 桥（`apps/mcp-bridge`）让 Agent 以 MCP 工具调用上传，桥在本地持有 token、不暴露给 Agent。配置好后 Agent 调 `upload_document({name, content, path?})` 即可拿到查看链接。
+
+```bash
+# Claude Code 接入（env 传 url+token）
+claude mcp add remote-reader bun apps/mcp-bridge/src/index.ts \
+  -e REMOTE_READER_URL=http://localhost:5173 \
+  -e REMOTE_READER_TOKEN=rr_xxx
+```
+
+或把 `{baseUrl, token}` 写进 `~/.config/remote-reader/config.json` 后只注册命令。env 优先于文件；配置缺失桥启动即退。详见 [docs/USER_GUIDE.md](./docs/USER_GUIDE.md) §2.4。
+
 ## 上传语义（幂等）
 
 按 `(owner, path, name)` 定位文档，按 content sha256 判断：
