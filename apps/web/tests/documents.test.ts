@@ -183,11 +183,16 @@ test('deleteNode 删 file 同时清 share_links', async () => {
     expect(db.select().from(schema.shareLinks).all().length).toBe(0);
 });
 
-test('deleteNode 删 folder 级联删子孙', async () => {
-    await uploadDocument(ownerId, 'a.md', 'x', ['p', 'c']);
+test('deleteNode 删 folder 级联删子孙 + 磁盘文件 + share_links', async () => {
+    const r = await uploadDocument(ownerId, 'a.md', 'x', ['p', 'c']);
+    const a = db.select().from(schema.documents).where(eq(schema.documents.id, r.id)).get();
+    const diskPath = a!.storagePath!;
     const p = folderByName('p')!;
     deleteNode(ownerId, p.id);
     expect(db.select().from(schema.documents).all().length).toBe(0);
+    expect(db.select().from(schema.shareLinks).all().length).toBe(0);
+    const { existsSync } = await import('node:fs');
+    expect(existsSync(diskPath)).toBe(false);
 });
 
 test('deleteNode 删 file 后磁盘文件删除', async () => {
@@ -203,4 +208,8 @@ test('deleteNode 非 owner 不删', async () => {
     const r = await uploadDocument(ownerId, 'a.md', 'x', []);
     deleteNode('other', r.id);
     expect(db.select().from(schema.documents).where(eq(schema.documents.id, r.id)).get()).toBeTruthy();
+});
+
+test('deleteNode 不存在的 id 静默返回', () => {
+    expect(() => deleteNode(ownerId, 'nonexistent-id')).not.toThrow();
 });
