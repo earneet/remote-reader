@@ -2,7 +2,7 @@
 
 - **创建日期**: 2026-07-18
 - **最近更新**: 2026-07-19（子计划 1 实现完成，回填实际技术栈与运行时分工）
-- **状态**: 子计划 1（Web 核心）已实现并 merge master；子计划 2/3 待做
+- **状态**: 子计划 1/2/3 全部已实现并 merge master（Web 核心 + 本地 MCP 桥 + 管理 UI + Docker）
 - **作者**: brainstorming 协作产出
 
 ---
@@ -397,9 +397,13 @@ md 原文
 | `GET /s/<token>` | 公开免登录 | ✅ SSR 渲染 md（markdown-it + Shiki） |
 | `/register` | 邀请码 | ✅ 首用户自动 admin |
 | `/login` | 公开 | ✅ argon2id + 限流 |
-| `/` | 需登录 | ⚠️ 占位首页（文件管理器在子计划 3） |
+| `/` | 需登录 | ✅ 文件管理器（双栏：列表 + 预览，子计划 3） |
+| `/d/<id>` | 需登录 | ✅ owner 文档查看页（子计划 3） |
+| `/settings/tokens` | 需登录 | ✅ API token 管理 UI（创建/撤销 + 一次性 reveal，子计划 3） |
+| `/settings/shares` | 需登录 | ✅ 分享 token 管理 UI（撤销，子计划 3） |
+| `POST /logout` | 需登录 | ✅ 清 session cookie（子计划 3） |
 
-**未实现（原 §7 设计中标注的）**：`/d/<id>`、`/settings/tokens`、`/settings/shares`、GET/PATCH/DELETE `/api/v1/documents`——属 Phase 2/3。API token 暂只能用 `node scripts/seed-token.mjs <email>` 生成；无 logout 路由（`clearSessionCookie` 已备）。
+API token：UI 内可生成（`/settings/tokens`），不再依赖 `node scripts/seed-token.mjs`。
 
 ### 15.2 运行时分工（关键，实现期确定）
 
@@ -415,8 +419,11 @@ md 原文
 
 ### 15.3 待做
 
-- **子计划 2**：本地 MCP 桥（`apps/mcp-bridge`，stdio，1 个 `upload_document` 工具转发到 API，桥持有 token）——核心流程缺失的另一半。
-- **子计划 3**：文件管理器 UI（列表/删除/移动/重命名）+ 分享撤销管理页 + token 管理 UI + logout 路由 + Docker。
+子计划 1/2/3 全部完成。剩余的仅为 Phase 3 扩展项（原 §12.3）：
+
+- 远程 MCP server（Streamable HTTP，复用 `packages/shared` 的工具函数）
+- 文档标签、全文搜索
+- 移动/重命名 UI（文件管理器目前支持浏览/删除）
 
 ### 15.4 Pre-merge review 修复要点（多 Agent 交叉验证）
 

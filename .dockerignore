@@ -1,0 +1,9 @@
+node_modules
+**/node_modules
+data
+.git
+.claude
+docs
+apps/web/build
+apps/web/.svelte-kit
+**/*.test.ts
