@@ -4,7 +4,7 @@ import { getOwnedDocument } from '$server/documents';
 import { readFile, FileNotFoundError } from '$server/storage';
 import { renderMarkdown } from '$server/markdown';
 
-export const load: PageServerLoad = async ({ locals, params }) => {
+export const load: PageServerLoad = async ({ locals, params, setHeaders }) => {
     if (!locals.user) redirect(302, '/login');
     const doc = getOwnedDocument(params.id, locals.user.id);
     if (!doc || doc.type !== 'file' || !doc.storagePath) error(404, '文档不存在');
@@ -17,5 +17,6 @@ export const load: PageServerLoad = async ({ locals, params }) => {
         throw e;
     }
     const html = await renderMarkdown(content);
+    setHeaders({ 'cache-control': 'no-store' });
     return { title: doc.name, html };
 };

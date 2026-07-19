@@ -6,7 +6,7 @@ import { getDocumentIdByShareToken } from '$server/shares';
 import { readFile, FileNotFoundError } from '$server/storage';
 import { renderMarkdown } from '$server/markdown';
 
-export const load: PageServerLoad = async ({ params }) => {
+export const load: PageServerLoad = async ({ params, setHeaders }) => {
     const documentId = getDocumentIdByShareToken(params.token);
     if (!documentId) error(404, '链接已失效或不存在');
 
@@ -21,5 +21,7 @@ export const load: PageServerLoad = async ({ params }) => {
         throw e;
     }
     const html = await renderMarkdown(content);
+    // M1: 免登录查看页禁缓存——撤销 share token 后浏览器/CDN/bfcache 不再展示已撤销内容
+    setHeaders({ 'cache-control': 'no-store' });
     return { title: doc.name, html };
 };
