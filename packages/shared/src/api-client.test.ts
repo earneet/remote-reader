@@ -71,3 +71,17 @@ test('网络错误映射为 ApiError(status=0)', async () => {
         createApiClient({ baseUrl: 'http://x', token: 't' }).uploadDocument({ name: 'n', content: 'c' })
     ).rejects.toMatchObject({ status: 0 });
 });
+
+test('200 但缺 url → ApiError 响应格式异常（#34）', async () => {
+    mockFetch(200, { id: 'd' });
+    await expect(
+        createApiClient({ baseUrl: 'http://x', token: 't' }).uploadDocument({ name: 'n', content: 'c' })
+    ).rejects.toMatchObject({ status: 200 });
+});
+
+test('200 但 body 非 json → ApiError（#34）', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('<html>not json</html>', { status: 200 })));
+    await expect(
+        createApiClient({ baseUrl: 'http://x', token: 't' }).uploadDocument({ name: 'n', content: 'c' })
+    ).rejects.toMatchObject({ status: 200 });
+});

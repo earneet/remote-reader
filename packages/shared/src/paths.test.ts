@@ -51,3 +51,18 @@ test('单点段不逃出根', () => {
     const result = parsePath('./a');
     expect(result.includes('..')).toBe(false);
 });
+
+test('纯点段解析为空 → 抛（#50）', () => {
+    expect(() => parsePath('.')).toThrow();
+    expect(() => parsePath('./.')).toThrow();
+    expect(() => parsePath('././.')).toThrow();
+});
+
+test('纯 .. 单段 → 抛（#50）', () => {
+    expect(() => parsePath('..')).toThrow();
+});
+
+test('末段 .. 归一化后为空 → 抛（#50）', () => {
+    expect(() => parsePath('a/..')).toThrow();
+    expect(() => parsePath('a/b/../..')).toThrow();
+});
