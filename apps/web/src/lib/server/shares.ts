@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, desc } from 'drizzle-orm';
 import { db, schema } from './db';
 import { generateId } from './auth';
 
@@ -27,7 +27,13 @@ export function getDocumentIdByShareToken(token: string): string | null {
     return row.documentId;
 }
 
-export function listSharesByOwner(ownerId: string) {
+export function listSharesByOwner(ownerId: string): Array<{
+    token: string;
+    documentId: string;
+    documentName: string;
+    createdAt: number;
+    expiresAt: number | null;
+}> {
     return db.select({
         token: schema.shareLinks.token,
         documentId: schema.shareLinks.documentId,
@@ -37,6 +43,7 @@ export function listSharesByOwner(ownerId: string) {
     }).from(schema.shareLinks)
         .innerJoin(schema.documents, eq(schema.shareLinks.documentId, schema.documents.id))
         .where(eq(schema.documents.ownerId, ownerId))
+        .orderBy(desc(schema.shareLinks.createdAt))
         .all();
 }
 

@@ -1,8 +1,13 @@
-import { eq, and } from 'drizzle-orm';
+import { eq, and, desc } from 'drizzle-orm';
 import { db, schema } from './db';
 import { generateId, generateApiToken } from './auth';
 
-export function listTokens(ownerId: string) {
+export function listTokens(ownerId: string): Array<{
+    id: string;
+    name: string;
+    createdAt: number;
+    lastUsedAt: number | null;
+}> {
     return db.select({
         id: schema.apiTokens.id,
         name: schema.apiTokens.name,
@@ -10,6 +15,7 @@ export function listTokens(ownerId: string) {
         lastUsedAt: schema.apiTokens.lastUsedAt
     }).from(schema.apiTokens)
         .where(eq(schema.apiTokens.userId, ownerId))
+        .orderBy(desc(schema.apiTokens.createdAt))
         .all();
 }
 
