@@ -5,20 +5,22 @@
     let { data } = $props();
     let currentDir = $derived(data.currentDir);
     let movingId: string | null = $state(null);
+    let moveError: string | null = $state(null);
     async function goto(id: string | null) {
         const url = new URL(location.href);
         if (id) url.searchParams.set('dir', id); else url.searchParams.delete('dir');
         history.pushState({}, '', url);
         await invalidateAll();
     }
-    function startMove(id: string) { movingId = id; }
+    function startMove(id: string) { movingId = id; moveError = null; }
     async function pickTarget(targetId: string | null) {
         if (!movingId) return;
         const fd = new FormData();
         fd.set('id', movingId);
         fd.set('target', targetId ?? 'root');
         const r = await fetch('?/move', { method: 'POST', body: fd });
-        if (r.ok) { movingId = null; await invalidateAll(); }
+        if (r.ok) { movingId = null; moveError = null; await invalidateAll(); }
+        else { moveError = '移动失败（目标无效或会造成环路），请重选目标或取消'; }
     }
 </script>
 
@@ -32,6 +34,7 @@
         />
         {#if movingId !== null}
             <p class="hint">移动模式：点左树选目标，或<button class="link" onclick={() => (movingId = null)}>取消</button></p>
+            {#if moveError}<p class="error">{moveError}</p>{/if}
         {/if}
     </aside>
     <section class="fm-right">
@@ -92,6 +95,7 @@
     .size { color: #57606a; font-size: 0.85em; }
     .inline { display: inline-flex; gap: 0.25rem; }
     .hint { color: #2da44e; font-size: 0.9em; }
+    .error { color: #cf222e; font-size: 0.9em; }
     .link { border: none; background: none; color: #0969da; cursor: pointer; padding: 0; }
     .move-btn { margin-left: auto; }
     .muted { color: #57606a; }

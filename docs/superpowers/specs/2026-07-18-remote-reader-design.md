@@ -423,7 +423,6 @@ API token：UI 内可生成（`/settings/tokens`），不再依赖 `node scripts
 
 - 远程 MCP server（Streamable HTTP，复用 `packages/shared` 的工具函数）
 - 文档标签、全文搜索
-- 移动/重命名 UI（文件管理器目前支持浏览/删除）
 
 ### 15.4 Pre-merge review 修复要点（多 Agent 交叉验证）
 
