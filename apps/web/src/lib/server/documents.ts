@@ -1,5 +1,6 @@
-import { eq, and, isNull } from 'drizzle-orm';
+import { eq, and, isNull, inArray } from 'drizzle-orm';
 import { join } from 'node:path';
+import { rmSync } from 'node:fs';
 import { db, schema } from './db';
 import { generateId, sha256Hex } from './auth';
 import { writeFile } from './storage';
@@ -197,4 +198,46 @@ export function moveNode(
         .where(eq(schema.documents.id, id))
         .run();
     return { ok: true };
+}
+
+export function deleteNode(ownerId: string, id: string): void {
+    const node = db.select().from(schema.documents)
+        .where(and(eq(schema.documents.id, id), eq(schema.documents.ownerId, ownerId)))
+        .get();
+    if (!node) return;
+
+    const subtreeIds: string[] = [id];
+    let frontier: string[] = [id];
+    while (frontier.length > 0) {
+        const children = db.select({ id: schema.documents.id })
+            .from(schema.documents)
+            .where(and(
+                eq(schema.documents.ownerId, ownerId),
+                inArray(schema.documents.parentId, frontier)
+            ))
+            .all();
+        const childIds = children.map((c) => c.id);
+        subtreeIds.push(...childIds);
+        frontier = childIds;
+    }
+
+    const files = db.select({ id: schema.documents.id, storagePath: schema.documents.storagePath })
+        .from(schema.documents)
+        .where(and(inArray(schema.documents.id, subtreeIds), eq(schema.documents.type, 'file')))
+        .all();
+
+    db.transaction((tx) => {
+        tx.delete(schema.shareLinks).where(inArray(schema.shareLinks.documentId, subtreeIds)).run();
+        tx.delete(schema.documents).where(inArray(schema.documents.id, subtreeIds)).run();
+    });
+
+    for (const f of files) {
+        if (f.storagePath) {
+            try {
+                rmSync(f.storagePath, { recursive: true, force: true });
+            } catch (e) {
+                console.warn('[deleteNode] disk cleanup failed', f.storagePath, e);
+            }
+        }
+    }
 }

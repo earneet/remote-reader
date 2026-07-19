@@ -11,7 +11,8 @@ import {
     listFolders,
     getOwnedDocument,
     renameNode,
-    moveNode
+    moveNode,
+    deleteNode
 } from '../src/lib/server/documents';
 import { eq, and } from 'drizzle-orm';
 
@@ -172,4 +173,34 @@ test('moveNode 非 owner 拒绝', async () => {
     const dst = folderByName('dst')!;
     const a = docByName('a.md')!;
     expect(moveNode('other', a.id, dst.id).ok).toBe(false);
+});
+
+test('deleteNode 删 file 同时清 share_links', async () => {
+    const r = await uploadDocument(ownerId, 'a.md', 'x', []);
+    expect(db.select().from(schema.shareLinks).all().length).toBe(1);
+    deleteNode(ownerId, r.id);
+    expect(db.select().from(schema.documents).where(eq(schema.documents.id, r.id)).get()).toBeUndefined();
+    expect(db.select().from(schema.shareLinks).all().length).toBe(0);
+});
+
+test('deleteNode 删 folder 级联删子孙', async () => {
+    await uploadDocument(ownerId, 'a.md', 'x', ['p', 'c']);
+    const p = folderByName('p')!;
+    deleteNode(ownerId, p.id);
+    expect(db.select().from(schema.documents).all().length).toBe(0);
+});
+
+test('deleteNode 删 file 后磁盘文件删除', async () => {
+    const r = await uploadDocument(ownerId, 'a.md', 'x', []);
+    const doc = db.select().from(schema.documents).where(eq(schema.documents.id, r.id)).get();
+    const path = doc!.storagePath!;
+    deleteNode(ownerId, r.id);
+    const { existsSync } = await import('node:fs');
+    expect(existsSync(path)).toBe(false);
+});
+
+test('deleteNode 非 owner 不删', async () => {
+    const r = await uploadDocument(ownerId, 'a.md', 'x', []);
+    deleteNode('other', r.id);
+    expect(db.select().from(schema.documents).where(eq(schema.documents.id, r.id)).get()).toBeTruthy();
 });
