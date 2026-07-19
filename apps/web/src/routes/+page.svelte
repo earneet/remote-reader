@@ -63,6 +63,15 @@
                         {:else}
                             <button class="move-btn" onclick={() => startMove(item.id)}>📂 移动</button>
                         {/if}
+                        <form class="inline" method="POST" action="?/delete"
+                            use:enhance={({ cancel }) => {
+                                if (!confirm('确认删除？文件夹会级联删除全部内容，且不可恢复。')) { cancel(); return; }
+                                return async ({ result }) => { if (result.type === 'success') await invalidateAll(); };
+                            }}
+                        >
+                            <input type="hidden" name="id" value={item.id}>
+                            <button>🗑 删除</button>
+                        </form>
                     </li>
                 {/each}
             </ul>

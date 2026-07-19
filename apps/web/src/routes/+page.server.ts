@@ -3,7 +3,7 @@ import { and, eq, isNull } from 'drizzle-orm';
 import type { Actions, PageServerLoad } from './$types';
 import { generateId } from '$server/auth';
 import { db, schema } from '$server/db';
-import { listChildren, listFolders, moveNode, renameNode } from '$server/documents';
+import { deleteNode, listChildren, listFolders, moveNode, renameNode } from '$server/documents';
 
 export const load: PageServerLoad = async ({ locals, url }) => {
     if (!locals.user) redirect(302, '/login');
@@ -56,6 +56,14 @@ export const actions: Actions = {
         const newParentId = target === 'root' || !target ? null : target;
         const r = moveNode(locals.user.id, id, newParentId);
         if (!r.ok) error(400, r.reason ?? '移动失败');
+        return { ok: true };
+    },
+    delete: async ({ request, locals }) => {
+        if (!locals.user) redirect(302, '/login');
+        const form = await request.formData();
+        const id = String(form.get('id') ?? '');
+        if (!id) error(400, '参数缺失');
+        deleteNode(locals.user.id, id);
         return { ok: true };
     }
 };
