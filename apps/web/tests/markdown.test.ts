@@ -1,5 +1,5 @@
 import { test, expect } from 'vitest';
-import { renderMarkdown } from '../src/lib/server/markdown';
+import { renderMarkdown, __resetMarkdownCacheForTest } from '../src/lib/server/markdown';
 
 test('渲染标题', async () => {
     const html = await renderMarkdown('# Title');
@@ -46,4 +46,13 @@ test('block $$...$$ 转为 math block 占位 div', async () => {
     const html = await renderMarkdown('$$\nx = y\n$$');
     expect(html).toContain('class="math block"');
     expect(html).toContain('x = y');
+});
+
+test('渲染结果缓存：同输入返回同输出、不同输入各异（M13）', async () => {
+    __resetMarkdownCacheForTest();
+    const a1 = await renderMarkdown('# cached');
+    const a2 = await renderMarkdown('# cached');
+    expect(a1).toBe(a2);
+    const b = await renderMarkdown('# other');
+    expect(b).not.toBe(a1);
 });

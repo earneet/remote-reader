@@ -1,6 +1,7 @@
 import MarkdownIt from 'markdown-it';
 import { createHighlighter } from 'shiki';
 import type { Highlighter } from 'shiki';
+import { createHash } from 'node:crypto';
 
 const THEME = 'github-dark';
 const LANGS = [
@@ -35,7 +36,11 @@ function getHighlighter(): Promise<Highlighter> {
     return highlighterPromise;
 }
 
-export async function renderMarkdown(src: string): Promise<string> {
+// M13: MarkdownIt 实例 + math 规则只构建一次（原来每次渲染都 new + 重注册），shiki highlighter 已单例。
+let mdInstance: MarkdownIt | null = null;
+
+async function getMarkdown(): Promise<MarkdownIt> {
+    if (mdInstance) return mdInstance;
     const hl = await getHighlighter();
     const md = new MarkdownIt({
         html: false,
@@ -96,5 +101,30 @@ export async function renderMarkdown(src: string): Promise<string> {
         `<span class="math inline">${md.utils.escapeHtml(tokens[idx].content)}</span>`;
     md.renderer.rules.math_block = (tokens: any, idx: number) =>
         `<div class="math block">${md.utils.escapeHtml(tokens[idx].content)}</div>\n`;
-    return md.render(src);
+    mdInstance = md;
+    return md;
+}
+
+// M13: 渲染结果按内容 hash 缓存（热文档重复访问跳过渲染）。FIFO 上限防无界增长。
+const RENDER_CACHE = new Map<string, string>();
+const RENDER_CACHE_MAX = 128;
+
+export async function renderMarkdown(src: string): Promise<string> {
+    const md = await getMarkdown();
+    const key = createHash('sha256').update(src, 'utf8').digest('hex');
+    const hit = RENDER_CACHE.get(key);
+    if (hit !== undefined) return hit;
+    const html = md.render(src);
+    if (RENDER_CACHE.size >= RENDER_CACHE_MAX) {
+        const first = RENDER_CACHE.keys().next().value;
+        if (first !== undefined) RENDER_CACHE.delete(first);
+    }
+    RENDER_CACHE.set(key, html);
+    return html;
+}
+
+// 仅供测试：清空缓存与单例，验证缓存命中/重建逻辑
+export function __resetMarkdownCacheForTest(): void {
+    mdInstance = null;
+    RENDER_CACHE.clear();
 }
