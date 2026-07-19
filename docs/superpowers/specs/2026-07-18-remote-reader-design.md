@@ -1,7 +1,8 @@
 # Remote Reader 设计文档
 
 - **创建日期**: 2026-07-18
-- **状态**: 设计已确认，待编写实现计划
+- **最近更新**: 2026-07-19（子计划 1 实现完成，回填实际技术栈与运行时分工）
+- **状态**: 子计划 1（Web 核心）已实现并 merge master；子计划 2/3 待做
 - **作者**: brainstorming 协作产出
 
 ---
@@ -121,7 +122,7 @@ remote_reader/
 users          用户
 ├─ id            (TEXT, 主键, cuid)
 ├─ email         (TEXT, 唯一)
-├─ password_hash (TEXT, Bun.password argon2id)
+├─ password_hash (TEXT, argon2id via @node-rs/argon2)
 ├─ role          (TEXT, 'admin' | 'member')
 └─ created_at    (INTEGER, unix ms)
 
@@ -299,36 +300,42 @@ md 原文
 
 ---
 
-## 10. 技术选型（基于 2026-07 实际查证）
+## 10. 技术选型（基于 2026-07 实际查证 + 实现期修正）
 
-| 关注点 | 选型 | 查证依据 |
+| 关注点 | 选型 | 查证/修正依据 |
 |---|---|---|
-| 运行时/包管理 | **Bun** | 一站式（运行+测试+打包），原生 TS |
+| 包管理 / dev·build 宿主 | **Bun** | 一站式，原生 TS；用作 `install` / `vite dev` / `vite build` 的宿主 |
 | 全栈框架 | **SvelteKit** | 混合渲染（首屏快+交互流畅），开发快，适合内容型应用 |
-| 构建/部署 | **adapter-node + `bun run`** | ⚠️ **不用 `bun build --compile`**（oven-sh/bun#15734 已知不兼容） |
-| 数据库访问 | **Drizzle ORM** | 2025 采用率超 Prisma；对 Bun+SQLite 一流 `bun:sqlite` 支持；轻量、edge-ready；已 v1 稳定 |
-| md 解析 | **markdown-it** | **默认安全** + 100% CommonMark，契合 XSS 防护需求 |
-| 代码高亮 | **Shiki** | 准确度最高（VS Code 同款）；⚠️ 只预载 ~15 常用语言，避免全语言 bundle 性能问题 |
-| 图表/公式 | **Mermaid.js + KaTeX** | 客户端按需渲染 |
-| 密码哈希 | **`Bun.password` (argon2id)** | ✨ 零依赖，Bun 原生（优于装 argon2 npm 包） |
-| MCP SDK | **@modelcontextprotocol/sdk** | 官方 TS SDK，最先支持 Streamable HTTP（利好 Phase 3） |
-| 测试 | **Bun test** | 内置，零配置 |
+| 构建/部署 | **adapter-node + `node build/index.js`** | ⚠️ 生产用 **node** 启动（非 `bun run`）：better-sqlite3 在 bun 直接运行时加载失败。不用 `bun build --compile`（oven-sh/bun#15734） |
+| 测试 | **vitest（node 运行时）** | `bun run test` 经 vitest 的 node shebang 在 node 下执行；同上 better-sqlite3 原因，不能用 `bun test` |
+| 数据库访问 | **Drizzle ORM + better-sqlite3** | ⚠️ **不用 `bun:sqlite`**：Vite SSR 不解析 `bun:*`（详见 §15 运行时分工） |
+| md 解析 | **markdown-it** | 默认安全（`html:false`）+ 100% CommonMark，契合 XSS 防护 |
+| 代码高亮 | **Shiki** | 准确度最高（VS Code 同款）；只预载 ~15 常用语言，避免全语言 bundle 性能问题 |
+| 图表/公式 | **Mermaid.js + KaTeX** | 客户端按需渲染（子计划 3） |
+| 密码哈希 | **`@node-rs/argon2` (argon2id)** | ⚠️ **不用 `Bun.password`**：同上 Vite SSR 不认 `Bun.*`。`Algorithm` 是 const enum，与 verbatimModuleSyntax/isolatedModules 冲突，故用字面量 `ARGON2ID=2` |
+| Session 签名 | **HMAC-SHA256 + timingSafeEqual** | `node:crypto`；token 含 exp 服务端校验；生产缺 `SESSION_SECRET` 启动期 fail-fast |
+| MCP SDK | **@modelcontextprotocol/sdk** | 官方 TS SDK，最先支持 Streamable HTTP（利好 Phase 3）；子计划 2 引入 |
+
+> **关键约束（实现期发现，原设计未预见）**：SvelteKit 的 SSR 在 Vite 下运行，**Vite 不识别 Bun 专属模块/全局**（`bun:sqlite`、`Bun.*`），导入会在 SSR/构建期失败。故所有 `apps/web` 服务端代码改用 node 兼容的 `better-sqlite3` / `@node-rs/argon2` / `node:crypto`。这带来反向约束：`better-sqlite3` 是原生 addon，**bun 直接运行时（`bun -e`/`bun run *.ts`/`bun test`）加载失败**，只在 `bun + vite dev` 下可用——因此测试用 vitest（node）、生产用 `node build/index.js`。详见 §15。
 
 ---
 
-## 11. 安全清单
+## 11. 安全清单（实现现状）
 
 | 关注点 | 处理 |
 |---|---|
-| 路径穿越 | Agent 传的 path 严格 sanitize，禁止 `..`/绝对路径，确保逃不出用户根目录 |
-| md XSS | 服务端渲染默认不渲染原始 HTML（markdown-it `html:false`） |
-| token 安全 | 只存 sha256 哈希；明文仅生成时显示一次；传输走 HTTPS |
-| 密码安全 | argon2id（Bun.password） |
-| 上传限制 | 单文件大小上限 + 单 token 速率限制 |
-| SQL 注入 | Drizzle 参数化查询天然防 |
+| 路径穿越 | Agent 传的 **`path` 与 `name` 都过 `parsePath`**（禁止 `..`/绝对路径/null byte/Windows 非法字符），拼成单一字符串再取末段为文件名；`path.join` 归一化无法逃出 owner 目录。⚠️ 曾遗漏 `name`（review CRITICAL），已修 |
+| md XSS | 服务端渲染默认不渲染原始 HTML（markdown-it `html:false`）；产物经 `{@html}` 输出受信 HTML |
+| API token | 只存 sha256 哈希（`hashToken`）；明文仅生成时显示一次；`authenticateApiToken` 用 `innerJoin users` 防孤儿 token；传输走 HTTPS |
+| Session | **HMAC-SHA256**（非自造 secret-suffix）+ **`timingSafeEqual`**（防时序）+ token 含 **exp 服务端校验**；生产缺 `SESSION_SECRET` **启动期 fail-fast**（懒触发，不破坏 build） |
+| 密码安全 | argon2id（`@node-rs/argon2`） |
+| 上传限制 | 单文件大小上限 `MAX_UPLOAD_BYTES`（默认 5MB，`envInt` 严格解析）+ 每 token 速率限制 `RATE_LIMIT`（默认 60/min）+ adapter-node `BODY_SIZE_LIMIT` 网关层（数字字节，须 > MAX_UPLOAD_BYTES） |
+| 登录限流 | `LOGIN_RATE_LIMIT_MAX`（默认每邮箱 10/窗）防暴力破解 |
+| 并发安全 | `uploadDocument` check-then-act 不跨 `await`（DB 写前置），并发同 path 不产生重复行 |
+| SQL 注入 | Drizzle 参数化查询天然防；SQLite 外键约束 ON（`references()`）保数据完整 |
 | CSRF | SvelteKit 表单内置防护 |
-| 权限 | 所有 API 操作校验 `resource.owner_id == token.user_id` |
-| 生产 | HTTPS |
+| 权限 | API 操作校验 token 归属；`/s/<token>` 凭 token 访问（设计如此，绕过 owner 检查） |
+| 生产 | HTTPS；session cookie `httpOnly`/`sameSite:lax`/`secure`(prod) |
 
 ---
 
@@ -373,6 +380,47 @@ md 原文
 3. **分享 token 生成策略**：长度、字符集、熵值。
 4. **上传限制的具体阈值**：单文件大小、速率窗口。
 5. **md 渲染插件配置**：启用哪些 markdown-it 插件、Shiki 预载哪些语言。
+
+> 注：上述 5 个开放决策点在子计划 1 实现中已由实现者（Claude）全部定稿：parsePath 拒绝 `..`/绝对路径/null/`\:*?"<>|`、content_hash 用 sha256 三态（created/skip/overwrite）、share token 用 `randomBytes(16)` base64url（128bit 熵）、阈值走 env（5MB / 60每分）、Shiki 预载 15 语言 + github-dark。
+
+---
+
+## 15. 实现现状（2026-07-19）
+
+### 15.1 已完成：子计划 1（Web 核心闭环）
+
+已 merge `master`（HEAD 见 git log），**58 单测 + svelte-check 0 错 + 生产冒烟 + e2e 全过**。已实现端点：
+
+| 路径 | 认证 | 状态 |
+|---|---|---|
+| `POST /api/v1/documents` | API token | ✅ 幂等上传（content_hash），返回 `{id, url}` |
+| `GET /s/<token>` | 公开免登录 | ✅ SSR 渲染 md（markdown-it + Shiki） |
+| `/register` | 邀请码 | ✅ 首用户自动 admin |
+| `/login` | 公开 | ✅ argon2id + 限流 |
+| `/` | 需登录 | ⚠️ 占位首页（文件管理器在子计划 3） |
+
+**未实现（原 §7 设计中标注的）**：`/d/<id>`、`/settings/tokens`、`/settings/shares`、GET/PATCH/DELETE `/api/v1/documents`——属 Phase 2/3。API token 暂只能用 `node scripts/seed-token.mjs <email>` 生成；无 logout 路由（`clearSessionCookie` 已备）。
+
+### 15.2 运行时分工（关键，实现期确定）
+
+| 场景 | 命令 | 运行时 |
+|---|---|---|
+| 装依赖 | `bun install` | bun |
+| dev | `bun --filter remote-reader-web dev` | bun + vite（better-sqlite3 此路径可加载） |
+| build | `bun --filter remote-reader-web build` | bun + vite（仅打包，不加载 addon） |
+| 测试 | `bun run test` | **node**（vitest 经 node shebang 执行） |
+| 生产 | `node apps/web/build/index.js` | **node**（adapter-node 产物） |
+
+⚠️ 生产入口是 `build/index.js`（启动 HTTP server），**不是** `build/handler.js`（仅导出 handler）。`BODY_SIZE_LIMIT` 必须是字节数（数字，如 `8388608`），不接受 `8MB`。生产须设 `SESSION_SECRET`，否则首个请求 fail-fast。
+
+### 15.3 待做
+
+- **子计划 2**：本地 MCP 桥（`apps/mcp-bridge`，stdio，1 个 `upload_document` 工具转发到 API，桥持有 token）——核心流程缺失的另一半。
+- **子计划 3**：文件管理器 UI（列表/删除/移动/重命名）+ 分享撤销管理页 + token 管理 UI + logout 路由 + Docker。
+
+### 15.4 Pre-merge review 修复要点（多 Agent 交叉验证）
+
+子计划 1 合并前经 5 维度 finder + 每 finding 2 对抗复核的 review，修了 12 项，关键的：上传 `name` 路径穿越（CRITICAL）、session 改 HMAC+timingSafeEqual+fail-fast+exp（HIGH）、登录限流、上传并发竞态重排、`envInt` 严格解析、markdown/shiki 健壮性。详见 git log 中 `review A/B/...` 系列 commit。
 
 ---
 

@@ -4,6 +4,12 @@
 
 核心流程：Agent 上传文档 → 拿到免登录查看链接 → 通过 IM 发给用户 → 用户点链接一步看到渲染结果。
 
+## 文档
+
+- [产品概览](./docs/PRODUCT.md)——定位、场景、功能与路线图
+- [用户使用手册](./docs/USER_GUIDE.md)——部署 / Agent 上传 / 阅读 / 配置 / 排查
+- [设计文档](./docs/superpowers/specs/2026-07-18-remote-reader-design.md)——架构、数据模型、安全模型、实现现状
+
 ## 当前状态
 
 子计划 1（Web 应用核心）已完成：Token 认证上传 API + 免登录 markdown 查看页。
@@ -13,7 +19,7 @@
 
 TypeScript · Bun（包管理 + dev/build 宿主） · SvelteKit（全栈 SSR） · Drizzle ORM + SQLite（better-sqlite3） · markdown-it + Shiki · @node-rs/argon2 · vitest。
 
-> **运行时分工**：`better-sqlite3` 是原生 addon，bun 直接运行时加载失败（仅 `bun + vite dev` 下可用）。因此：**测试用 `bun run test`（vitest，在 node 下跑）**；dev/build/install 用 bun；**生产用 `node build/handler.js`**（adapter-node 产物，勿用 `bun run` 启服务）。
+> **运行时分工**：`better-sqlite3` 是原生 addon，bun 直接运行时加载失败（仅 `bun + vite dev` 下可用）。因此：**测试用 `bun run test`（vitest，在 node 下跑）**；dev/build/install 用 bun；**生产用 `node apps/web/build/index.js`**（adapter-node 产物，勿用 `bun run` 启服务）。详见 [docs/USER_GUIDE.md](./docs/USER_GUIDE.md)。
 
 ## 快速开始
 
@@ -45,10 +51,14 @@ bun --filter remote-reader-web dev          # http://localhost:5173（被占会�
 
 ```bash
 bun --filter remote-reader-web build
-DATABASE_PATH=./data/app.db DATA_DIR=./data/documents \
-  BASE_URL=https://your-host SESSION_SECRET=... node build/handler.js
+SESSION_SECRET=<长随机串> INITIAL_INVITE_CODE=<邀请码> \
+  DATABASE_PATH=./data/app.db DATA_DIR=./data/documents \
+  BASE_URL=https://your-host ORIGIN=https://your-host \
+  BODY_SIZE_LIMIT=8388608 PORT=3000 \
+  node apps/web/build/index.js
 ```
-⚠️ 用 `node` 启动，**不要 `bun run`**（better-sqlite3 在 bun 直接运行时加载失败）。
+
+⚠️ 用 `node` 启动，入口是 `apps/web/build/index.js`（**不是** `handler.js`）；**不要 `bun run`** 启服务（better-sqlite3 在 bun 直接运行时加载失败）。`SESSION_SECRET` 生产必填（缺失 fail-fast）；`BODY_SIZE_LIMIT` 必须是字节数（数字，须 > `MAX_UPLOAD_BYTES`）。完整配置与故障排查见 [docs/USER_GUIDE.md](./docs/USER_GUIDE.md)。
 
 ## 测试
 
