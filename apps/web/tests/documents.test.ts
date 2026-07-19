@@ -5,8 +5,13 @@ import { dirname, join } from 'node:path';
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator';
 import { db, schema } from '../src/lib/server/db';
 import { hashPassword, generateId, sha256Hex } from '../src/lib/server/auth';
-import { uploadDocument } from '../src/lib/server/documents';
-import { eq } from 'drizzle-orm';
+import {
+    uploadDocument,
+    listChildren,
+    listFolders,
+    getOwnedDocument
+} from '../src/lib/server/documents';
+import { eq, and } from 'drizzle-orm';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const migrationsFolder = join(here, '../src/lib/server/db/migrations');
@@ -83,4 +88,36 @@ test('根目录文件（pathSegments 为空）parentId 为 null', async () => {
     const row = db.select().from(schema.documents).where(eq(schema.documents.id, r.id)).get();
     expect(row?.parentId).toBe(null);
     expect(row?.type).toBe('file');
+});
+
+test('listChildren 返回指定 folder 的子项', async () => {
+    await uploadDocument(ownerId, 'a.md', 'x', ['reports']);
+    await uploadDocument(ownerId, 'b.md', 'y', ['reports']);
+    const reports = db.select().from(schema.documents)
+        .where(and(eq(schema.documents.name, 'reports'), eq(schema.documents.type, 'folder'))).get();
+    const children = listChildren(ownerId, reports!.id);
+    expect(children.length).toBe(2);
+});
+
+test('listChildren 根目录（parentId=null）返回根级 file+folder', async () => {
+    await uploadDocument(ownerId, 'root.md', 'x', []);
+    await uploadDocument(ownerId, 'sub.md', 'y', ['sub']);
+    const root = listChildren(ownerId, null);
+    expect(root.length).toBe(2);
+    expect(root.some((d) => d.name === 'root.md' && d.type === 'file')).toBe(true);
+    expect(root.some((d) => d.name === 'sub' && d.type === 'folder')).toBe(true);
+});
+
+test('listFolders 返回 owner 的所有 folder（不含 file）', async () => {
+    await uploadDocument(ownerId, 'a.md', 'x', ['reports']);
+    await uploadDocument(ownerId, 'b.md', 'y', ['notes']);
+    const folders = listFolders(ownerId);
+    expect(folders.length).toBe(2);
+    expect(folders.every((d) => d.type === 'folder')).toBe(true);
+});
+
+test('getOwnedDocument 仅返回属于该 owner 的文档', async () => {
+    const r = await uploadDocument(ownerId, 'a.md', 'x', []);
+    expect(getOwnedDocument(r.id, ownerId)).toBeTruthy();
+    expect(getOwnedDocument(r.id, 'other-user')).toBeUndefined();
 });

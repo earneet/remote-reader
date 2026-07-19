@@ -119,3 +119,32 @@ export async function uploadDocument(
     const url = await ensureShareUrl(id);
     return { id, url };
 }
+
+export function listChildren(ownerId: string, parentId: string | null) {
+    return db.select().from(schema.documents)
+        .where(and(
+            eq(schema.documents.ownerId, ownerId),
+            parentId === null
+                ? isNull(schema.documents.parentId)
+                : eq(schema.documents.parentId, parentId)
+        ))
+        .all();
+}
+
+export function listFolders(ownerId: string) {
+    return db.select().from(schema.documents)
+        .where(and(
+            eq(schema.documents.ownerId, ownerId),
+            eq(schema.documents.type, 'folder')
+        ))
+        .all();
+}
+
+export function getOwnedDocument(id: string, ownerId: string) {
+    return db.select().from(schema.documents)
+        .where(and(
+            eq(schema.documents.id, id),
+            eq(schema.documents.ownerId, ownerId)
+        ))
+        .get();
+}
