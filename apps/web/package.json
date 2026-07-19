@@ -29,7 +29,9 @@
     "@remote-reader/shared": "workspace:*",
     "better-sqlite3": "^12.11.1",
     "drizzle-orm": "^0.36.0",
+    "katex": "^0.18.0",
     "markdown-it": "^14.1.0",
+    "mermaid": "^11.16.0",
     "shiki": "^1.22.0"
   }
 }

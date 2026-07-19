@@ -30,3 +30,20 @@ test('未预载语言的代码块安全降级（不抛错）', async () => {
     const html = await renderMarkdown('```brainfuck\n++++++++[>++++++++<-]>\n```');
     expect(html).toContain('<pre>');
 });
+
+test('mermaid fence 输出 language-mermaid class 供客户端识别', async () => {
+    const html = await renderMarkdown('```mermaid\ngraph TD; A-->B\n```');
+    expect(html).toContain('language-mermaid');
+});
+
+test('inline $...$ 转为 math inline 占位 span', async () => {
+    const html = await renderMarkdown('公式 $a+b$ 末尾');
+    expect(html).toContain('class="math inline"');
+    expect(html).toContain('a+b');
+});
+
+test('block $$...$$ 转为 math block 占位 div', async () => {
+    const html = await renderMarkdown('$$\nx = y\n$$');
+    expect(html).toContain('class="math block"');
+    expect(html).toContain('x = y');
+});

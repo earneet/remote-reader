@@ -1,8 +1,53 @@
 <script lang="ts">
     let { html }: { html: string } = $props();
+    let container: HTMLDivElement;
+
+    $effect(() => {
+        if (container && html) {
+            enhanceMermaid(container);
+            enhanceKatex(container);
+        }
+    });
+
+    async function enhanceMermaid(root: HTMLElement): Promise<void> {
+        const codeBlocks = Array.from(root.querySelectorAll<HTMLElement>('code.language-mermaid'));
+        if (codeBlocks.length === 0) return;
+        const mermaid = (await import('mermaid')).default;
+        mermaid.initialize({ startOnLoad: false, theme: 'dark' });
+        for (const code of codeBlocks) {
+            const pre = code.parentElement;
+            if (!pre) continue;
+            const id = 'mmd-' + Math.random().toString(36).slice(2, 9);
+            try {
+                const { svg } = await mermaid.render(id, code.textContent ?? '');
+                const div = document.createElement('div');
+                div.className = 'mermaid-rendered';
+                div.innerHTML = svg;
+                pre.replaceWith(div);
+            } catch (e) {
+                console.warn('[mermaid] render failed', e);
+            }
+        }
+    }
+
+    async function enhanceKatex(root: HTMLElement): Promise<void> {
+        const nodes = Array.from(root.querySelectorAll<HTMLElement>('.math.inline, .math.block'));
+        if (nodes.length === 0) return;
+        const katex = (await import('katex')).default;
+        for (const el of nodes) {
+            try {
+                el.innerHTML = katex.renderToString(el.textContent ?? '', {
+                    displayMode: el.classList.contains('block'),
+                    throwOnError: false
+                });
+            } catch (e) {
+                console.warn('[katex] render failed', e);
+            }
+        }
+    }
 </script>
 
-<div class="markdown-body">
+<div class="markdown-body" bind:this={container}>
     {@html html}
 </div>
 
@@ -47,5 +92,13 @@
         margin: 1rem 0;
         padding: 0 1rem;
         color: #57606a;
+    }
+    .markdown-body :global(.mermaid-rendered) {
+        text-align: center;
+        margin: 1rem 0;
+    }
+    .markdown-body :global(.math.block) {
+        margin: 1rem 0;
+        overflow-x: auto;
     }
 </style>
