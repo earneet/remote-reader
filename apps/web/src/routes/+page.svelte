@@ -4,17 +4,35 @@
     import { invalidateAll } from '$app/navigation';
     let { data } = $props();
     let currentDir = $derived(data.currentDir);
+    let movingId: string | null = $state(null);
     async function goto(id: string | null) {
         const url = new URL(location.href);
         if (id) url.searchParams.set('dir', id); else url.searchParams.delete('dir');
         history.pushState({}, '', url);
         await invalidateAll();
     }
+    function startMove(id: string) { movingId = id; }
+    async function pickTarget(targetId: string | null) {
+        if (!movingId) return;
+        const fd = new FormData();
+        fd.set('id', movingId);
+        fd.set('target', targetId ?? 'root');
+        const r = await fetch('?/move', { method: 'POST', body: fd });
+        if (r.ok) { movingId = null; await invalidateAll(); }
+    }
 </script>
 
 <div class="fm">
     <aside class="fm-left">
-        <FolderTree folders={data.folders} currentId={currentDir} onSelect={goto} />
+        <FolderTree
+            folders={data.folders}
+            currentId={currentDir}
+            selecting={movingId !== null}
+            onSelect={movingId !== null ? pickTarget : goto}
+        />
+        {#if movingId !== null}
+            <p class="hint">移动模式：点左树选目标，或<button class="link" onclick={() => (movingId = null)}>取消</button></p>
+        {/if}
     </aside>
     <section class="fm-right">
         <h1>{currentDir ? '子目录' : '根目录'}</h1>
@@ -39,6 +57,12 @@
                             <input name="name" value={item.name} required>
                             <button>✏ 重命名</button>
                         </form>
+                        {#if movingId === item.id}
+                            <span class="hint">← 在左树点目标</span>
+                            <button onclick={() => (movingId = null)}>取消</button>
+                        {:else}
+                            <button class="move-btn" onclick={() => startMove(item.id)}>📂 移动</button>
+                        {/if}
                     </li>
                 {/each}
             </ul>
@@ -57,6 +81,9 @@
     .items a { color: #0969da; text-decoration: none; }
     .items a:hover { text-decoration: underline; }
     .size { color: #57606a; font-size: 0.85em; }
-    .inline { display: inline-flex; gap: 0.25rem; margin-left: auto; }
+    .inline { display: inline-flex; gap: 0.25rem; }
+    .hint { color: #2da44e; font-size: 0.9em; }
+    .link { border: none; background: none; color: #0969da; cursor: pointer; padding: 0; }
+    .move-btn { margin-left: auto; }
     .muted { color: #57606a; }
 </style>
