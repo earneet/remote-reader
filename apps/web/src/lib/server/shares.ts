@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { db, schema } from './db';
 import { generateId } from './auth';
 
@@ -25,4 +25,31 @@ export function getDocumentIdByShareToken(token: string): string | null {
     if (!row) return null;
     if (row.expiresAt && row.expiresAt < Date.now()) return null;
     return row.documentId;
+}
+
+export function listSharesByOwner(ownerId: string) {
+    return db.select({
+        token: schema.shareLinks.token,
+        documentId: schema.shareLinks.documentId,
+        documentName: schema.documents.name,
+        createdAt: schema.shareLinks.createdAt,
+        expiresAt: schema.shareLinks.expiresAt
+    }).from(schema.shareLinks)
+        .innerJoin(schema.documents, eq(schema.shareLinks.documentId, schema.documents.id))
+        .where(eq(schema.documents.ownerId, ownerId))
+        .all();
+}
+
+export function revokeShare(ownerId: string, token: string): boolean {
+    const link = db.select({ id: schema.shareLinks.id })
+        .from(schema.shareLinks)
+        .innerJoin(schema.documents, eq(schema.shareLinks.documentId, schema.documents.id))
+        .where(and(
+            eq(schema.shareLinks.token, token),
+            eq(schema.documents.ownerId, ownerId)
+        ))
+        .get();
+    if (!link) return false;
+    db.delete(schema.shareLinks).where(eq(schema.shareLinks.id, link.id)).run();
+    return true;
 }

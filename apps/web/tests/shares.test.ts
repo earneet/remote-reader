@@ -7,13 +7,16 @@ import { generateId } from '../src/lib/server/auth';
 import {
     generateShareToken,
     createShareLink,
-    getDocumentIdByShareToken
+    getDocumentIdByShareToken,
+    listSharesByOwner,
+    revokeShare
 } from '../src/lib/server/shares';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const migrationsFolder = join(here, '../src/lib/server/db/migrations');
 
 let docId: string;
+let userId: string;
 
 beforeAll(() => {
     migrate(db, { migrationsFolder });
@@ -24,7 +27,7 @@ beforeEach(() => {
     db.delete(schema.documents).run();
     db.delete(schema.apiTokens).run();
     db.delete(schema.users).run();
-    const userId = generateId();
+    userId = generateId();
     db.insert(schema.users).values({
         id: userId,
         email: `s-${Date.now()}@x.com`,
@@ -88,4 +91,29 @@ test('过期 share link（expiresAt 在过去）→ null', () => {
         createdAt: Date.now()
     }).run();
     expect(getDocumentIdByShareToken(token)).toBeNull();
+});
+
+test('listSharesByOwner 返回 owner 文档的分享（含文档名）', async () => {
+    const { token } = await createShareLink(docId);
+    const list = listSharesByOwner(userId);
+    expect(list.length).toBe(1);
+    expect(list[0].token).toBe(token);
+    expect(list[0].documentName).toBe('d.md');
+});
+
+test('listSharesByOwner 不返回他人文档的分享', async () => {
+    await createShareLink(docId);
+    expect(listSharesByOwner('other-user').length).toBe(0);
+});
+
+test('revokeShare 删除指定 token', async () => {
+    const { token } = await createShareLink(docId);
+    expect(revokeShare(userId, token)).toBe(true);
+    expect(getDocumentIdByShareToken(token)).toBeNull();
+});
+
+test('revokeShare 非 owner 返回 false 不删', async () => {
+    const { token } = await createShareLink(docId);
+    expect(revokeShare('other-user', token)).toBe(false);
+    expect(getDocumentIdByShareToken(token)).toBe(docId);
 });
