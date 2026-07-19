@@ -10,7 +10,7 @@
 
 **依据 spec:** `docs/superpowers/specs/2026-07-19-sub3-management-ui-docker-design.md`
 
-**learning 模式约定：** 标注 `【用户实现】` 的 step 由用户亲手编码（5-10 行），plan 给出测试+函数签名+约束，不给实现代码。其余 step 给完整代码。
+**learning 模式约定（已按用户偏好调整）：** plan 原将 4 个有取舍的决策点标注 `【用户实现】`（moveNode 环路、deleteNode 级联、token 横幅 UX、mermaid 扫描）。但根据用户既有偏好（不写代码，learning 开放点也由 Claude 实现——见 memory `user-prefers-claude-implements`），这些点**实际全部由 Claude（controller）提供实现**，不暂停请用户写。plan 仍保留 `【用户实现】` 标注作为"此处有设计取舍"的记号，但实现代码由 controller 在派发 implementer 时一并给出。其余 step 给完整代码。
 
 ---
 
