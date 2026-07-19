@@ -1,5 +1,5 @@
 import { test, expect, vi } from 'vitest';
-import { checkRateLimit } from '../src/lib/server/ratelimit';
+import { checkRateLimit, sweepExpired } from '../src/lib/server/ratelimit';
 
 test('首次请求 allowed，remaining = max - 1', () => {
     const r = checkRateLimit('rl-a', { max: 3, windowMs: 60_000 });
@@ -37,4 +37,15 @@ test('不同 key 互不影响', () => {
     expect(checkRateLimit('rl-d1', cfg).allowed).toBe(true);
     expect(checkRateLimit('rl-d2', cfg).allowed).toBe(true);
     expect(checkRateLimit('rl-d1', cfg).allowed).toBe(false);
+});
+
+test('sweepExpired 清理过期 bucket、保留未过期（防内存泄漏 M6）', () => {
+    const t0 = Date.now();
+    checkRateLimit('sweep-a', { max: 5, windowMs: 1000 });
+    checkRateLimit('sweep-b', { max: 5, windowMs: 1000 });
+    checkRateLimit('sweep-fresh', { max: 5, windowMs: 60_000 });
+    expect(sweepExpired(t0)).toBe(0);
+    const removed = sweepExpired(t0 + 2000);
+    expect(removed).toBeGreaterThanOrEqual(2);
+    expect(sweepExpired(t0 + 2000)).toBe(0);
 });
