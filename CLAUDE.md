@@ -8,11 +8,13 @@ Remote Reader 让远程工作的 Agent 通过 MCP 上传 Markdown 文档，用�
 
 ## 当前状态
 
-**子计划 1/2/3 全部已实现并 merge `master`**：Web 上传 API（`POST /api/v1/documents`，token 认证 + content_hash 幂等）+ 免登录查看页 `/s/<token>`（markdown-it + Shiki SSR + Mermaid + KaTeX）+ 注册/登录/session/logout；本地 MCP 桥（`apps/mcp-bridge`，stdio，`upload_document` 工具）；文件管理器（双栏列表/预览/删除）+ `/d/<id>` owner 查看页 + API token 管理 UI（`/settings/tokens`，创建/撤销 + 一次性 reveal）+ 分享 token 管理 UI（`/settings/shares`，撤销）；Docker（多阶段 Dockerfile + docker-compose）。100 单测 + svelte-check 0/0 + 桥 tsc 0 错 + Docker 构建冒烟全过。
+**子计划 1/2/3 全部已实现并 merge `master`**：Web 上传 API（`POST /api/v1/documents`，token 认证 + content_hash 幂等）+ 免登录查看页 `/s/<token>`（markdown-it + Shiki SSR + Mermaid + KaTeX）+ 注册/登录/session/logout；本地 MCP 桥（`apps/mcp-bridge`，stdio，`upload_document` 工具）；文件管理器（双栏列表/预览/删除）+ `/d/<id>` owner 查看页 + API token 管理 UI（`/settings/tokens`，创建/撤销 + 一次性 reveal）+ 分享 token 管理 UI（`/settings/shares`，撤销）；速率限制（上传/登录，见 `apps/web/src/lib/server/ratelimit.ts`）；Docker（多阶段 Dockerfile + docker-compose，非 root 运行）。100+ 单测 + svelte-check 0/0 + 桥 tsc 0 错 + Docker 构建冒烟全过。
 
 - 子计划 1：✅ 完成（`docs/superpowers/plans/2026-07-18-web-core.md`）
 - 子计划 2：✅ 完成（`docs/superpowers/specs/2026-07-19-mcp-bridge-design.md` + `docs/superpowers/plans/2026-07-19-mcp-bridge.md`）
-- 子计划 3：✅ 完成（管理 UI + md 增强 + Docker）
+- 子计划 3：✅ 完成（`docs/superpowers/specs/2026-07-19-sub3-management-ui-docker-design.md` + `docs/superpowers/plans/2026-07-19-sub3-management-ui-docker.md`：管理 UI + md 增强 + Docker）
+
+**下一步（低优先）**：spec §12 Phase 3 扩展（远程 MCP server / 多文档批量上传等），详见 spec §15.3 待做。
 
 **桥运行时**：无原生依赖（纯 fetch + MCP SDK）→ `bun apps/mcp-bridge/src/index.ts` 直跑；`tsc --noEmit` 类型检查（`bun --filter remote-reader-mcp-bridge check`）。配置 = `~/.config/remote-reader/config.json`（XDG）默认 + `REMOTE_READER_URL`/`REMOTE_READER_TOKEN` env 覆盖。
 
@@ -47,16 +49,17 @@ Bun workspaces，`apps/web` 与 `apps/mcp-bridge` 都依赖 `@remote-reader/shar
 
 ## 开发命令
 
-> 以下命令在子计划 1 Task 1 初始化 monorepo 后可用（当前尚未实现）。
+根 `package.json` 提供 `bun run dev` / `bun run build` / `bun run test` 快捷方式（转发到 web workspace / vitest）。`bun run test` 经 vitest 的 node shebang 在 node 下跑（不用 bun 直接跑）。
 
 ```bash
 bun install                                    # 装所有 workspace 依赖
-bun --filter remote-reader-web dev             # 启动 SvelteKit dev (http://localhost:5173)
-bun --filter remote-reader-web build           # 构建（adapter-node）
-bun --filter remote-reader-web check           # svelte-check 类型检查
+bun run dev                                    # = bun --filter remote-reader-web dev（SvelteKit dev，http://localhost:5173）
+bun run build                                  # = bun --filter remote-reader-web build（adapter-node 产物 → apps/web/build/）
+bun --filter remote-reader-web check           # svelte-check 类型检查（src + .svelte）
 bun --filter remote-reader-web db:generate     # 生成 Drizzle migration
-bun --filter remote-reader-web db:migrate      # 执行 migration
-bun run test                                   # 跑所有测试（vitest，node 运行时）
+bun --filter remote-reader-web db:migrate      # mkdir data + 执行 migration（含已生成 schema）
+bun --filter remote-reader-mcp-bridge check    # 桥 tsc --noEmit 类型检查
+bun run test                                   # 跑所有测试（vitest，node 运行时，fileParallelism:false）
 bun run test apps/web/tests/auth.test.ts       # 跑单个测试文件
 bun run test -t "测试名片段"                    # 按测试名过滤
 ```
@@ -65,9 +68,21 @@ bun run test -t "测试名片段"                    # 按测试名过滤
 
 ⚠️ **部署注意**：用 `adapter-node` 产物 + **`node apps/web/build/index.js`** 启动（不要 `bun run` 启服务，会触发 better-sqlite3 加载失败），**不要用 `bun build --compile`** 打单二进制（oven-sh/bun#15734 已知不兼容，详见 spec §10）。生产必填 `SESSION_SECRET`（缺失 fail-fast）；`BODY_SIZE_LIMIT` 必须是字节数（数字，须 > `MAX_UPLOAD_BYTES`）。
 
-## 环境变量（见 `.env.example`）
+## 运维 / 部署辅助脚本
 
-`DATABASE_PATH`、`DATA_DIR`、`BASE_URL`、`SESSION_SECRET`、`INITIAL_INVITE_CODE`（注册首个管理员所需）、`MAX_UPLOAD_BYTES`。运行时数据在 `data/`（已 gitignore，**绝不入库**）。
+```bash
+node scripts/seed-token.mjs <email>            # 免 UI 直接为某用户生成一个 API token（直写 SQLite，明文打印一次）
+API_TOKEN=rr_xxx BASE_URL=http://localhost:5173 bash scripts/e2e-check.sh   # 端到端冒烟：上传 → /s/<token> 200 → 错误场景
+docker compose up --build                      # 一键起服务（:3000），data/ 挂载为卷
+```
+
+**Docker 非 root 运行**：`docker-entrypoint.sh` 先 `chown -R node:node /app/data`（host 首次建卷常是 root 属主），再用 `runuser -u node` 降权跑 `node apps/web/build/index.js`；healthcheck 命中 `/`（<500 即活）。改 entrypoint / Dockerfile 前看 sub3 设计 spec。
+
+## 环境变量（完整清单见 `.env.example`）
+
+核心：`DATABASE_PATH`、`DATA_DIR`、`BASE_URL`、`SESSION_SECRET`（生产必填，缺失 fail-fast）、`INITIAL_INVITE_CODE`（注册首个管理员所需）、`MAX_UPLOAD_BYTES`。运行时数据在 `data/`（已 gitignore，**绝不入库**）。
+
+速率限制 / 会话 / 网关：`RATE_LIMIT_MAX` + `RATE_LIMIT_WINDOW_MS`（每 token 上传）、`LOGIN_RATE_LIMIT_MAX`（每邮箱登录）、`SESSION_MAX_AGE`（session 有效期秒，默认 30 天）、`BODY_SIZE_LIMIT`（adapter-node 请求体字节数，须 > `MAX_UPLOAD_BYTES`）、`PORT`（生产端口，默认 3000）。
 
 ## 安全要点（项目特有）
 
