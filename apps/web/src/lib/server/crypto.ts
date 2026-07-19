@@ -1,19 +1,22 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { envInt } from './env';
 
-function readSecret(): string {
+let cachedSecret: string | null = null;
+
+function getSecret(): string {
+    if (cachedSecret !== null) return cachedSecret;
     const s = process.env.SESSION_SECRET;
     if (!s) {
         if (process.env.NODE_ENV === 'production') {
             throw new Error('SESSION_SECRET must be set in production');
         }
         console.warn('[session] SESSION_SECRET 未设置，使用不安全的开发默认值');
-        return 'dev-insecure-secret';
+        cachedSecret = 'dev-insecure-secret';
+        return cachedSecret;
     }
-    return s;
+    cachedSecret = s;
+    return cachedSecret;
 }
-
-const SECRET = readSecret();
 
 interface Payload {
     userId: string;
@@ -25,7 +28,7 @@ function maxAgeMs(): number {
 }
 
 function signBody(body: string): string {
-    return createHmac('sha256', SECRET).update(body).digest('hex');
+    return createHmac('sha256', getSecret()).update(body).digest('hex');
 }
 
 export function sign(payload: { userId: string }): string {
