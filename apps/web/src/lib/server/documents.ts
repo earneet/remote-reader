@@ -148,3 +148,53 @@ export function getOwnedDocument(id: string, ownerId: string) {
         ))
         .get();
 }
+
+export function renameNode(ownerId: string, id: string, newName: string): boolean {
+    const result = db.update(schema.documents)
+        .set({ name: newName, updatedAt: Date.now() })
+        .where(and(
+            eq(schema.documents.id, id),
+            eq(schema.documents.ownerId, ownerId)
+        ))
+        .run();
+    return result.changes > 0;
+}
+
+export function moveNode(
+    ownerId: string,
+    id: string,
+    newParentId: string | null
+): { ok: boolean; reason?: string } {
+    const node = db.select().from(schema.documents)
+        .where(and(eq(schema.documents.id, id), eq(schema.documents.ownerId, ownerId)))
+        .get();
+    if (!node) return { ok: false, reason: '节点不存在或无权操作' };
+
+    if (newParentId === id) return { ok: false, reason: '目标与自身相同' };
+
+    if (newParentId !== null) {
+        const target = db.select().from(schema.documents)
+            .where(and(
+                eq(schema.documents.id, newParentId),
+                eq(schema.documents.ownerId, ownerId),
+                eq(schema.documents.type, 'folder')
+            ))
+            .get();
+        if (!target) return { ok: false, reason: '目标文件夹不存在' };
+
+        let cursor: string | null = newParentId;
+        while (cursor !== null) {
+            if (cursor === id) return { ok: false, reason: '不能移入自身子孙' };
+            const parent = db.select().from(schema.documents)
+                .where(eq(schema.documents.id, cursor))
+                .get();
+            cursor = parent?.parentId ?? null;
+        }
+    }
+
+    db.update(schema.documents)
+        .set({ parentId: newParentId, updatedAt: Date.now() })
+        .where(eq(schema.documents.id, id))
+        .run();
+    return { ok: true };
+}

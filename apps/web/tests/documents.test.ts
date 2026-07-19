@@ -9,7 +9,9 @@ import {
     uploadDocument,
     listChildren,
     listFolders,
-    getOwnedDocument
+    getOwnedDocument,
+    renameNode,
+    moveNode
 } from '../src/lib/server/documents';
 import { eq, and } from 'drizzle-orm';
 
@@ -120,4 +122,54 @@ test('getOwnedDocument 仅返回属于该 owner 的文档', async () => {
     const r = await uploadDocument(ownerId, 'a.md', 'x', []);
     expect(getOwnedDocument(r.id, ownerId)).toBeTruthy();
     expect(getOwnedDocument(r.id, 'other-user')).toBeUndefined();
+});
+
+function folderByName(name: string) {
+    return db.select().from(schema.documents)
+        .where(and(eq(schema.documents.name, name), eq(schema.documents.type, 'folder')))
+        .get();
+}
+function docByName(name: string) {
+    return db.select().from(schema.documents)
+        .where(and(eq(schema.documents.name, name), eq(schema.documents.type, 'file')))
+        .get();
+}
+
+test('renameNode 修改名称', async () => {
+    const r = await uploadDocument(ownerId, 'a.md', 'x', []);
+    expect(renameNode(ownerId, r.id, 'renamed.md')).toBe(true);
+    const row = db.select().from(schema.documents).where(eq(schema.documents.id, r.id)).get();
+    expect(row?.name).toBe('renamed.md');
+});
+
+test('renameNode 非 owner 返回 false 不生效', async () => {
+    const r = await uploadDocument(ownerId, 'a.md', 'x', []);
+    expect(renameNode('other', r.id, 'renamed.md')).toBe(false);
+    expect(db.select().from(schema.documents).where(eq(schema.documents.id, r.id)).get()?.name).toBe('a.md');
+});
+
+test('moveNode 移到另一 folder', async () => {
+    await uploadDocument(ownerId, 'a.md', 'x', ['src']);
+    await uploadDocument(ownerId, 'b.md', 'y', ['dst']);
+    const dst = folderByName('dst')!;
+    const a = docByName('a.md')!;
+    const r = moveNode(ownerId, a.id, dst.id);
+    expect(r.ok).toBe(true);
+    expect(db.select().from(schema.documents).where(eq(schema.documents.id, a.id)).get()?.parentId).toBe(dst.id);
+});
+
+test('moveNode 拒绝移入自身子孙（防环路）', async () => {
+    await uploadDocument(ownerId, 'a.md', 'x', ['p', 'c']);
+    const p = folderByName('p')!;
+    const c = folderByName('c')!;
+    const r = moveNode(ownerId, p.id, c.id);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBeTruthy();
+});
+
+test('moveNode 非 owner 拒绝', async () => {
+    await uploadDocument(ownerId, 'a.md', 'x', ['dst']);
+    const dst = folderByName('dst')!;
+    const a = docByName('a.md')!;
+    expect(moveNode('other', a.id, dst.id).ok).toBe(false);
 });
