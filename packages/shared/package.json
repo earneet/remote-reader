@@ -8,6 +8,10 @@
   "exports": {
     ".": "./src/index.ts",
     "./paths": "./src/paths.ts",
-    "./types": "./src/types.ts"
+    "./types": "./src/types.ts",
+    "./api-client": "./src/api-client.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1"
   }
 }
