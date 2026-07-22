@@ -11,9 +11,8 @@ const config = {
             $components: 'src/lib/components'
         },
         csp: {
-            // H6: CSP 作为 markdown-it html:false 之后的第二道防线。
-            // 先以 report-only 上线（不阻塞 mermaid 的 eval / katex·mermaid 的 inline-style 需求），
-            // 观察实际违规后收紧为 enforcing。script-src 仍排除外域与 inline <script>。
+            // H6: CSP 作为 markdown-it html:false 之后的第二道防线；report-only 先观察不阻断。
+            // report-uri 为必填 directive，缺失会致 SvelteKit CspReportOnlyProvider 构造期抛错、全站 500。
             reportOnly: {
                 'default-src': ["'self'"],
                 'script-src': ["'self'", "'unsafe-eval'"],
@@ -23,7 +22,8 @@ const config = {
                 'connect-src': ["'self'"],
                 'worker-src': ["'self'", 'blob:'],
                 'base-uri': ["'none'"],
-                'form-action': ["'self'"]
+                'form-action': ["'self'"],
+                'report-uri': ['/api/csp-report']
             }
         }
     }
