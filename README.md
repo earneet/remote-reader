@@ -73,7 +73,7 @@ bun --filter remote-reader-web dev          # http://localhost:5173（被占会�
 
 4. 打开返回的 `url`（形如 `/s/<token>`）—— 免登录查看渲染结果
 
-完整部署（反向代理、HTTPS、备份、升级迁移）见 [安装指导](./docs/INSTALL.md)。
+完整部署（systemd 一键 / Docker / 手动 / 反向代理 / HTTPS / 备份 / 升级迁移）见 [安装指导](./docs/INSTALL.md)。
 
 ## 通过 MCP 上传（Agent）
 
@@ -121,7 +121,7 @@ bun --filter remote-reader-web build          # 生产构建
 
 ## 文档
 
-- [安装指导](./docs/INSTALL.md) —— Docker / 手动部署 / 反向代理 / 备份升级 / 配置参考
+- [安装指导](./docs/INSTALL.md) —— systemd 一键 / Docker / 手动部署 / 反向代理 / 备份升级 / 配置参考
 - [用户手册](./docs/USER_GUIDE.md) —— 部署者 / Agent 操作者 / 阅读者三视角
 - [产品概览](./docs/PRODUCT.md) —— 定位、场景、功能、路线图
 - [设计文档](./docs/superpowers/specs/2026-07-18-remote-reader-design.md) —— 架构、数据模型、安全模型、实现现状

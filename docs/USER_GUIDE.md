@@ -54,7 +54,7 @@ curl -X POST http://localhost:3000/api/v1/documents \
 
 ## 1. 部署者 / 管理员
 
-完整部署（Docker / 手动 node / 反向代理 / HTTPS / 备份 / 升级迁移）见 [安装指导](./INSTALL.md)。本节聚焦管理员日常操作。
+完整部署（systemd 一键 / Docker / 手动 node / 反向代理 / HTTPS / 备份 / 升级迁移）见 [安装指导](./INSTALL.md)。本节聚焦管理员日常操作。
 
 ### 1.1 注册首个管理员
 
@@ -226,7 +226,7 @@ Response 200: { "id": "...", "url": "https://<host>/s/<share-token>" }
 
 ## 相关文档
 
-- [安装指导](./INSTALL.md) —— Docker / 手动部署 / 反向代理 / 备份升级 / 配置参考
+- [安装指导](./INSTALL.md) —— systemd 一键 / Docker / 手动部署 / 反向代理 / 备份升级 / 配置参考
 - [产品概览](./PRODUCT.md) —— 定位、场景、功能、路线图
 - [设计文档](./superpowers/specs/2026-07-18-remote-reader-design.md) —— 架构、数据模型、安全模型、实现现状
 - 快速上手：根目录 [`README.md`](../README.md)

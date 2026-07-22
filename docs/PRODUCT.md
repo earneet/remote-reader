@@ -92,7 +92,7 @@ sequenceDiagram
 
 ## 相关文档
 
-- [安装指导](./INSTALL.md) —— Docker / 手动部署 / 反向代理 / 备份升级
+- [安装指导](./INSTALL.md) —— systemd 一键 / Docker / 手动部署 / 反向代理 / 备份升级
 - [用户手册](./USER_GUIDE.md) —— 部署者 / Agent 操作者 / 阅读者三视角
 - [设计文档](./superpowers/specs/2026-07-18-remote-reader-design.md) —— 架构、数据模型、安全模型、实现现状
 - 快速上手：根目录 [`README.md`](../README.md)
