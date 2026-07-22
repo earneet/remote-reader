@@ -1,4 +1,4 @@
-import { error, redirect } from '@sveltejs/kit';
+import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 import { db, schema } from '$server/db';
 import { hashPassword, generateId } from '$server/auth';
@@ -29,17 +29,17 @@ export const actions: Actions = {
 
         // H4: 注册限流——按 client address，防 invite code 暴力/抢注首个 admin
         const rl = checkRateLimit(`register:${getClientAddress()}`, REGISTER_RATE_LIMIT);
-        if (!rl.allowed) error(429, '注册过于频繁，请稍后再试');
+        if (!rl.allowed) return fail(429, { error: '注册过于频繁，请稍后再试' });
 
-        if (!email || !password) error(400, 'email 与 password 必填');
+        if (!email || !password) return fail(400, { error: 'email 与 password 必填' });
         // M2: 邮箱格式 + 密码强度校验（invite-code 门槛已大幅降低用户枚举价值，409 保留以引导已注册用户登录）
-        if (!EMAIL_RE.test(email)) error(400, '邮箱格式不正确');
-        if (password.length < MIN_PASSWORD) error(400, `密码至少 ${MIN_PASSWORD} 位`);
+        if (!EMAIL_RE.test(email)) return fail(400, { error: '邮箱格式不正确' });
+        if (password.length < MIN_PASSWORD) return fail(400, { error: `密码至少 ${MIN_PASSWORD} 位` });
 
-        if (inviteCode !== process.env.INITIAL_INVITE_CODE) error(403, '邀请码无效');
+        if (inviteCode !== process.env.INITIAL_INVITE_CODE) return fail(403, { error: '邀请码无效' });
 
         const existing = db.select().from(schema.users).where(eq(schema.users.email, email)).get();
-        if (existing) error(409, '该邮箱已注册');
+        if (existing) return fail(409, { error: '该邮箱已注册' });
 
         const passwordHash = await hashPassword(password);
         // M7: firstUser 判定 + 插入包进同步事务——better-sqlite3 同步执行，事务内不被事件循环中断，

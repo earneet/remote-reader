@@ -1,4 +1,4 @@
-import { error, redirect } from '@sveltejs/kit';
+import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 import { db, schema } from '$server/db';
 import { verifyPassword, hashPassword } from '$server/auth';
@@ -30,17 +30,17 @@ export const actions: Actions = {
         const email = String(form.get('email') ?? '').trim().toLowerCase();
         const password = String(form.get('password') ?? '');
 
-        if (!email) error(400, '邮箱必填');
+        if (!email) return fail(400, { error: '邮箱必填' });
 
         // key 含 clientAddress + email：攻击者从其 IP 暴力某账号时，自己被限流；
         // 受害者从自身 IP 登录不受影响（防定向账号锁定 DoS）。
         const rl = checkRateLimit(`login:${getClientAddress()}:${email}`, LOGIN_RATE_LIMIT);
-        if (!rl.allowed) error(429, '登录尝试过于频繁，请稍后再试');
+        if (!rl.allowed) return fail(429, { error: '登录尝试过于频繁，请稍后再试' });
 
         const user = db.select().from(schema.users).where(eq(schema.users.email, email)).get();
         const ok = user ? await verifyPassword(password, user.passwordHash) : await verifyDummy(password);
         if (!user || !ok) {
-            error(401, '邮箱或密码错误');
+            return fail(401, { error: '邮箱或密码错误' });
         }
         setSessionCookie(cookies, { userId: user.id });
         redirect(302, '/');
