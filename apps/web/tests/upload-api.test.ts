@@ -5,22 +5,23 @@ import { generateApiToken, generateId, hashPassword } from '../src/lib/server/au
 // 413 测试需要小上限；限流放宽避免测试间互相触发——须在 import +server 前设
 process.env.MAX_UPLOAD_BYTES = '10';
 process.env.RATE_LIMIT_MAX = '10000';
+process.env.AUTH_FAIL_RATE_LIMIT_MAX = '3';
 const { POST } = await import('../src/routes/api/v1/documents/+server');
 
 let validAuth: string;
 
-function makeEvent(headers: Record<string, string>, body: unknown) {
+function makeEvent(headers: Record<string, string>, body: unknown, address = '127.0.0.1') {
     const request = new Request('http://localhost/api/v1/documents', {
         method: 'POST',
         headers: { 'content-type': 'application/json', ...headers },
         body: typeof body === 'string' ? body : JSON.stringify(body)
     });
-    return { request } as Parameters<typeof POST>[0];
+    return { request, getClientAddress: () => address } as Parameters<typeof POST>[0];
 }
 
-async function call(headers: Record<string, string>, body: unknown) {
+async function call(headers: Record<string, string>, body: unknown, address?: string) {
     try {
-        const r = await POST(makeEvent(headers, body));
+        const r = await POST(makeEvent(headers, body, address));
         return { status: r.status, body: await r.json().catch(() => null) };
     } catch (e) {
         return { status: (e as { status?: number })?.status ?? 500, body: (e as { body?: unknown })?.body ?? null };
@@ -97,4 +98,12 @@ test('幂等：同内容同 name 再传返回同 id', async () => {
     const a = await call({ authorization: validAuth }, { name: 'dup.md', content: 'same' });
     const b = await call({ authorization: validAuth }, { name: 'dup.md', content: 'same' });
     expect(a.body.id).toBe(b.body.id);
+});
+
+test('同 IP 连续无效 token 触发认证失败限流 → 429', async () => {
+    const ip = '9.9.9.9';
+    for (let i = 0; i < 3; i++) {
+        expect((await call({ authorization: 'Bearer rr_wrong' }, { name: 'a.md', content: 'x' }, ip)).status).toBe(401);
+    }
+    expect((await call({ authorization: 'Bearer rr_wrong' }, { name: 'a.md', content: 'x' }, ip)).status).toBe(429);
 });

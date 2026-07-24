@@ -40,3 +40,7 @@ test('FK 约束真实生效：插入孤儿 document 被拒', () => {
         ).run()
     ).toThrow();
 });
+
+test('busy_timeout 已设置（防并发写 SQLITE_BUSY 偶发 500）', () => {
+    expect(sqlite.pragma('busy_timeout', { simple: true })).toBeGreaterThan(0);
+});

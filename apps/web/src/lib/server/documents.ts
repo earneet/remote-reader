@@ -265,7 +265,10 @@ export function deleteNode(ownerId: string, id: string): void {
     let frontier: string[] = [id];
     let depth = 0;
     while (frontier.length > 0) {
-        if (depth++ > MAX_TREE_DEPTH) break;
+        if (depth++ > MAX_TREE_DEPTH) {
+            console.warn('[deleteNode] 子树深度超上限（可能 parentId 环或异常深树），仅删除已收集节点', ownerId, id);
+            break;
+        }
         const children = db.select({ id: schema.documents.id })
             .from(schema.documents)
             .where(and(

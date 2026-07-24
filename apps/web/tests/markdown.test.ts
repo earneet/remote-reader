@@ -26,9 +26,10 @@ test('代码块带 shiki 高亮', async () => {
     expect(html).toContain('shiki');
 });
 
-test('未预载语言的代码块安全降级（不抛错）', async () => {
+test('未预载语言的代码块安全降级（不抛错、内容不丢失）', async () => {
     const html = await renderMarkdown('```brainfuck\n++++++++[>++++++++<-]>\n```');
     expect(html).toContain('<pre>');
+    expect(html).toContain('++++++++');
 });
 
 test('mermaid fence 输出 language-mermaid class 供客户端识别', async () => {

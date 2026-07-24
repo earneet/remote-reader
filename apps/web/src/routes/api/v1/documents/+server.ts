@@ -11,10 +11,19 @@ const RATE_LIMIT = {
     max: envInt('RATE_LIMIT_MAX', 60),
     windowMs: envInt('RATE_LIMIT_WINDOW_MS', 60_000)
 };
+// 认证失败按 IP 限流：防无效 token 无限速枚举（token 256 位熵使暴力不可行，此为纵深防御）。
+const AUTH_FAIL_RATE_LIMIT = {
+    max: envInt('AUTH_FAIL_RATE_LIMIT_MAX', 30),
+    windowMs: envInt('RATE_LIMIT_WINDOW_MS', 60_000)
+};
 
-export const POST: RequestHandler = async ({ request }) => {
+export const POST: RequestHandler = async ({ request, getClientAddress }) => {
     const auth = authenticateApiToken(request.headers.get('authorization'));
-    if (!auth) error(401, 'invalid or missing api token');
+    if (!auth) {
+        const rl = checkRateLimit(`authfail:${getClientAddress()}`, AUTH_FAIL_RATE_LIMIT);
+        if (!rl.allowed) error(429, 'too many failed auth attempts, slow down');
+        error(401, 'invalid or missing api token');
+    }
 
     const rl = checkRateLimit(`upload:${auth.tokenId}`, RATE_LIMIT);
     if (!rl.allowed) error(429, 'rate limit exceeded');

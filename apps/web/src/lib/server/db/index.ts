@@ -60,6 +60,7 @@ sqlite.pragma('journal_mode = WAL');
 sqlite.pragma('synchronous = NORMAL');
 sqlite.pragma('temp_store = MEMORY');
 sqlite.pragma('foreign_keys = ON');
+sqlite.pragma('busy_timeout = 5000');
 
 // C1: 启动时 idempotent 建表 + 索引，全新部署（含 Docker 容器）无需手动 migrate 即可工作，
 // 避免首请求 500 (no such table)。dev 的 drizzle-kit migrate 仍可用；IF NOT EXISTS 保证两者共存不冲突。
