@@ -71,6 +71,8 @@ curl http://localhost:3000/api/health            # → {"ok":true}
 
 **一键卸载**：`sudo ./scripts/uninstall.sh`（默认保留数据；加 `--purge` 连数据一起删，删前二次确认。详见 [`scripts/README.md`](../scripts/README.md) 的「uninstall.sh」一节）。
 
+**升级**：`sudo ./scripts/update.sh` 一键原地升级已部署实例（保留配置 + 数据，不重新生成 `SESSION_SECRET`，失败自动回滚。详见 [`scripts/README.md`](../scripts/README.md) 的「update.sh」一节）。
+
 ---
 
 ## 3. 方式二：Docker Compose（推荐生产）
@@ -292,7 +294,7 @@ bun --filter remote-reader-web db:migrate    # 应用（生产在停服/维护�
 
 | 部署方式 | 升级步骤 |
 |---|---|
-| 方式一（systemd） | 见 [`scripts/README.md`](../scripts/README.md) 的「升级」一节。目前 install.sh 不自动覆盖已有 service，需手动同步代码 + rebuild 或先卸载再装 |
+| 方式一（systemd） | `sudo ./scripts/update.sh` 一键原地升级（保留配置 + 数据，失败自动回滚）。详见 [`scripts/README.md`](../scripts/README.md) 的「update.sh」一节 |
 | 方式二（Docker） | `git pull && docker compose up -d --build`（migration 在镜像构建期已执行） |
 | 方式三（手动） | `git pull && bun install && bun --filter remote-reader-web build` 后重启进程 |
 

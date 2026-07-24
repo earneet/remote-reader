@@ -1,11 +1,12 @@
 # scripts/ · 自动化脚本
 
-四个脚本，对应四类任务：
+五个脚本，对应五类任务：
 
 | 脚本 | 用途 | 何时用 | 调用方 |
 |---|---|---|---|
 | [`install.sh`](./install.sh) | 一键注册为 systemd 服务 | 全新部署 Ubuntu/Debian 服务器 | 部署者（root） |
 | [`uninstall.sh`](./uninstall.sh) | 一键卸载 systemd 服务（install 逆操作） | 停服 / 清代码 / 可选删数据 | 部署者（root） |
+| [`update.sh`](./update.sh) | 一键原地升级已部署服务（保留配置 + 数据） | 升级已部署的 systemd 实例 | 部署者（root） |
 | [`seed-token.mjs`](./seed-token.mjs) | 免 UI 为已存在用户生成 API token | 自动化初始化 / UI 不可用时 | 部署者 / 运维 |
 | [`e2e-check.sh`](./e2e-check.sh) | 端到端冒烟测试 | 升级后回归 / 验证部署是否正常 | 开发者 / CI |
 
@@ -158,13 +159,16 @@ sudo systemctl restart remote-reader
 
 ### 升级
 
+**推荐：一键原地升级**（保留配置 + 数据，不重新生成 `SESSION_SECRET`，已登录 session 不失效）：
+
 ```bash
-# 在项目源码目录
-git pull
-sudo ./scripts/install.sh                        # ⚠️ 当前脚本检测到同名 service 会中止
+# 在项目源码克隆根目录
+sudo ./scripts/update.sh
 ```
 
-升级流程目前**不会自动覆盖**已有 service（防止误操作）。两种升级方式：
+`update.sh` 从现有部署读参数（PORT/BASE_URL 等）→ git pull → 备份 → rsync 新码 → rebuild → 重启 → health 校验，失败自动回滚。详见「[update.sh](#updatesh--一键原地升级)」一节。
+
+> `install.sh` 检测到同名 service 会中止（防覆盖），所以**不要直接重跑 install.sh 升级**。下面两种手动方式是 `update.sh` 不可用时的后备：
 
 **A. 原地重建**（数据不丢）：
 
@@ -306,6 +310,62 @@ sudo ./scripts/uninstall.sh --yes           # 跳过所有确认（自动化）
 
 ---
 
+## update.sh · 一键原地升级（install.sh 的升级版）
+
+**用途**：把已用 `install.sh` 部署的 systemd 实例**原地升级**到最新代码，**保留全部配置与数据**。比"卸载 + 重装"更省事：不重新生成 `SESSION_SECRET`（已登录 session 不失效）、不碰 `/var/lib`（DB / 文档 / API token / 分享链接全保留）、不要求重传 `PORT`/`BASE_URL`。
+
+**做了什么**（每步 `[update]` 日志）：
+
+1. 前置检查（root、systemd、源码是 git 仓库且工作区干净、service/代码/env 齐备、node ≥ 22、bun、rsync、curl）
+2. 从 `/etc/remote-reader/env` 读 `PORT`/`BASE_URL` 等（无需重传）
+3. 打印读取到的参数 + 操作清单 + 升级前备份提示 → `y/N` 确认
+4. `git pull --ff-only` 拉取最新代码（只动克隆，不碰 `INSTALL_DIR`）
+5. **整目录备份** `/opt/remote-reader` → `/opt/remote-reader.bak`（含 build + node_modules，兜底 better-sqlite3 ABI 坑）
+6. `rsync -a --delete` 新码到 `INSTALL_DIR`（排除 data / node_modules / build / .git / .env）
+7. `chown root:root` + `bun install` + `bun --filter remote-reader-web build` + 剥离 devDeps（与 install.sh 同 build 链路）
+8. `systemctl restart` → 轮询 `/api/health`（最多 30s）
+9. **health 不过则自动回滚** `INSTALL_DIR` ← `.bak` + 重启 + 告警；通过则清理 `.bak` + 总结
+
+### 基本用法
+
+```bash
+sudo ./scripts/update.sh              # 一条命令原地升级
+sudo ./scripts/update.sh -y           # 跳过确认（自动化）
+```
+
+### 参数
+
+| 参数 / 变量 | 默认 | 说明 |
+|---|---|---|
+| `-y` / `--yes` | 关 | 跳过确认 |
+| `-h` / `--help` | — | 显示帮助 |
+| `INSTALL_DIR` | `/opt/remote-reader` | 代码目录（须与安装时一致） |
+| `SERVICE_NAME` | `remote-reader` | unit 名（多实例须与安装时一致） |
+| `SERVICE_USER` | `remote-reader` | 运行用户（仅展示，升级不改其归属） |
+
+`PORT` / `BASE_URL` 等运行参数**从现有部署的 env 读取**，不接受命令行/环境变量覆盖（升级不应改配置）。
+
+### 安全设计
+
+- **配置与数据零改动**：不写 `env`、不碰 `/var/lib`、不重新生成 `SESSION_SECRET`（Web 不用重登）。
+- **失败必回滚**：rebuild 前整目录备份；任何中途失败（build 报错等）或 health 不过，EXIT trap 自动 `mv` 还原 `INSTALL_DIR` 并重启，绝不让服务停在起不来的状态。
+- **整目录备份**（而非只备份 `build/`）：better-sqlite3 的 `.node` 在 `node_modules` 里，bun 重编译可能产出与生产 node ABI 不匹配的二进制，只备份 `build` 不足以回滚。
+- **health 校验**：生产跑 `node apps/web/build/index.js`，ABI 不匹配只在此时暴露；build 通过 ≠ 生产可跑。
+- **拒绝危险路径**：`INSTALL_DIR` 为空或 `/` 时中止（回滚要 `rm -rf INSTALL_DIR`）。
+- **git 工作区须干净**：脏工作区 `git pull` 会冲突，脚本先检查再拉。
+- **中断可识别**：上次升级中断留下的 `.bak` 会被检测到并拒绝盲跑，提示人工确认。
+- **幂等**：成功后自动清理 `.bak`，重复跑不报错；`git pull` / `systemctl restart` 本身幂等。
+
+### 已知坑（实测踩过，脚本已处理）
+
+| 坑 | 对策 |
+|---|---|
+| `sudo` 找不到 bun（secure_path 不含 `~/.bun/bin`） | 从 `SUDO_USER` 取 home，加进 `PATH` |
+| sudo 下 `~/.bun-install` 不可写 | `export BUN_INSTALL_CACHE_DIR=/tmp/.bun-cache` |
+| bun 重编译 better-sqlite3 产出与 node 22（ABI 127）不匹配的 `.node` | 整目录备份 + health 校验 + 失败回滚 |
+
+---
+
 ## seed-token.mjs · 免 UI 生成 API token
 
 **用途**：跳过 Web UI，直接写 SQLite 为某已注册用户生成一个 API token。适合首次部署后用脚本快速拿到 token 配置 MCP 桥。
@@ -363,6 +423,6 @@ API_TOKEN=rr_xxx BASE_URL=http://localhost:3000 ./scripts/e2e-check.sh
 
 ## 开发提示
 
-- 三个脚本都不依赖项目运行时（除了 seed-token.mjs 需要 better-sqlite3），可以独立分发。
+- 除 `seed-token.mjs` 需要 better-sqlite3 外，其余 bash 脚本都不依赖项目运行时，可以独立分发。
 - install.sh 的逻辑都按"前可预测、后可追溯"设计：每步有 `[install]` log 前缀，失败不静默。
 - 想加新脚本时保持同样风格：set -euo pipefail、颜色 log 函数、前置检查、可参数化。
