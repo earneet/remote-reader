@@ -40,14 +40,31 @@ function formEvent(form: Record<string, string>, address = `ip-${Math.random()}`
     } as any;
 }
 
-async function register(form: Record<string, string>) {
-    const evt = formEvent(form);
+// action 失败用 return fail(status)（不抛，返回 ActionFailure 带 .status），
+// 成功用 redirect(status)（抛 Redirect 带 .status）。统一同时看返回值与抛出。
+async function runAction(
+    fn: (evt: any) => unknown,
+    form: Record<string, string>,
+    address = `ip-${Math.random()}`
+) {
+    const evt = formEvent(form, address);
     try {
-        await registerMod.actions.default(evt);
-        return { status: 302, cookies: evt.cookies };
+        const result = await fn(evt);
+        if (result && typeof (result as { status?: number }).status === 'number') {
+            return { status: (result as { status: number }).status, cookies: evt.cookies };
+        }
+        return { status: 200, cookies: evt.cookies };
     } catch (e) {
         return { status: (e as { status?: number })?.status ?? 500, cookies: evt.cookies };
     }
+}
+
+function register(form: Record<string, string>, address?: string) {
+    return runAction((evt) => registerMod.actions.default(evt), form, address);
+}
+
+function login(form: Record<string, string>, address?: string) {
+    return runAction((evt) => loginMod.actions.default(evt), form, address);
 }
 
 test('register 错 invite → 403', async () => {
@@ -89,32 +106,18 @@ test('register 重复邮箱 → 409', async () => {
 
 test('login 错密码 → 401', async () => {
     await register({ email: 'u@b.com', password: 'password1', invite_code: 'testinvite' });
-    try {
-        await loginMod.actions.default(formEvent({ email: 'u@b.com', password: 'wrong' }, 'lip1'));
-        throw new Error('should have thrown');
-    } catch (e) {
-        expect((e as { status?: number }).status).toBe(401);
-    }
+    const r = await login({ email: 'u@b.com', password: 'wrong' }, 'lip1');
+    expect(r.status).toBe(401);
 });
 
 test('login 用户不存在 → 401', async () => {
-    try {
-        await loginMod.actions.default(formEvent({ email: 'ghost@b.com', password: 'whatever' }, 'lip2'));
-        throw new Error('should have thrown');
-    } catch (e) {
-        expect((e as { status?: number }).status).toBe(401);
-    }
+    const r = await login({ email: 'ghost@b.com', password: 'whatever' }, 'lip2');
+    expect(r.status).toBe(401);
 });
 
 test('login 成功：设 session cookie 并 redirect 302', async () => {
     await register({ email: 'ok@b.com', password: 'password1', invite_code: 'testinvite' });
-    const evt = formEvent({ email: 'ok@b.com', password: 'password1' }, 'lip3');
-    let status = 0;
-    try {
-        await loginMod.actions.default(evt);
-    } catch (e) {
-        status = (e as { status?: number }).status ?? 0;
-    }
-    expect(status).toBe(302);
-    expect(evt.cookies._store['session']).toBeTruthy();
+    const r = await login({ email: 'ok@b.com', password: 'password1' }, 'lip3');
+    expect(r.status).toBe(302);
+    expect(r.cookies._store['session']).toBeTruthy();
 });

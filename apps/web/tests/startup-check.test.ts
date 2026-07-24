@@ -49,6 +49,37 @@ test('prod 缺 INITIAL_INVITE_CODE 抛', () => {
 });
 
 test('prod 强配置通过', () => {
-    prod({ SESSION_SECRET: 'a'.repeat(64), INITIAL_INVITE_CODE: 'goodcode123' });
+    prod({
+        SESSION_SECRET: 'a'.repeat(64),
+        INITIAL_INVITE_CODE: 'goodcode123',
+        BASE_URL: 'https://reader.example.com'
+    });
     expect(() => validateStartupConfig()).not.toThrow();
+});
+
+test('prod 缺 BASE_URL 抛', () => {
+    prod({
+        SESSION_SECRET: 'a'.repeat(64),
+        INITIAL_INVITE_CODE: 'goodcode123',
+        BASE_URL: undefined
+    });
+    expect(() => validateStartupConfig()).toThrow(/BASE_URL/);
+});
+
+test('prod localhost BASE_URL 抛', () => {
+    prod({
+        SESSION_SECRET: 'a'.repeat(64),
+        INITIAL_INVITE_CODE: 'goodcode123',
+        BASE_URL: 'http://localhost:5173'
+    });
+    expect(() => validateStartupConfig()).toThrow(/BASE_URL/);
+});
+
+test('prod 127.0.0.1 BASE_URL 抛', () => {
+    prod({
+        SESSION_SECRET: 'a'.repeat(64),
+        INITIAL_INVITE_CODE: 'goodcode123',
+        BASE_URL: 'http://127.0.0.1:3000'
+    });
+    expect(() => validateStartupConfig()).toThrow(/BASE_URL/);
 });
