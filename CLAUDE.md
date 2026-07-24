@@ -8,13 +8,15 @@ Remote Reader 让远程工作的 Agent 通过 MCP 上传 Markdown 文档，用�
 
 ## 当前状态
 
-**子计划 1/2/3 全部已实现并 merge `master`**：Web 上传 API（`POST /api/v1/documents`，token 认证 + content_hash 幂等）+ 免登录查看页 `/s/<token>`（markdown-it + Shiki SSR + Mermaid + KaTeX）+ 注册/登录/session/logout；本地 MCP 桥（`apps/mcp-bridge`，stdio，`upload_document` 工具）；文件管理器（双栏列表/预览/删除）+ `/d/<id>` owner 查看页 + API token 管理 UI（`/settings/tokens`，创建/撤销 + 一次性 reveal）+ 分享 token 管理 UI（`/settings/shares`，撤销）；速率限制（上传/登录，见 `apps/web/src/lib/server/ratelimit.ts`）；Docker（多阶段 Dockerfile + docker-compose，非 root 运行）。159 单测 + svelte-check 0/0 + 桥 tsc 0 错 + Docker 构建冒烟全过。
+**子计划 1/2/3 全部已实现并 merge `master`**：Web 上传 API（`POST /api/v1/documents`，token 认证 + content_hash 幂等）+ 免登录查看页 `/s/<token>`（markdown-it + Shiki SSR + Mermaid + KaTeX）+ 注册/登录/session/logout；本地 MCP 桥（`apps/mcp-bridge`，stdio，`upload_document` 工具）；文件管理器（双栏列表/预览/删除）+ `/d/<id>` owner 查看页 + API token 管理 UI（`/settings/tokens`，创建/撤销 + 一次性 reveal）+ 分享 token 管理 UI（`/settings/shares`，撤销）；速率限制（上传/登录，见 `apps/web/src/lib/server/ratelimit.ts`）；Docker（多阶段 Dockerfile + docker-compose，非 root 运行）。200 单测 + svelte-check 0/0 + 桥 tsc 0 错 + Docker 构建冒烟全过。
 
 - 子计划 1：✅ 完成（`docs/superpowers/plans/2026-07-18-web-core.md`）
 - 子计划 2：✅ 完成（`docs/superpowers/specs/2026-07-19-mcp-bridge-design.md` + `docs/superpowers/plans/2026-07-19-mcp-bridge.md`）
 - 子计划 3：✅ 完成（`docs/superpowers/specs/2026-07-19-sub3-management-ui-docker-design.md` + `docs/superpowers/plans/2026-07-19-sub3-management-ui-docker.md`：管理 UI + md 增强 + Docker）
 
 **安全审核修复（2026-07-19，多 Agent 审核 + 3-lens 交叉复核）**：数据完整性（C1 运行时建表 / H1-H2 写盘原子 / H3 `foreign_keys=ON` / M9 重名校验）、认证加固（H4 invite fail-fast + 注册限流 / M3 SESSION_SECRET 强度 / M7 firstUser 事务 / 登录时序恒定）、客户端安全（H6 CSP report-only / H7 referrer no-referrer / M1 cache-control no-store）、性能（M12 索引 / M13 markdown 单例+缓存 / ratelimit Map 回收）、部署（M14 BASE_URL 不硬编码 / M15 /api/health healthcheck）、代码质量（删死代码 / 单源 env / 去 any）。测试 102→159。
+
+**全项目审查 + 修复（2026-07-24，6-Agent 并行审查 + 逐条实测复核）**：真问题 2 个——auth-routes 测试 helper 未适配 `fail()` 语义（`cd8384e` 重设计回归致 7 用例断言失效）、`BASE_URL` 生产默认 localhost 无 fail-fast（M14 半修，已加 startup-check 非 localhost 校验）；加固——db `busy_timeout` 显式化（核验 better-sqlite3 默认已 5000ms，原"无 busy_timeout"系误判）、上传 API 认证失败按 IP 限流（`AUTH_FAIL_RATE_LIMIT_MAX` 默认 30）、`docker-entrypoint.sh` 改 `#!/bin/bash`+`set -euo pipefail`；补 session/`/d/[id]`/settings/logout/文件管理器 5 处测试盲点。第二阶段复核纠正 agent 幻觉 3 处（CSP"不完整"/M7"偏差"/crypto·auth·apitoken"无测试"）+ TDD 证伪"高优先"误判 3 处（busy_timeout/markdown 丢内容/deleteNode throw）。测试 159→200。
 
 **下一步（低优先）**：spec §12 Phase 3 扩展（远程 MCP server / 多文档批量上传等），详见 spec §15.3 待做；CSP 由 report-only 转 enforcing（需线上观察 mermaid/katex 违规）；session 服务端撤销表 / 审计日志（设计级，未做）。
 
