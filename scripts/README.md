@@ -1,10 +1,11 @@
 # scripts/ · 自动化脚本
 
-三个脚本，对应三类任务：
+四个脚本，对应四类任务：
 
 | 脚本 | 用途 | 何时用 | 调用方 |
 |---|---|---|---|
 | [`install.sh`](./install.sh) | 一键注册为 systemd 服务 | 全新部署 Ubuntu/Debian 服务器 | 部署者（root） |
+| [`uninstall.sh`](./uninstall.sh) | 一键卸载 systemd 服务（install 逆操作） | 停服 / 清代码 / 可选删数据 | 部署者（root） |
 | [`seed-token.mjs`](./seed-token.mjs) | 免 UI 为已存在用户生成 API token | 自动化初始化 / UI 不可用时 | 部署者 / 运维 |
 | [`e2e-check.sh`](./e2e-check.sh) | 端到端冒烟测试 | 升级后回归 / 验证部署是否正常 | 开发者 / CI |
 
@@ -248,6 +249,60 @@ A: 多网卡机器 `hostname -I` 返回多个 IP，脚本取第一个。如果�
 
 **Q: 想看脚本会做什么但不真跑？**
 A: 当前没有 dry-run 模式。可以先 `bash -n scripts/install.sh` 看语法，再 `less scripts/install.sh` 通读。所有写操作都在前面有 log 输出，跑到 `y/N` 确认时按 `N` 中止即可。
+
+---
+
+## uninstall.sh · 一键卸载（install.sh 的逆操作）
+
+**用途**：把 `install.sh` 装上的 systemd 服务、代码、配置清除干净；**数据默认保留**，可选用 `--purge` 连数据一起删。
+
+**做了什么**（每步 `[uninstall]` 日志，失败不静默）：
+
+1. 前置检查（root、systemd、拒绝 `DATA_DIR`/`INSTALL_DIR` 为空或 `/`）
+2. 存在性检测：unit / 代码 / 数据 **全无残留 → 友好退出**（幂等，不报错）
+3. 读旧 `PORT`（若 env 还在）→ 结尾精确提示 ufw
+4. 打印操作清单 + 主确认（`-y` 跳过）；`--purge` 模式删数据前**二次确认**
+5. 执行清理（每步容错，半残状态也能清干净）：
+   - `systemctl stop` + `disable`
+   - 删 unit → `daemon-reload` + `reset-failed`
+   - `rm -rf` 代码目录 + 配置目录
+   - **仅 `--purge`**：`rm -rf` 数据目录
+   - `userdel`（**永不加 `-r`**，见下）
+6. ufw 启用则提示（只读不删）
+
+### 基本用法
+
+```bash
+sudo ./scripts/uninstall.sh                 # 停服 + 删代码/配置，保留数据
+sudo ./scripts/uninstall.sh --purge         # 连数据一起删（删前二次确认）
+sudo ./scripts/uninstall.sh --yes           # 跳过所有确认（自动化）
+```
+
+### 参数
+
+| 参数 / 变量 | 默认 | 说明 |
+|---|---|---|
+| `--purge` | 关 | 连数据目录一起永久删除（删前单独确认） |
+| `-y` / `--yes` | 关 | 跳过所有确认 |
+| `-h` / `--help` | — | 显示帮助 |
+| `SERVICE_NAME` | `remote-reader` | unit 名（多实例须与安装时一致） |
+| `SERVICE_USER` | `remote-reader` | 运行用户 |
+| `INSTALL_DIR` | `/opt/remote-reader` | 代码目录 |
+| `DATA_DIR` | `/var/lib/remote-reader` | 数据目录（保留/删除目标） |
+
+### 安全设计
+
+- **默认保留数据**：破坏性操作不作为默认，需显式 `--purge`。
+- **单一数据删除入口**：数据只在 `--purge` 分支删一处；`userdel` 永不加 `-r`（`install.sh` 把用户 home 指向 `DATA_DIR`，`-r` 会顺带删数据）。
+- **双重确认**：`--purge` 删数据前再问一次；取消则降级为保留数据继续。
+- **拒绝危险路径**：`DATA_DIR`/`INSTALL_DIR` 为空或 `/` 时中止，防 `rm -rf /` 类事故。
+- **幂等**：未安装直接友好退出；半残状态（如服务在跑但 unit 已删）也能清干净。
+- **不动 ufw**：防火墙规则只提示不自动删（`install.sh` 当初也没动）。
+
+### 卸载后
+
+- 默认保留 `/var/lib/remote-reader/`（DB + 文档），手动 `sudo rm -rf` 即可彻底清掉。
+- `/etc/remote-reader/env` 含 `SESSION_SECRET`，卸载即删；重装会生成新密钥，**旧 session 全部失效**。要保 session，卸载前备份该值，重装后写回。
 
 ---
 

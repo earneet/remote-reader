@@ -69,6 +69,8 @@ curl http://localhost:3000/api/health            # → {"ok":true}
 
 参数化（端口 / 自定义路径 / 多实例）、预期输出、安全加固清单、升级、卸载、FAQ 等 → **见 [`scripts/README.md`](../scripts/README.md)**。
 
+**一键卸载**：`sudo ./scripts/uninstall.sh`（默认保留数据；加 `--purge` 连数据一起删，删前二次确认。详见 [`scripts/README.md`](../scripts/README.md) 的「uninstall.sh」一节）。
+
 ---
 
 ## 3. 方式二：Docker Compose（推荐生产）
