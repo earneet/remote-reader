@@ -27,8 +27,10 @@
 </div>
 {/if}
 
-<form method="POST" action="?/create" use:enhance={() => async ({ result }) => {
-    if (result.type === 'success') { dismissed = false; copied = false; await invalidateAll(); }
+<!-- 必须 await update()：enhance 自定义回调不调它，applyAction 就不执行 → form prop 不更新，
+     一次性明文 reveal（form?.plaintext）永不显示。invalidateAll 只刷新 data，不写 form。 -->
+<form method="POST" action="?/create" use:enhance={() => async ({ result, update }) => {
+    if (result.type === 'success') { dismissed = false; copied = false; await update(); }
 }}>
     <input name="name" placeholder="如 claude-code-laptop" required>
     <button>生成新 token</button>
