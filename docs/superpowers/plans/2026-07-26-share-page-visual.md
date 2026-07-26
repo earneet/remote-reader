@@ -4,13 +4,13 @@
 
 **Goal:** 把免登录查看页 `/s/<token>` 从朴素 GitHub 浅色升级为「精修 GitHub」视觉（浅灰底 + 白色文档卡 + 柔和阴影 + 圆角），新增深色模式、修复手机偏左布局 bug、Mermaid 浮卡（缩放/拖动/全屏）、桌面加宽到 960px、代码块等宽并关连字（ASCII flow 图友好）。
 
-**Architecture:** CSS 变量（`--rr-*`）驱动深浅双态，`<html data-theme>` 属性切换；可测交互逻辑抽成纯函数（`theme.ts` / `mermaid-zoom.ts`）走 vitest TDD；markdown SSR 端给 `table` 包 overflow 壳防手机撑破；mermaid 从 `MarkdownViewer` 拆为独立 `MermaidViewer` 组件（浮卡 + 缩放 + 拖动 + 全屏 + 主题跟随）；`app.html` 内联防 FOUC 脚本。
+**Architecture:** CSS 变量（`--rr-*`）驱动深浅双态，但**变量/body 背景/`color-scheme` 全部 scope 到 `/s/[token]/+page.svelte` 的 `.share-root` 容器**（绝不放进全站根布局 `+layout.svelte`——否则深色态会污染 `/`、`/login`、`/settings`、`/d/[id]` 等非范围路由，致深底浅字不可读）；`MarkdownViewer` 的 `var()` 全带浅色 fallback，让 `/d/[id]` 共用同一组件也零影响；`<html data-theme>` 切换 + `app.html` 内联防 FOUC 脚本（带 `nonce` 满足 CSP）；可测逻辑抽纯函数（`theme.ts`/`mermaid-zoom.ts`）走 vitest TDD；markdown SSR 端 `table` 包 overflow 壳；mermaid 拆 `MermaidViewer`（浮卡 + zoom 缩放 + 拖动 + 全屏 + 主题跟随 + `securityLevel:'strict'` + listener 清理）。
 
 **Tech Stack:** SvelteKit（Svelte 5 runes）/ TypeScript / markdown-it / Shiki / mermaid 11 / vitest（node 运行时，**无 svelte 组件测试框架**）。
 
-**Spec:** `docs/superpowers/specs/2026-07-26-share-page-visual-design.md`
+**Spec:** `docs/superpowers/specs/2026-07-26-share-page-visual-design.md`（v2，含交叉审查修复）
 
-**测试约束说明：** 项目无 `@testing-library/svelte`，无法对 `.svelte` 组件做单测。故 Task 1/2/3 走严格 TDD（纯函数 + SSR 输出可测）；Task 4-8（CSS 变量、组件、页面）按「实现 → `svelte-check` 通过 → commit」，UI 视觉/交互在 Task 9 手动验证。
+**测试约束说明：** 项目无 `@testing-library/svelte`，无法对 `.svelte` 组件做单测。故 Task 1/2/3 走严格 TDD（纯函数 + SSR 输出可测）；Task 4-8（CSS、组件、页面）按「实现 → `svelte-check` 通过 → commit」，UI 视觉/交互在 Task 9 手动验证。
 
 ---
 
@@ -18,18 +18,19 @@
 
 - **Create** `apps/web/src/lib/shared/theme.ts` — 主题解析纯函数（`resolveTheme` / `toggleTheme` / `THEME_STORAGE_KEY` / `Theme`）
 - **Create** `apps/web/src/lib/shared/mermaid-zoom.ts` — 缩放计算纯函数（`clampZoom` / `nextZoom` / `formatZoom` / 常量）
-- **Create** `apps/web/src/lib/components/ThemeToggle.svelte` — 深浅切换按钮
-- **Create** `apps/web/src/lib/components/MermaidViewer.svelte` — mermaid 浮卡（缩放/拖动/全屏/主题跟随）
+- **Create** `apps/web/src/lib/components/ThemeToggle.svelte` — 深浅切换按钮（切 `<html data-theme>` + 写 localStorage）
+- **Create** `apps/web/src/lib/components/MermaidViewer.svelte` — mermaid 浮卡（zoom 缩放/拖动/全屏/主题跟随/`securityLevel:'strict'`/listener 清理）
 - **Modify** `apps/web/src/lib/server/markdown.ts` — `table_open`/`table_close` 包 `<div class="rr-table-wrap">`
-- **Modify** `apps/web/src/lib/components/MarkdownViewer.svelte` — 颜色换 `var()`、宽度 960、防溢出、等宽关连字、移除 mermaid（接 `MermaidViewer`）
-- **Modify** `apps/web/src/routes/+layout.svelte` — `:global()` CSS 变量 token（浅/深）+ body 背景
-- **Modify** `apps/web/src/app.html` — `<head>` 内联防 FOUC 脚本
-- **Modify** `apps/web/src/routes/s/[token]/+page.svelte` — 顶栏（返回 + ThemeToggle）
+- **Modify** `apps/web/src/lib/components/MarkdownViewer.svelte` — 颜色换 `var(--rr-*, 浅色fallback)`；宽度 960；防溢出；等宽关连字；移除 mermaid（接 `MermaidViewer`）
+- **Modify** `apps/web/src/app.html` — `<head>` 内联防 FOUC 脚本（带 `nonce="%sveltekit.nonce%"`）
+- **Modify** `apps/web/src/routes/s/[token]/+page.svelte` — **新增 `.share-root` 根容器**（承载变量浅/深 + body 背景 + color-scheme）+ 顶栏 + ThemeToggle
 - **Test** `apps/web/tests/theme.test.ts`（新）
 - **Test** `apps/web/tests/mermaid-zoom.test.ts`（新）
 - **Test** `apps/web/tests/markdown.test.ts`（加用例）
 
-> Alias 约定：`$lib` → `src/lib`（SvelteKit 默认）、`$components` → `src/lib/components`、`$server` → `src/lib/server`。**注意 `$shared` 已被 `packages/shared/src` 占用，本计划的纯函数用 `$lib/shared/`。**
+> Alias 约定：`$lib` → `src/lib`（SvelteKit 默认）、`$components` → `src/lib/components`、`$server` → `src/lib/server`。**`$shared` 已被 `packages/shared/src` 占用，本计划纯函数用 `$lib/shared/`。**
+>
+> **不动文件：** `apps/web/src/routes/+layout.svelte`（深色变量 scope 到 `.share-root`，不污染全站）、`apps/web/src/routes/s/[token]/+page.server.ts`。
 
 ---
 
@@ -253,10 +254,10 @@ Expected: FAIL — 输出含 `<table>` 但不含 `<div class="rr-table-wrap">`
 Run: `bun run test apps/web/tests/markdown.test.ts`
 Expected: PASS（含新用例 + 原有用例；原有「渲染表格（GFM）」断言 `toContain('<table>')` 仍成立，因为包壳后仍含 `<table>`）
 
-- [ ] **Step 5: 回归 share-view + commit**
+- [ ] **Step 5: 回归 share-view + d-view + commit**
 
-Run: `bun run test apps/web/tests/share-view.test.ts`
-Expected: PASS（`+page.server.ts` 的 `load` 返回 html 含 `<h1>`，table 包壳不影响）
+Run: `bun run test apps/web/tests/share-view.test.ts apps/web/tests/d-view.test.ts`
+Expected: PASS（table 包壳改的是共享渲染层，`/d/[id]` 也走 `renderMarkdown`，spec §6 要求两处回归；两测试断言 `<h1>` 不受影响）
 
 ```bash
 git add apps/web/src/lib/server/markdown.ts apps/web/tests/markdown.test.ts
@@ -265,61 +266,21 @@ git commit -m "feat(web): markdown 表格 SSR 包 overflow 壳（修手机撑破
 
 ---
 
-## Task 4: CSS 变量 token（浅/深）+ body 背景 + 防 FOUC 脚本
+## Task 4: app.html 防 FOUC 脚本（带 nonce 满足 CSP）
 
-定义全局 CSS 变量与深色态覆盖，并在 `app.html` 注入防 FOUC 同步脚本（首屏前据 localStorage + `prefers-color-scheme` 设 `data-theme`）。
-
-本 Task 只定义变量与设 `data-theme`，**不应用 body 背景**（避免 Task 7 前出现"深色态正文不可读"的破坏性中间态）；body 背景在 Task 7 与 `MarkdownViewer` 换 `var()` 一起加，保证浅深同时协调。
+在 `app.html` `<head>` 注入防 FOUC 同步脚本——首屏前据 localStorage + `prefers-color-scheme` 设 `<html data-theme>`，让 `.share-root`（Task 8）首屏即正确着色。**必须带 `nonce="%sveltekit.nonce%"`**：项目 CSP（`svelte.config.js`，report-only）`script-src` 不含 `'unsafe-inline'`、未开 nonce/hash 模式，SvelteKit 不会替 app.html 手写脚本自动加 nonce，故必须显式用占位符。
 
 **Files:**
-- Modify: `apps/web/src/routes/+layout.svelte`
 - Modify: `apps/web/src/app.html`
 
-- [ ] **Step 1: 改 `+layout.svelte` 注入全局变量**
+> **本 Task 只动 app.html。** 深色变量/body 背景/color-scheme **不**放 `+layout.svelte`（避免污染全站），统一放 Task 8 的 `.share-root`（/s/ 专属）。
 
-打开 `apps/web/src/routes/+layout.svelte`，在 `<style>` 块的最前面（`.topnav` 之前）插入全局 token 定义与 body 背景：
-
-```css
-    :global(:root) {
-        --rr-bg: #f6f8fa;
-        --rr-card-bg: #ffffff;
-        --rr-card-border: transparent;
-        --rr-text: #1f2328;
-        --rr-text-muted: #57606a;
-        --rr-link: #0969da;
-        --rr-border: #d0d7de;
-        --rr-border-soft: #eaecef;
-        --rr-inline-code-bg: #eff2f5;
-        --rr-inline-code-text: #bc4b00;
-        --rr-code-bg: #1e2228;
-        --rr-shadow: 0 1px 3px rgba(0,0,0,.05), 0 10px 28px rgba(0,0,0,.06);
-        --rr-toggle-bg: #eaeef1;
-        color-scheme: light;
-    }
-    :global([data-theme="dark"]) {
-        --rr-bg: #0d1117;
-        --rr-card-bg: #161b22;
-        --rr-card-border: #21262d;
-        --rr-text: #c9d1d9;
-        --rr-text-muted: #8b949e;
-        --rr-link: #58a6ff;
-        --rr-border: #21262d;
-        --rr-border-soft: #21262d;
-        --rr-inline-code-bg: rgba(110,118,129,.28);
-        --rr-inline-code-text: #e3b341;
-        --rr-code-bg: #0d1117;
-        --rr-shadow: 0 10px 28px rgba(0,0,0,.45);
-        --rr-toggle-bg: #21262d;
-        color-scheme: dark;
-    }
-```
-
-- [ ] **Step 2: 改 `app.html` 注入防 FOUC 脚本**
+- [ ] **Step 1: 改 app.html 注入脚本**
 
 打开 `apps/web/src/app.html`，在 `<head>` 内、`%sveltekit.head%` 之前插入：
 
 ```html
-        <script>
+        <script nonce="%sveltekit.nonce%">
             (function () {
                 try {
                     var t = localStorage.getItem('rr-theme');
@@ -334,25 +295,25 @@ git commit -m "feat(web): markdown 表格 SSR 包 overflow 壳（修手机撑破
         </script>
 ```
 
-（逻辑与 `theme.ts` 的 `resolveTheme` 一致；此处必须内联自包含——模块在客户端 hydrate 后才跑，太晚会闪白。）
+（逻辑与 `theme.ts` 的 `resolveTheme` 一致；必须内联自包含——模块在客户端 hydrate 后才跑，太晚会闪白。）
 
-- [ ] **Step 3: 类型检查**
+- [ ] **Step 2: 类型检查**
 
 Run: `bun --filter remote-reader-web check`
 Expected: 0 error / 0 warning
 
-- [ ] **Step 4: commit**
+- [ ] **Step 3: commit**
 
 ```bash
-git add apps/web/src/routes/+layout.svelte apps/web/src/app.html
-git commit -m "feat(web): CSS 变量深浅 token + body 背景 + 防 FOUC 脚本"
+git add apps/web/src/app.html
+git commit -m "feat(web): app.html 防 FOUC 脚本（带 nonce 满足 CSP）"
 ```
 
 ---
 
 ## Task 5: ThemeToggle 深浅切换按钮组件
 
-按钮显示当前态图标（浅色显月亮 / 深色显太阳），点击切换 `data-theme` 并写 `localStorage`。
+按钮显示当前态图标（浅色显月亮 / 深色显太阳），点击切换 `<html data-theme>` 并写 `localStorage`。
 
 **Files:**
 - Create: `apps/web/src/lib/components/ThemeToggle.svelte`
@@ -421,9 +382,9 @@ git commit -m "feat(web): CSS 变量深浅 token + body 背景 + 防 FOUC 脚本
         width: 32px;
         height: 32px;
         border-radius: 8px;
-        border: 1px solid var(--rr-border);
-        background: var(--rr-toggle-bg);
-        color: var(--rr-text-muted);
+        border: 1px solid var(--rr-border, #d0d7de);
+        background: var(--rr-toggle-bg, #eaeef1);
+        color: var(--rr-text-muted, #57606a);
         display: inline-flex;
         align-items: center;
         justify-content: center;
@@ -431,10 +392,12 @@ git commit -m "feat(web): CSS 变量深浅 token + body 背景 + 防 FOUC 脚本
         padding: 0;
     }
     .rr-theme-toggle:hover {
-        color: var(--rr-text);
+        color: var(--rr-text, #1f2328);
     }
 </style>
 ```
+
+> ThemeToggle 的 `var()` 也带 fallback——它只在 `.share-root` 内渲染（Task 8），fallback 是双保险。
 
 - [ ] **Step 2: 类型检查**
 
@@ -450,9 +413,9 @@ git commit -m "feat(web): ThemeToggle 深浅切换按钮组件"
 
 ---
 
-## Task 6: MermaidViewer 浮卡组件（缩放 / 拖动 / 全屏 / 主题跟随）
+## Task 6: MermaidViewer 浮卡组件（zoom 缩放 / 拖动 / 全屏 / 主题跟随 / listener 清理 / securityLevel:strict）
 
-把原 `MarkdownViewer` 里的 `enhanceMermaid` 迁出并升级：mermaid 块渲染为独立浮卡，带 `−` / 百分比 / `+` / `⤢ 全屏`，缩放用 CSS `zoom`（影响布局 → 溢出可拖动滚动），主题变化时按新主题重渲。
+把原 `MarkdownViewer` 里的 `enhanceMermaid` 迁出并升级：mermaid 块渲染为独立浮卡，带 `−` / 百分比 / `+` / `⤢ 全屏`，缩放用 CSS `zoom`（影响布局 → 溢出可拖动滚动；`transform:scale` 不影响布局会导致拖动失效），主题变化时按新主题重渲。`loadMermaid` 显式 `securityLevel:'strict'`（防御深度）；拖动 listener 在 `onDestroy` 清理（防内存泄漏）。
 
 **Files:**
 - Create: `apps/web/src/lib/components/MermaidViewer.svelte`
@@ -470,6 +433,7 @@ git commit -m "feat(web): ThemeToggle 深浅切换按钮组件"
 
     let fullscreen = $state<{ svg: string; zoom: number } | null>(null);
     let themeObserver: MutationObserver | null = null;
+    let cleanups: Array<() => void> = [];
 
     function currentTheme(): 'light' | 'dark' {
         return document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
@@ -477,8 +441,12 @@ git commit -m "feat(web): ThemeToggle 深浅切换按钮组件"
 
     async function loadMermaid() {
         const m = (await import('mermaid')).default;
+        // securityLevel:'strict' 是 mermaid 11 默认值，此处显式声明：
+        // 防御深度——与 markdown-it html:false、CSP 同属多层防线，防止未来误改为 loose
+        // 致下方 canvas.innerHTML / {@html} 的 SVG 注入变成 XSS 面。
         m.initialize({
             startOnLoad: false,
+            securityLevel: 'strict',
             theme: currentTheme() === 'dark' ? 'dark' : 'default'
         });
         return m;
@@ -571,7 +539,7 @@ git commit -m "feat(web): ThemeToggle 深浅切换按钮组件"
         let sy = 0;
         let sl = 0;
         let st = 0;
-        canvas.addEventListener('mousedown', (e: MouseEvent) => {
+        const onDown = (e: MouseEvent) => {
             const overflowX = canvas.scrollWidth > canvas.clientWidth;
             const overflowY = canvas.scrollHeight > canvas.clientHeight;
             if (!overflowX && !overflowY) return;
@@ -582,7 +550,7 @@ git commit -m "feat(web): ThemeToggle 深浅切换按钮组件"
             st = canvas.scrollTop;
             canvas.classList.add('dragging');
             e.preventDefault();
-        });
+        };
         const onMove = (e: MouseEvent): void => {
             if (!down) return;
             canvas.scrollLeft = sl - (e.pageX - sx);
@@ -593,8 +561,15 @@ git commit -m "feat(web): ThemeToggle 深浅切换按钮组件"
             down = false;
             canvas.classList.remove('dragging');
         };
+        canvas.addEventListener('mousedown', onDown);
         window.addEventListener('mousemove', onMove);
         window.addEventListener('mouseup', onUp);
+        // 注册清理：组件销毁时统一 removeEventListener，防 window 监听器累积泄漏
+        cleanups.push(() => {
+            canvas.removeEventListener('mousedown', onDown);
+            window.removeEventListener('mousemove', onMove);
+            window.removeEventListener('mouseup', onUp);
+        });
     }
 
     async function rerenderOnTheme(): Promise<void> {
@@ -639,6 +614,8 @@ git commit -m "feat(web): ThemeToggle 深浅切换按钮组件"
     onDestroy(() => {
         themeObserver?.disconnect();
         window.removeEventListener('keydown', onKey);
+        cleanups.forEach((fn) => fn());
+        cleanups = [];
     });
 </script>
 
@@ -680,10 +657,10 @@ git commit -m "feat(web): ThemeToggle 深浅切换按钮组件"
 
 <style>
     .rr-mermaid-card {
-        border: 1px solid var(--rr-border);
+        border: 1px solid var(--rr-border, #d0d7de);
         border-radius: 10px;
-        background: var(--rr-card-bg);
-        box-shadow: var(--rr-shadow);
+        background: var(--rr-card-bg, #fff);
+        box-shadow: var(--rr-shadow, 0 1px 3px rgba(0,0,0,.05), 0 10px 28px rgba(0,0,0,.06));
         margin: 1rem 0;
         overflow: hidden;
     }
@@ -692,12 +669,12 @@ git commit -m "feat(web): ThemeToggle 深浅切换按钮组件"
         align-items: center;
         justify-content: space-between;
         padding: 6px 10px;
-        border-bottom: 1px solid var(--rr-border-soft);
-        background: var(--rr-bg);
+        border-bottom: 1px solid var(--rr-border-soft, #eaecef);
+        background: var(--rr-bg, #f6f8fa);
     }
     .rr-mermaid-label {
         font-size: 12px;
-        color: var(--rr-text-muted);
+        color: var(--rr-text-muted, #57606a);
         font-weight: 600;
     }
     .rr-mermaid-ctrls {
@@ -709,20 +686,20 @@ git commit -m "feat(web): ThemeToggle 深浅切换按钮组件"
         min-width: 26px;
         height: 26px;
         padding: 0 6px;
-        border: 1px solid var(--rr-border);
+        border: 1px solid var(--rr-border, #d0d7de);
         border-radius: 5px;
-        background: var(--rr-card-bg);
-        color: var(--rr-text-muted);
+        background: var(--rr-card-bg, #fff);
+        color: var(--rr-text-muted, #57606a);
         cursor: pointer;
         font-size: 13px;
         line-height: 1;
     }
     .rr-mermaid-btn:hover {
-        color: var(--rr-text);
+        color: var(--rr-text, #1f2328);
     }
     .rr-mermaid-pct {
         font-size: 11px;
-        color: var(--rr-text-muted);
+        color: var(--rr-text-muted, #57606a);
         min-width: 40px;
         text-align: center;
         user-select: none;
@@ -745,7 +722,7 @@ git commit -m "feat(web): ThemeToggle 深浅切换按钮组件"
     .rr-mermaid-fallback {
         padding: 1rem;
         overflow-x: auto;
-        background: var(--rr-code-bg);
+        background: var(--rr-code-bg, #1e2228);
         color: #e1e4e8;
         border-radius: 8px;
         margin: 1rem 0;
@@ -763,8 +740,8 @@ git commit -m "feat(web): ThemeToggle 深浅切换按钮组件"
         padding: 24px;
     }
     .rr-mermaid-overlay-inner {
-        background: var(--rr-card-bg);
-        border: 1px solid var(--rr-border);
+        background: var(--rr-card-bg, #fff);
+        border: 1px solid var(--rr-border, #d0d7de);
         border-radius: 12px;
         max-width: 95vw;
         max-height: 92vh;
@@ -791,20 +768,21 @@ Expected: 0 error / 0 warning
 
 ```bash
 git add apps/web/src/lib/components/MermaidViewer.svelte
-git commit -m "feat(web): MermaidViewer 浮卡（缩放/拖动/全屏/主题跟随）"
+git commit -m "feat(web): MermaidViewer 浮卡（zoom缩放/拖动/全屏/主题跟随/securityLevel+清理）"
 ```
 
 ---
 
-## Task 7: MarkdownViewer 重构（var / 960 / 防溢出 / 等宽关连字 / 接 MermaidViewer）
+## Task 7: MarkdownViewer 重构（var 带 fallback / 960 / 防溢出 / 等宽关连字 / 接 MermaidViewer）
 
-颜色硬编码换 CSS 变量；宽度 760→960；防溢出（pre/img/svg/table-wrap max-width + overflow）；代码块等宽字体栈 + `font-variant-ligatures:none` + `tab-size:4`（ASCII flow 图友好）；移除 `enhanceMermaid`（交给 `MermaidViewer`），保留 katex 增强。
+颜色硬编码换 `var(--rr-*, 浅色fallback)`——**fallback 是关键**：`/d/[id]` 共用此组件但无 `.share-root` 祖先，自动回退浅色、不响应 `data-theme`，零影响。宽度 760→960；防溢出；代码块等宽字体栈 + `font-variant-ligatures:none` + `tab-size:4`；移除 mermaid（交 `MermaidViewer`），保留 katex。
 
 **Files:**
 - Modify: `apps/web/src/lib/components/MarkdownViewer.svelte`（整体重写 `<script>` 与 `<style>`，结构不变：仍一个 `.markdown-body` 容器 + `{@html html}`）
-- Modify: `apps/web/src/routes/+layout.svelte`（应用 body 背景——此时正文已换 `var()`，浅深同时生效）
 
-- [ ] **Step 1: 重写组件 + 应用 body 背景**
+> **不改 `+layout.svelte`。** body 背景与深色变量在 Task 8 的 `.share-root`。
+
+- [ ] **Step 1: 重写组件**
 
 把 `apps/web/src/lib/components/MarkdownViewer.svelte` 整体替换为：
 
@@ -851,17 +829,17 @@ git commit -m "feat(web): MermaidViewer 浮卡（缩放/拖动/全屏/主题跟�
         font-size: 16px;
         line-height: 1.75;
         font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-        color: var(--rr-text);
+        color: var(--rr-text, #1f2328);
     }
     .markdown-body :global(a) {
-        color: var(--rr-link);
+        color: var(--rr-link, #0969da);
     }
     .markdown-body :global(a:hover) {
         text-decoration: underline;
     }
     .markdown-body :global(h1),
     .markdown-body :global(h2) {
-        border-bottom: 1px solid var(--rr-border-soft);
+        border-bottom: 1px solid var(--rr-border-soft, #eaecef);
         padding-bottom: 0.3em;
     }
     .markdown-body :global(pre) {
@@ -883,8 +861,8 @@ git commit -m "feat(web): MermaidViewer 浮卡（缩放/拖动/全屏/主题跟�
     }
     .markdown-body :global(:not(pre) > code) {
         padding: 0.15em 0.35em;
-        background: var(--rr-inline-code-bg);
-        color: var(--rr-inline-code-text);
+        background: var(--rr-inline-code-bg, #eff2f5);
+        color: var(--rr-inline-code-text, #bc4b00);
         border-radius: 4px;
     }
     .markdown-body :global(.rr-table-wrap) {
@@ -897,14 +875,14 @@ git commit -m "feat(web): MermaidViewer 浮卡（缩放/拖动/全屏/主题跟�
     }
     .markdown-body :global(th),
     .markdown-body :global(td) {
-        border: 1px solid var(--rr-border);
+        border: 1px solid var(--rr-border, #d0d7de);
         padding: 0.4rem 0.8rem;
     }
     .markdown-body :global(blockquote) {
-        border-left: 3px solid var(--rr-border);
+        border-left: 3px solid var(--rr-border, #d0d7de);
         margin: 1rem 0;
         padding: 0 1rem;
-        color: var(--rr-text-muted);
+        color: var(--rr-text-muted, #57606a);
     }
     .markdown-body :global(img) {
         max-width: 100%;
@@ -912,9 +890,6 @@ git commit -m "feat(web): MermaidViewer 浮卡（缩放/拖动/全屏/主题跟�
     .markdown-body :global(.math.block) {
         margin: 1rem 0;
         overflow-x: auto;
-    }
-    :global([data-theme="dark"]) .markdown-body :global(pre.shiki) {
-        border: 1px solid var(--rr-border);
     }
     @media (max-width: 768px) {
         .markdown-body {
@@ -924,15 +899,7 @@ git commit -m "feat(web): MermaidViewer 浮卡（缩放/拖动/全屏/主题跟�
 </style>
 ```
 
-接着打开 `apps/web/src/routes/+layout.svelte`，在 Task 4 写入的 `:global([data-theme="dark"]) { ... }` 块之后追加 body 背景：
-
-```css
-    :global(body) {
-        background: var(--rr-bg);
-        color: var(--rr-text);
-        margin: 0;
-    }
-```
+> **不设 `:global([data-theme="dark"]) .markdown-body :global(pre.shiki)` 边框规则**——`/d/[id]` 共用此组件，该规则会在 `<html data-theme=dark>`（SPA 导航残留）下给 `/d/[id]` 的 pre 加边框、且 `var(--rr-border)` 无 fallback 会失效。去掉后深色代码块靠 Shiki 自身深背景在深色 `.share-root` 卡片上已足够对比。
 
 - [ ] **Step 2: 类型检查**
 
@@ -941,21 +908,21 @@ Expected: 0 error / 0 warning
 
 - [ ] **Step 3: 回归测试**
 
-Run: `bun run test apps/web/tests/markdown.test.ts apps/web/tests/share-view.test.ts`
-Expected: PASS（table 包壳后仍含 `<table>`；share-view 的 `<h1>` 断言不受影响）
+Run: `bun run test apps/web/tests/markdown.test.ts apps/web/tests/share-view.test.ts apps/web/tests/d-view.test.ts`
+Expected: PASS（table 包壳后仍含 `<table>`；share-view / d-view 的 `<h1>` 断言不受影响）
 
 - [ ] **Step 4: commit**
 
 ```bash
 git add apps/web/src/lib/components/MarkdownViewer.svelte
-git commit -m "refactor(web): MarkdownViewer 样式重构（var/960/防溢出/等宽关连字）+ 接 MermaidViewer"
+git commit -m "refactor(web): MarkdownViewer 样式重构（var带fallback/960/防溢出/等宽关连字）+ 接 MermaidViewer"
 ```
 
 ---
 
-## Task 8: 查看页 `/s/[token]` 顶栏整合
+## Task 8: 查看页 `/s/[token]` `.share-root` 容器 + 顶栏整合
 
-把返回链接与 `ThemeToggle` 组成顶栏，宽度对齐 960，移除旧 `.back` 硬编码色。
+**新增 `.share-root` 根容器**承载全部深色主题相关样式（变量浅/深 + `min-height:100vh` 背景 + `color-scheme`），把作用域严格收窄到 `/s/`——非 `/s/` 路由完全不响应 `data-theme`，杜绝深色态污染。顶栏（返回 + ThemeToggle）置于此容器内。
 
 **Files:**
 - Modify: `apps/web/src/routes/s/[token]/+page.svelte`
@@ -975,14 +942,50 @@ git commit -m "refactor(web): MarkdownViewer 样式重构（var/960/防溢出/�
     <title>{data.title}</title>
 </svelte:head>
 
-<div class="share-topbar">
-    <a class="back" href="/">← 返回我的文档库</a>
-    <ThemeToggle />
+<div class="share-root">
+    <div class="share-topbar">
+        <a class="back" href="/">← 返回我的文档库</a>
+        <ThemeToggle />
+    </div>
+    <MarkdownViewer html={data.html} />
 </div>
 
-<MarkdownViewer html={data.html} />
-
 <style>
+    .share-root {
+        --rr-bg: #f6f8fa;
+        --rr-card-bg: #ffffff;
+        --rr-card-border: transparent;
+        --rr-text: #1f2328;
+        --rr-text-muted: #57606a;
+        --rr-link: #0969da;
+        --rr-border: #d0d7de;
+        --rr-border-soft: #eaecef;
+        --rr-inline-code-bg: #eff2f5;
+        --rr-inline-code-text: #bc4b00;
+        --rr-code-bg: #1e2228;
+        --rr-shadow: 0 1px 3px rgba(0, 0, 0, 0.05), 0 10px 28px rgba(0, 0, 0, 0.06);
+        --rr-toggle-bg: #eaeef1;
+        min-height: 100vh;
+        background: var(--rr-bg);
+        color: var(--rr-text);
+        color-scheme: light;
+    }
+    :global([data-theme="dark"]) .share-root {
+        --rr-bg: #0d1117;
+        --rr-card-bg: #161b22;
+        --rr-card-border: #21262d;
+        --rr-text: #c9d1d9;
+        --rr-text-muted: #8b949e;
+        --rr-link: #58a6ff;
+        --rr-border: #21262d;
+        --rr-border-soft: #21262d;
+        --rr-inline-code-bg: rgba(110, 118, 129, 0.28);
+        --rr-inline-code-text: #e3b341;
+        --rr-code-bg: #0d1117;
+        --rr-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+        --rr-toggle-bg: #21262d;
+        color-scheme: dark;
+    }
     .share-topbar {
         max-width: 960px;
         margin: 0 auto;
@@ -1008,6 +1011,8 @@ git commit -m "refactor(web): MarkdownViewer 样式重构（var/960/防溢出/�
 </style>
 ```
 
+> **为何不放进 `+layout.svelte`**：`+layout.svelte` 是全站根布局（无 `s/+layout.svelte` 子布局），`:global(body)` 背景 + `:global([data-theme="dark"])` 会作用于 `/`、`/login`、`/settings`、`/d/[id]` 等非范围路由，致深底浅字不可读。`.share-root` 仅 `/s/` 有，作用域天然收窄。
+
 - [ ] **Step 2: 类型检查**
 
 Run: `bun --filter remote-reader-web check`
@@ -1017,7 +1022,7 @@ Expected: 0 error / 0 warning
 
 ```bash
 git add apps/web/src/routes/s/[token]/+page.svelte
-git commit -m "feat(web): /s/<token> 查看页顶栏整合 + ThemeToggle"
+git commit -m "feat(web): /s/<token> 查看页 .share-root 容器（深色 scope 收窄）+ 顶栏整合"
 ```
 
 ---
@@ -1039,49 +1044,61 @@ Expected: 0 error / 0 warning
 Run: `bun --filter remote-reader-mcp-bridge check`
 Expected: 0 error（桥未动，确认无连带）
 
-- [ ] **Step 3: 启动 dev 并准备一个含多元素的测试文档**
+- [ ] **Step 3: 启动 dev 并准备测试文档**
 
 Run: `bun run dev -- --host 0.0.0.0`，用 `hostname -I` 取局域网 IP（如 `192.168.x.x`），浏览器打开 `http://<局域网IP>:5173`（用户在局域网机器访问，**非 localhost**）
 
 通过文件管理器或 API 上传一篇覆盖各元素的 markdown（标题/段落/表格/代码块/mermaid/数学公式/含 `->` `=>` 的 ASCII 框线图），生成 `/s/<token>` 链接。
 
-- [ ] **Step 4: 手动验证清单（逐项在浏览器确认）**
+- [ ] **Step 4: `/s/<token>` 手动验证清单**
 
 - [ ] 浅色态：浅灰底 + 白色文档卡 + 柔和阴影 + 圆角，正文/链接/行内 code 配色正确。
-- [ ] 点击右上角 ThemeToggle → 切到深色态（页面底、卡片、文字、链接、行内 code 全部变深色）。
-- [ ] 刷新页面 → 深色态被记忆（localStorage `rr-theme`），且**首屏不闪白**（防 FOUC 生效）。
-- [ ] 把系统主题切到深色、清掉 localStorage → 刷新后自动深色（跟随系统）。
-- [ ] 代码块两态都保持深色（github-dark）；深色态代码块有细边框。
-- [ ] **ASCII flow 图对齐正确**：含 `->` `=>` `>=` 的图未被连字成箭头（仍是独立字符），`┌─┐│└─┘` 框线对齐无错位。
-- [ ] 表格：宽表在容器内**横向滚动**（不撑破布局）。
-- [ ] **手机响应式**：Chrome DevTools 切 375 视口 → 文档居中、不被宽内容挤到左半屏、padding 收窄。
-- [ ] **Mermaid 浮卡**：图渲染为带顶栏的浮卡；`−`/`+` 缩放、百分比更新、双击百分比重置 100%；放大后鼠标拖动平移看局部；`⤢` 进全屏、全屏内缩放、Esc/点遮罩/✕ 关闭。
-- [ ] 切换深浅主题时，已渲染的 mermaid 图按新主题重渲（浅色态为 default 配色、深色态为 dark 配色）。
+- [ ] 点击右上角 ThemeToggle → 切深色态（页面底、卡片、文字、链接、行内 code 全变深色）。
+- [ ] 刷新 → 深色态记忆（localStorage `rr-theme`），**首屏不闪白**（防 FOUC + nonce 生效）。
+- [ ] 系统切深色 + 清 localStorage → 刷新后自动深色（跟随系统）。
+- [ ] 代码块两态都深色（github-dark）。
+- [ ] **ASCII flow 图对齐正确**：含 `->` `=>` `>=` 的图未被连字成箭头，`┌─┐│└─┘` 框线对齐无错位。
+- [ ] 宽表在容器内**横向滚动**（不撑破）。
+- [ ] **手机响应式**：Chrome DevTools 375 视口 → 居中、不被宽内容挤到左半屏、padding 收窄。
+- [ ] **Mermaid 浮卡**：`−`/`+` 缩放、百分比更新、双击重置 100%；放大后拖动平移看局部；`⤢` 全屏、全屏内缩放、Esc/点遮罩/✕ 关闭。
+- [ ] 切深浅主题时，已渲染 mermaid 按新主题重渲（浅=default / 深=dark 配色）。
 
-- [ ] **Step 5: 终态 commit（如有验证中修复）**
+- [ ] **Step 5: 跨路由零影响验证（spec §3.3 scope 收窄的关键验收）**
 
-若 Step 4 发现问题并修复，提交修复；否则无新增 commit。最终确认 `git status` 干净、`git log` 含本计划各 Task 的 commit。
+- [ ] 在 `/s/` 切到深色后，导航到 `/`（文件管理器）、`/login`、`/settings/tokens`：这些页面**仍为浅色、文字可读**（深色未污染非范围路由）。
+- [ ] owner 登录后访问 `/d/<id>`：宽表横向滚动不撑破；markdown-body 仍浅色可读（共用 MarkdownViewer + var fallback，不响应 `data-theme`）；mermaid 浮卡同样工作（MermaidViewer 嵌入 MarkdownViewer 自动生效）。
+- [ ] dev 控制台无 CSP 违规报告刷屏（`/api/csp-report` 未因防 FOUC 脚本报 script-src 违规——nonce 生效）。
+
+- [ ] **Step 6: 终态 commit（如有验证中修复）**
+
+若 Step 4/5 发现问题并修复，提交修复；否则无新增 commit。最终确认 `git status` 干净、`git log` 含本计划各 Task 的 commit。
 
 ---
 
-## Self-Review（计划作者自检）
+## Self-Review（计划作者自检 · v2 含交叉审查修复）
 
-**Spec coverage：**
-- §3.1 视觉 token（浅/深）→ Task 4 ✓
-- §3.1 字体/宽度/圆角/代码块始终深色 → Task 4（变量）+ Task 7（字体/宽度/边框）✓
-- §3.1 代码块等宽 + 关连字（ASCII 友好）→ Task 7（`font-variant-ligatures:none` / `tab-size:4` / 字体栈）✓
-- §3.2 响应式防溢出（容器 100%/min-width:0、手机 padding、table 包壳、pre/img/svg max-width）→ Task 3（table SSR 壳）+ Task 7（容器/pre/img 样式 + @media）✓
-- §3.3 深色模式（data-theme / 优先级 / 防 FOUC / ThemeToggle / mermaid 跟随）→ Task 4（变量+防FOUC）+ Task 5（ThemeToggle）+ Task 6（mermaid MutationObserver 重渲）✓
-- §3.4 Mermaid 浮卡（浮卡/缩放/拖动/全屏/失败兜底）→ Task 6 ✓
-- §4 文件级改动 → Task 1-8 逐一覆盖 ✓
-- §5 测试（table 包壳单测、回归 200+、svelte-check、手动验证）→ Task 3/9 ✓
+**审查修复落地：**
+- HIGH「深色态污染非 /s/ 路由」→ 变量/body/color-scheme 全 scope 到 Task 8 `.share-root`；MarkdownViewer var() 带浅色 fallback（Task 7）让 `/d/[id]` 共用零影响；`+layout.svelte` 不动。✓
+- MEDIUM「CSP nonce 缺失」→ Task 4 app.html 脚本带 `nonce="%sveltekit.nonce%"`。✓
+- MEDIUM「zoom 偏离 spec」→ spec §3.4 已更新为 zoom；Task 6 用 zoom + 注释说明。✓
+- MEDIUM「enableDrag listener 不清理」→ Task 6 加 `cleanups` 数组 + onDestroy 清理。✓
+- MEDIUM「Task 9 漏 /d/[id]」→ Task 9 Step 5 加跨路由零影响验证（含 /d/[id]）。✓
+- LOW「Task 3 漏 d-view」→ Task 3 Step 5 加 `d-view.test.ts`。✓
+- LOW「mermaid securityLevel」→ Task 6 loadMermaid 显式 `securityLevel:'strict'`。✓
+- 误报（color-scheme 中间态 / `/d/[id] .back` 对齐）→ 不修（verify 已否决）。✓
+
+**Spec coverage（v2）：**
+- §3.1 视觉 token → Task 8（.share-root 定义）✓
+- §3.1 字体/宽度/圆角/代码块始终深色/等宽关连字 → Task 7 ✓
+- §3.2 响应式防溢出 → Task 3（table 壳）+ Task 7（容器/pre/img）✓
+- §3.3 深色模式（scope /share-root / var fallback / 防 FOUC+nonce / ThemeToggle / mermaid 跟随）→ Task 4/5/6/8 ✓
+- §3.4 Mermaid 浮卡（zoom/拖动/全屏/兜底/securityLevel/清理）→ Task 6 ✓
+- §4 文件级 → Task 1-8 ✓
+- §5 测试 → Task 3/9 ✓
 
 **Type consistency：**
-- `Theme` 类型在 `theme.ts`（Task 1）定义，`ThemeToggle`（Task 5）`import type Theme` ✓
-- `THEME_STORAGE_KEY`（Task 1）被 `ThemeToggle`（Task 5）与 `app.html`（Task 4，字面量 `'rr-theme'`，注释指向 theme.ts）共用，值一致 ✓
-- `nextZoom` / `formatZoom` / `ZOOM_STEP`（Task 2）被 `MermaidViewer`（Task 6）使用，签名匹配 ✓
-- `MermaidViewer` props `{ container: HTMLDivElement | undefined }` 与 `MarkdownViewer` 传入的 `bind:this={container}`（`HTMLDivElement | undefined`）匹配 ✓
+- `Theme` / `THEME_STORAGE_KEY`（Task 1）→ ThemeToggle（Task 5）+ app.html（Task 4，字面量 `'rr-theme'`）共用，值一致 ✓
+- `nextZoom`/`formatZoom`/`ZOOM_STEP`（Task 2）→ MermaidViewer（Task 6）签名匹配 ✓
+- `MermaidViewer` props `{ container: HTMLDivElement | undefined }` ← MarkdownViewer 传 `bind:this` 同型 ✓
 
-**Placeholder scan：** 无 TBD/TODO；所有代码步均含完整代码；命令含 expected 输出 ✓
-
-**中间态处理：** body 背景推迟到 Task 7 与 `MarkdownViewer` 换 `var()` 同做，避免了"深色态正文不可读"的破坏性中间态——每个 commit 后浅深两态均可正常查看。
+**无破坏性中间态：** Task 4 仅改 app.html（设 data-theme 但无 CSS 响应它，因变量在 Task 8 才上）；Task 5-7 组件独立可编译；Task 8 上 `.share-root` 后浅深两态即正确——每个 commit 后页面均可正常查看。
