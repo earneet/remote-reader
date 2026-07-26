@@ -4,7 +4,7 @@
     let container: HTMLDivElement | undefined = $state(undefined);
 
     $effect(() => {
-        if (container) enhanceKatex(container);
+        if (container && html) enhanceKatex(container);
     });
 
     async function enhanceKatex(root: HTMLElement): Promise<void> {
@@ -27,7 +27,7 @@
 <div class="markdown-body" bind:this={container}>
     {@html html}
 </div>
-<MermaidViewer {container} />
+<MermaidViewer {container} {html} />
 
 <style>
     .markdown-body {

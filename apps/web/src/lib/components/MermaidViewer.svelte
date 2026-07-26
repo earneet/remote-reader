@@ -2,7 +2,7 @@
     import { onMount, onDestroy } from 'svelte';
     import { nextZoom, formatZoom, ZOOM_STEP } from '$lib/shared/mermaid-zoom';
 
-    let { container }: { container: HTMLDivElement | undefined } = $props();
+    let { container, html }: { container: HTMLDivElement | undefined; html: string } = $props();
 
     let fullscreen = $state<{ svg: string; zoom: number } | null>(null);
     let themeObserver: MutationObserver | null = null;
@@ -27,7 +27,7 @@
 
     $effect(() => {
         const root = container;
-        if (root) void renderAll(root);
+        if (root && html) void renderAll(root);
     });
 
     async function renderAll(root: HTMLElement): Promise<void> {
