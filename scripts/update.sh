@@ -116,20 +116,35 @@ SRC_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 [[ -f "${SRC_DIR}/package.json" ]] || die "未在源码根找到 package.json：${SRC_DIR}"
 [[ -d "${SRC_DIR}/apps/web" ]]     || die "未找到 apps/web 目录：${SRC_DIR}/apps/web"
 
+# 解析原属主（脚本经 sudo 跑时，源码克隆通常属 SUDO_USER）；git 操作需以其身份执行
+SUDO_HOME=""
+if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
+    SUDO_HOME="$(getent passwd "${SUDO_USER}" | cut -d: -f6)"
+fi
+
 # 源码须是 git 仓库且工作区干净：update 要 git pull，脏工作区会冲突
 GIT_BIN="$(command -v git || true)"
 [[ -n "${GIT_BIN}" ]] || die "未找到 git（update 需 git pull 拉取新码）"
-# sudo 下 git 对他人属主的仓库报 dubious ownership，显式放行 SRC_DIR
-git_cmd() { "${GIT_BIN}" -C "${SRC_DIR}" -c safe.directory="${SRC_DIR}" "$@"; }
+# git 操作一律以源码属主身份跑：
+# ① 用到属主用户级 ignore（~/.config/git/ignore），status 视图与其 `git status` 一致
+#    ——root 的 HOME=/root 读不到属主全局 ignore，会把 .claude/settings.local.json 等
+#    误判为未跟踪，假报"工作区不干净"（即便属主自己 git status 是干净的）；
+# ② 顺带免 dubious ownership；③ 避免以 root 写 .git/index 改属主、污染属主后续 git。
+git_cmd() {
+    if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
+        sudo -H -u "${SUDO_USER}" "${GIT_BIN}" -C "${SRC_DIR}" "$@"
+    else
+        "${GIT_BIN}" -C "${SRC_DIR}" "$@"
+    fi
+}
 git_cmd rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "${SRC_DIR} 不是 git 仓库（update 需 git pull）"
 if [[ -n "$(git_cmd status --porcelain 2>/dev/null)" ]]; then
     die "源码工作区不干净，git pull 可能冲突。请先处理：cd ${SRC_DIR} && git status"
 fi
 
 # sudo 重置 PATH（secure_path），需把原用户的 ~/.bun/bin 找回来（与 install.sh 同因）
-if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
-    SUDO_HOME="$(getent passwd "${SUDO_USER}" | cut -d: -f6)"
-    [[ -d "${SUDO_HOME}/.bun/bin" ]] && export PATH="${SUDO_HOME}/.bun/bin:${PATH}"
+if [[ -n "${SUDO_HOME}" && -d "${SUDO_HOME}/.bun/bin" ]]; then
+    export PATH="${SUDO_HOME}/.bun/bin:${PATH}"
 fi
 command -v node  >/dev/null 2>&1 || die "未找到 node"
 command -v bun   >/dev/null 2>&1 || die "未找到 bun（构建用）"
