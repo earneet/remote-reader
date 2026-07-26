@@ -32,3 +32,6 @@ apps/mcp-bridge/config.local.*
 # Agent 工作目录（opencode 等）
 .omo/
 *.log
+
+# Brainstorm 视觉伴侣（superpowers）
+.superpowers/
