@@ -57,3 +57,10 @@ test('渲染结果缓存：同输入返回同输出、不同输入各异（M13�
     const b = await renderMarkdown('# other');
     expect(b).not.toBe(a1);
 });
+
+test('表格被 overflow 壳包裹（防手机撑破布局）', async () => {
+    const html = await renderMarkdown('| a | b |\n|---|---|\n| 1 | 2 |');
+    expect(html).toContain('<div class="rr-table-wrap">');
+    expect(html).toContain('</table></div>');
+    expect(html).toContain('<table>');
+});
