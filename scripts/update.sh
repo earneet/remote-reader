@@ -153,12 +153,13 @@ command -v curl  >/dev/null 2>&1 || die "未找到 curl"
 NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
 [[ "${NODE_MAJOR}" -ge "${NODE_MIN_MAJOR}" ]] || die "node 版本过低（${NODE_MAJOR}.x），需要 ${NODE_MIN_MAJOR}+"
 
-# 必须已是 install.sh 装好的实例：unit + 代码 + env 三者齐备
-systemctl list-unit-files 2>/dev/null | grep -q "^${SERVICE_NAME}\.service" \
-    || die "未检测到已安装的 ${SERVICE_NAME}.service，请先用 install.sh 安装"
-[[ -d "${INSTALL_DIR}" ]] || die "安装目录不存在：${INSTALL_DIR}（请先 install.sh）"
+# 必须已是 install.sh 装好的实例：unit 文件 + 代码目录 + env 三者齐备。
+# 直接查 install.sh 落地的文件，不靠 `systemctl list-unit-files`——后者在 sudo 下
+# 不可靠（实测出现过 service 明明 enabled/active 却被 grep 漏掉、假报"未安装"），
+# 文件存在才是可靠判据；systemd 是否真认识该 unit，留给后面的 restart 去验证。
+[[ -f "${UNIT_FILE}" ]]  || die "未检测到 install.sh 部署：systemd unit 不存在（${UNIT_FILE}）。update.sh 只升级已安装实例，请先 sudo ./scripts/install.sh"
+[[ -d "${INSTALL_DIR}" ]] || die "未检测到 install.sh 部署：安装目录不存在（${INSTALL_DIR}）。请先 sudo ./scripts/install.sh"
 [[ -f "${ENV_FILE}" ]]   || die "配置文件不存在：${ENV_FILE}（无法读取 PORT，请确认是 install.sh 部署）"
-[[ -f "${UNIT_FILE}" ]]  || die "systemd unit 不存在：${UNIT_FILE}"
 
 # 上次升级中断会残留 BACKUP_DIR：宁可停下让人确认，也不盲删/盲覆盖（可能是唯一恢复源）
 if [[ -e "${BACKUP_DIR}" || -e "${BACKUP_TMP}" ]]; then
