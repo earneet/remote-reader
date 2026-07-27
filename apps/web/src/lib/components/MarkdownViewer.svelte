@@ -37,6 +37,7 @@
         padding: 2rem;
         box-sizing: border-box;
         min-width: 0;
+        overflow-wrap: anywhere;
         font-size: 16px;
         line-height: 1.75;
         font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
