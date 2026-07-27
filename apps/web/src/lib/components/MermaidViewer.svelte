@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { onMount, onDestroy } from 'svelte';
+    import { onMount } from 'svelte';
     import { nextZoom, formatZoom, ZOOM_STEP } from '$lib/shared/mermaid-zoom';
 
     let { container, html }: { container: HTMLDivElement | undefined; html: string } = $props();
@@ -183,12 +183,12 @@
             attributeFilter: ['data-theme']
         });
         window.addEventListener('keydown', onKey);
-    });
-    onDestroy(() => {
-        themeObserver?.disconnect();
-        window.removeEventListener('keydown', onKey);
-        cleanups.forEach((fn) => fn());
-        cleanups = [];
+        return () => {
+            themeObserver?.disconnect();
+            window.removeEventListener('keydown', onKey);
+            cleanups.forEach((fn) => fn());
+            cleanups = [];
+        };
     });
 
     function focusOnMount(node: HTMLElement) {
