@@ -28,6 +28,7 @@ apps/mcp-bridge/config.local.*
 .DS_Store
 .vscode/
 .idea/
+.claude/
 
 # Agent 工作目录（opencode 等）
 .omo/
