@@ -5,6 +5,8 @@ const config = {
     preprocess: vitePreprocess(),
     kit: {
         adapter: adapter(),
+        // 绝对 asset path：相对路径对两级路由 /s/[token] 会误算成 /s/_app（404 → 整页无样式）
+        paths: { relative: false },
         alias: {
             $shared: '../../packages/shared/src',
             $server: 'src/lib/server',
