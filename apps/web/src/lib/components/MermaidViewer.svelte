@@ -1,10 +1,10 @@
 <script lang="ts">
     import { onMount } from 'svelte';
-    import { nextZoom, formatZoom, ZOOM_STEP } from '$lib/shared/mermaid-zoom';
+    import { nextZoom, formatZoom, ZOOM_STEP, clampZoom } from '$lib/shared/mermaid-zoom';
 
     let { container, html }: { container: HTMLDivElement | undefined; html: string } = $props();
 
-    let fullscreen = $state<{ svg: string; zoom: number } | null>(null);
+    let fullscreen = $state<{ svg: string; zoom: number; x: number; y: number } | null>(null);
     let themeObserver: MutationObserver | null = null;
     let cleanups: Array<() => void> = [];
 
@@ -14,9 +14,7 @@
 
     async function loadMermaid() {
         const m = (await import('mermaid')).default;
-        // securityLevel:'strict' 是 mermaid 11 默认值，此处显式声明：
-        // 防御深度——与 markdown-it html:false、CSP 同属多层防线，防止未来误改为 loose
-        // 致下方 canvas.innerHTML / {@html} 的 SVG 注入变成 XSS 面。
+        // securityLevel:'strict' 防御深度：与 markdown-it html:false、CSP 同属多层防线
         m.initialize({
             startOnLoad: false,
             securityLevel: 'strict',
@@ -42,7 +40,7 @@
             try {
                 const id = 'mmd-' + Math.random().toString(36).slice(2, 9);
                 const { svg } = await mermaid.render(id, raw);
-                pre.replaceWith(buildCard(svg, raw));
+                pre.replaceWith(buildInline(svg, raw));
             } catch (e) {
                 console.warn('[mermaid] render failed', e);
                 const fb = document.createElement('pre');
@@ -53,125 +51,130 @@
         }
     }
 
-    function buildCard(svgMarkup: string, raw: string): HTMLElement {
-        const card = document.createElement('div');
-        card.className = 'rr-mermaid-card';
-        card.dataset.rrRaw = encodeURIComponent(raw);
-
-        const bar = document.createElement('div');
-        bar.className = 'rr-mermaid-bar';
-        const label = document.createElement('span');
-        label.className = 'rr-mermaid-label';
-        label.textContent = '图表';
-        const ctrls = document.createElement('div');
-        ctrls.className = 'rr-mermaid-ctrls';
-
-        const canvas = document.createElement('div');
-        canvas.className = 'rr-mermaid-canvas';
-        canvas.innerHTML = svgMarkup;
-
-        let zoom = 1;
-        const pct = document.createElement('span');
-        pct.className = 'rr-mermaid-pct';
-        pct.title = '双击重置为 100%';
-        const apply = (z: number): void => {
-            zoom = z;
-            pct.textContent = formatZoom(zoom);
-            canvas.style.setProperty('zoom', String(zoom));
-            canvas.style.cursor = zoom > 1 ? 'grab' : 'default';
-        };
-        apply(1);
-        pct.addEventListener('dblclick', () => apply(1));
-
-        const minus = mkBtn('−', '缩小', () => apply(nextZoom(zoom, -ZOOM_STEP)));
-        const plus = mkBtn('+', '放大', () => apply(nextZoom(zoom, ZOOM_STEP)));
-        const full = mkBtn('⤢', '全屏查看', () => {
-            fullscreen = { svg: svgMarkup, zoom: 1 };
+    function buildInline(svgMarkup: string, raw: string): HTMLElement {
+        const wrap = document.createElement('div');
+        wrap.className = 'rr-mermaid-inline';
+        wrap.dataset.rrRaw = encodeURIComponent(raw);
+        wrap.title = '点击查看大图';
+        wrap.innerHTML = svgMarkup;
+        wrap.addEventListener('click', () => {
+            fullscreen = { svg: wrap.innerHTML, zoom: 1, x: 0, y: 0 };
         });
-
-        ctrls.append(minus, pct, plus, full);
-        bar.append(label, ctrls);
-        card.append(bar, canvas);
-        enableDrag(canvas);
-        return card;
-    }
-
-    function mkBtn(text: string, title: string, onClick: () => void): HTMLButtonElement {
-        const b = document.createElement('button');
-        b.type = 'button';
-        b.className = 'rr-mermaid-btn';
-        b.textContent = text;
-        b.title = title;
-        b.addEventListener('click', onClick);
-        return b;
-    }
-
-    function enableDrag(canvas: HTMLElement): void {
-        let down = false;
-        let sx = 0;
-        let sy = 0;
-        let sl = 0;
-        let st = 0;
-        const onDown = (e: MouseEvent) => {
-            const overflowX = canvas.scrollWidth > canvas.clientWidth;
-            const overflowY = canvas.scrollHeight > canvas.clientHeight;
-            if (!overflowX && !overflowY) return;
-            down = true;
-            sx = e.pageX;
-            sy = e.pageY;
-            sl = canvas.scrollLeft;
-            st = canvas.scrollTop;
-            canvas.classList.add('dragging');
-            e.preventDefault();
-        };
-        const onMove = (e: MouseEvent): void => {
-            if (!down) return;
-            canvas.scrollLeft = sl - (e.pageX - sx);
-            canvas.scrollTop = st - (e.pageY - sy);
-        };
-        const onUp = (): void => {
-            if (!down) return;
-            down = false;
-            canvas.classList.remove('dragging');
-        };
-        canvas.addEventListener('mousedown', onDown);
-        window.addEventListener('mousemove', onMove);
-        window.addEventListener('mouseup', onUp);
-        // 注册清理：组件销毁时统一 removeEventListener，防 window 监听器累积泄漏
-        cleanups.push(() => {
-            canvas.removeEventListener('mousedown', onDown);
-            window.removeEventListener('mousemove', onMove);
-            window.removeEventListener('mouseup', onUp);
-        });
+        return wrap;
     }
 
     async function rerenderOnTheme(): Promise<void> {
         const root = container;
         if (!root) return;
-        const cards = Array.from(root.querySelectorAll<HTMLElement>('.rr-mermaid-card'));
-        if (cards.length === 0) return;
+        const inlines = Array.from(root.querySelectorAll<HTMLElement>('.rr-mermaid-inline'));
+        if (inlines.length === 0) return;
         const mermaid = await loadMermaid();
-        for (const card of cards) {
-            const raw = decodeURIComponent(card.dataset.rrRaw ?? '');
+        for (const el of inlines) {
+            const raw = decodeURIComponent(el.dataset.rrRaw ?? '');
             if (!raw) continue;
             try {
                 const id = 'mmd-' + Math.random().toString(36).slice(2, 9);
                 const { svg } = await mermaid.render(id, raw);
-                const cv = card.querySelector<HTMLElement>('.rr-mermaid-canvas');
-                if (cv) cv.innerHTML = svg;
+                el.innerHTML = svg;
             } catch (e) {
                 console.warn('[mermaid] rerender failed', e);
             }
         }
     }
 
-    function onKey(e: KeyboardEvent): void {
-        if (e.key === 'Escape') fullscreen = null;
-    }
-
     function fsZoom(delta: number): void {
         if (!fullscreen) return;
         fullscreen.zoom = nextZoom(fullscreen.zoom, delta);
+    }
+
+    function fsReset(): void {
+        if (!fullscreen) return;
+        fullscreen.zoom = 1;
+        fullscreen.x = 0;
+        fullscreen.y = 0;
+    }
+
+    function onKey(e: KeyboardEvent): void {
+        if (e.key === 'Escape' && fullscreen) fullscreen = null;
+    }
+
+    // lightbox 打开时聚焦 overlay、关闭时焦点回触发元素
+    function focusOnMount(node: HTMLElement) {
+        const prev = document.activeElement as HTMLElement | null;
+        node.focus();
+        return {
+            destroy() {
+                if (prev && typeof prev.focus === 'function') prev.focus();
+            }
+        };
+    }
+
+    // Pointer Events 统一鼠标/触摸/笔：单指拖动平移、双指 pinch 缩放、滚轮缩放
+    function gestures(node: HTMLElement) {
+        let pointers = new Map<number, { x: number; y: number }>();
+        let pinchStartDist = 0;
+        let zoomStart = 1;
+        let dragStart = { x: 0, y: 0 };
+        let panStart = { x: 0, y: 0 };
+        let dragging = false;
+
+        const onPointerDown = (e: PointerEvent) => {
+            if (!fullscreen) return;
+            pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+            if (pointers.size === 1) {
+                dragging = true;
+                dragStart = { x: e.clientX, y: e.clientY };
+                panStart = { x: fullscreen.x, y: fullscreen.y };
+            } else if (pointers.size === 2) {
+                dragging = false;
+                const pts = [...pointers.values()];
+                pinchStartDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+                zoomStart = fullscreen.zoom;
+            }
+            try {
+                node.setPointerCapture(e.pointerId);
+            } catch (e) {
+                // 忽略 capture 失败
+            }
+        };
+        const onPointerMove = (e: PointerEvent) => {
+            if (!fullscreen) return;
+            if (pointers.has(e.pointerId)) {
+                pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+            }
+            if (pointers.size >= 2 && pinchStartDist > 0) {
+                const pts = [...pointers.values()];
+                const d = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+                fullscreen.zoom = clampZoom(zoomStart * (d / pinchStartDist));
+            } else if (dragging) {
+                fullscreen.x = panStart.x + (e.clientX - dragStart.x);
+                fullscreen.y = panStart.y + (e.clientY - dragStart.y);
+            }
+        };
+        const onPointerUp = (e: PointerEvent) => {
+            pointers.delete(e.pointerId);
+            if (pointers.size < 2) pinchStartDist = 0;
+            if (pointers.size === 0) dragging = false;
+        };
+        const onWheel = (e: WheelEvent) => {
+            if (!fullscreen) return;
+            e.preventDefault();
+            fullscreen.zoom = clampZoom(fullscreen.zoom - e.deltaY * 0.0015);
+        };
+
+        node.addEventListener('pointerdown', onPointerDown);
+        node.addEventListener('pointermove', onPointerMove);
+        node.addEventListener('pointerup', onPointerUp);
+        node.addEventListener('pointercancel', onPointerUp);
+        node.addEventListener('wheel', onWheel, { passive: false });
+        cleanups.push(() => {
+            node.removeEventListener('pointerdown', onPointerDown);
+            node.removeEventListener('pointermove', onPointerMove);
+            node.removeEventListener('pointerup', onPointerUp);
+            node.removeEventListener('pointercancel', onPointerUp);
+            node.removeEventListener('wheel', onWheel);
+        });
+        return {};
     }
 
     onMount(() => {
@@ -190,16 +193,6 @@
             cleanups = [];
         };
     });
-
-    function focusOnMount(node: HTMLElement) {
-        const prev = document.activeElement as HTMLElement | null;
-        node.focus();
-        return {
-            destroy() {
-                if (prev && typeof prev.focus === 'function') prev.focus();
-            }
-        };
-    }
 </script>
 
 {#if fullscreen}
@@ -209,103 +202,49 @@
         aria-modal="true"
         tabindex="-1"
         use:focusOnMount
-        onclick={() => {
-            fullscreen = null;
+        onclick={(e) => {
+            if (e.target === e.currentTarget) fullscreen = null;
         }}
         onkeydown={(e) => {
             if (e.key === 'Escape' || e.key === 'Enter') fullscreen = null;
         }}
     >
-        <div
-            class="rr-mermaid-overlay-inner"
-            role="presentation"
-            onclick={(e) => e.stopPropagation()}
-            onkeydown={(e) => e.stopPropagation()}
-        >
+        <div class="rr-mermaid-overlay-inner">
             <div class="rr-mermaid-bar">
-                <span class="rr-mermaid-label">图表 · 全屏</span>
+                <span class="rr-mermaid-label">图表 · {formatZoom(fullscreen.zoom)}</span>
                 <div class="rr-mermaid-ctrls">
-                    <button type="button" class="rr-mermaid-btn" onclick={() => fsZoom(-ZOOM_STEP)}>−</button>
-                    <span class="rr-mermaid-pct">{formatZoom(fullscreen.zoom)}</span>
-                    <button type="button" class="rr-mermaid-btn" onclick={() => fsZoom(ZOOM_STEP)}>+</button>
+                    <button type="button" class="rr-mermaid-btn" onclick={() => fsZoom(-ZOOM_STEP)} title="缩小">−</button>
+                    <button type="button" class="rr-mermaid-btn" onclick={() => fsReset()} title="重置 100%">⊙</button>
+                    <button type="button" class="rr-mermaid-btn" onclick={() => fsZoom(ZOOM_STEP)} title="放大">+</button>
                     <button
                         type="button"
                         class="rr-mermaid-btn"
-                        title="关闭"
                         onclick={() => {
                             fullscreen = null;
                         }}
+                        title="关闭"
                     >✕</button>
                 </div>
             </div>
-            <div class="rr-mermaid-canvas is-fullscreen" style={`zoom:${fullscreen.zoom}`}>
-                {@html fullscreen.svg}
+            <div class="rr-mermaid-stage" use:gestures>
+                <div
+                    class="rr-mermaid-svg-wrap"
+                    style={`transform: translate(${fullscreen.x}px, ${fullscreen.y}px) scale(${fullscreen.zoom})`}
+                >
+                    {@html fullscreen.svg}
+                </div>
             </div>
         </div>
     </div>
 {/if}
 
 <style>
-    :global(.rr-mermaid-card) {
-        border: 1px solid var(--rr-border, #d0d7de);
-        border-radius: 10px;
-        background: var(--rr-card-bg, #fff);
-        box-shadow: var(--rr-shadow, 0 1px 3px rgba(0,0,0,.05), 0 10px 28px rgba(0,0,0,.06));
+    :global(.rr-mermaid-inline) {
+        text-align: center;
         margin: 1rem 0;
-        overflow: hidden;
+        cursor: zoom-in;
     }
-    :global(.rr-mermaid-bar) {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 6px 10px;
-        border-bottom: 1px solid var(--rr-border-soft, #eaecef);
-        background: var(--rr-bg, #f6f8fa);
-    }
-    :global(.rr-mermaid-label) {
-        font-size: 12px;
-        color: var(--rr-text-muted, #57606a);
-        font-weight: 600;
-    }
-    :global(.rr-mermaid-ctrls) {
-        display: flex;
-        gap: 4px;
-        align-items: center;
-    }
-    :global(.rr-mermaid-btn) {
-        min-width: 26px;
-        height: 26px;
-        padding: 0 6px;
-        border: 1px solid var(--rr-border, #d0d7de);
-        border-radius: 5px;
-        background: var(--rr-card-bg, #fff);
-        color: var(--rr-text-muted, #57606a);
-        cursor: pointer;
-        font-size: 13px;
-        line-height: 1;
-    }
-    :global(.rr-mermaid-btn:hover) {
-        color: var(--rr-text, #1f2328);
-    }
-    :global(.rr-mermaid-pct) {
-        font-size: 11px;
-        color: var(--rr-text-muted, #57606a);
-        min-width: 40px;
-        text-align: center;
-        user-select: none;
-        cursor: pointer;
-    }
-    :global(.rr-mermaid-canvas) {
-        padding: 16px;
-        text-align: center;
-        overflow: auto;
-        max-height: 420px;
-        min-width: 0;
-    }
-    :global(.rr-mermaid-canvas.dragging) {
-        cursor: grabbing !important;
-    }
-    :global(.rr-mermaid-canvas svg) {
+    :global(.rr-mermaid-inline svg) {
         max-width: 100%;
         height: auto;
     }
@@ -319,17 +258,17 @@
         font-family: ui-monospace, Menlo, monospace;
     }
 
-    :global(.rr-mermaid-overlay) {
+    .rr-mermaid-overlay {
         position: fixed;
         inset: 0;
         z-index: 1000;
-        background: rgba(0, 0, 0, 0.7);
+        background: rgba(0, 0, 0, 0.8);
         display: flex;
         align-items: center;
         justify-content: center;
-        padding: 24px;
+        padding: 16px;
     }
-    :global(.rr-mermaid-overlay-inner) {
+    .rr-mermaid-overlay-inner {
         background: var(--rr-card-bg, #fff);
         border: 1px solid var(--rr-border, #d0d7de);
         border-radius: 12px;
@@ -340,10 +279,59 @@
         flex-direction: column;
         width: 100%;
     }
-    :global(.rr-mermaid-canvas.is-fullscreen) {
-        overflow: auto;
-        max-height: none;
+    .rr-mermaid-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 6px 10px;
+        border-bottom: 1px solid var(--rr-border-soft, #eaecef);
+        background: var(--rr-bg, #f6f8fa);
+        flex-shrink: 0;
+    }
+    .rr-mermaid-label {
+        font-size: 12px;
+        color: var(--rr-text-muted, #57606a);
+    }
+    .rr-mermaid-ctrls {
+        display: flex;
+        gap: 4px;
+    }
+    .rr-mermaid-btn {
+        min-width: 28px;
+        height: 28px;
+        padding: 0 6px;
+        border: 1px solid var(--rr-border, #d0d7de);
+        border-radius: 5px;
+        background: var(--rr-card-bg, #fff);
+        color: var(--rr-text-muted, #57606a);
+        cursor: pointer;
+        font-size: 14px;
+        line-height: 1;
+    }
+    .rr-mermaid-btn:hover {
+        color: var(--rr-text, #1f2328);
+    }
+    .rr-mermaid-stage {
         flex: 1;
-        padding: 20px;
+        overflow: hidden;
+        position: relative;
+        touch-action: none;
+        cursor: grab;
+    }
+    .rr-mermaid-stage:active {
+        cursor: grabbing;
+    }
+    .rr-mermaid-svg-wrap {
+        transform-origin: center center;
+        width: 100%;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .rr-mermaid-svg-wrap :global(svg) {
+        max-width: 100%;
+        max-height: 80vh;
+        height: auto;
     }
 </style>
