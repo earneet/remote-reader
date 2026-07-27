@@ -94,6 +94,16 @@
         fullscreen.y = 0;
     }
 
+    function fsToggleBrowserFullscreen(): void {
+        const el = document.querySelector('.rr-mermaid-overlay');
+        if (!el) return;
+        if (!document.fullscreenElement) {
+            el.requestFullscreen?.().catch(() => {});
+        } else {
+            document.exitFullscreen?.();
+        }
+    }
+
     function onKey(e: KeyboardEvent): void {
         if (e.key === 'Escape' && fullscreen) fullscreen = null;
     }
@@ -216,6 +226,7 @@
                     <button type="button" class="rr-mermaid-btn" onclick={() => fsZoom(-ZOOM_STEP)} title="缩小">−</button>
                     <button type="button" class="rr-mermaid-btn" onclick={() => fsReset()} title="重置 100%">⊙</button>
                     <button type="button" class="rr-mermaid-btn" onclick={() => fsZoom(ZOOM_STEP)} title="放大">+</button>
+                    <button type="button" class="rr-mermaid-btn" onclick={() => fsToggleBrowserFullscreen()} title="浏览器全屏">⛶</button>
                     <button
                         type="button"
                         class="rr-mermaid-btn"
