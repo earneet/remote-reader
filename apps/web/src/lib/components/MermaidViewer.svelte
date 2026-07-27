@@ -5,6 +5,7 @@
     let { container, html }: { container: HTMLDivElement | undefined; html: string } = $props();
 
     let fullscreen = $state<{ svg: string; zoom: number; x: number; y: number } | null>(null);
+    let browserFs = $state(false);
     let themeObserver: MutationObserver | null = null;
     let cleanups: Array<() => void> = [];
 
@@ -95,17 +96,26 @@
     }
 
     function fsToggleBrowserFullscreen(): void {
+        // 用 class 驱动视觉全屏（跨平台，iOS 无 Fullscreen API 也生效）；
+        // 同时尝试 requestFullscreen 让桌面/Android 隐藏浏览器 UI
+        browserFs = !browserFs;
         const el = document.querySelector('.rr-mermaid-overlay');
-        if (!el) return;
-        if (!document.fullscreenElement) {
-            el.requestFullscreen?.().catch(() => {});
-        } else {
-            document.exitFullscreen?.();
+        if (browserFs) {
+            el?.requestFullscreen?.().catch(() => {
+                // 不支持（iOS 等）：browserFs 已 true，靠 CSS class 模拟全屏布局
+            });
+        } else if (document.fullscreenElement) {
+            document.exitFullscreen?.().catch(() => {});
         }
     }
 
     function onKey(e: KeyboardEvent): void {
         if (e.key === 'Escape' && fullscreen) fullscreen = null;
+    }
+
+    // 浏览器退出全屏（Esc）时同步 class 状态
+    function onFsChange(): void {
+        browserFs = !!document.fullscreenElement;
     }
 
     // lightbox 打开时聚焦 overlay、关闭时焦点回触发元素
@@ -196,9 +206,11 @@
             attributeFilter: ['data-theme']
         });
         window.addEventListener('keydown', onKey);
+        document.addEventListener('fullscreenchange', onFsChange);
         return () => {
             themeObserver?.disconnect();
             window.removeEventListener('keydown', onKey);
+            document.removeEventListener('fullscreenchange', onFsChange);
             cleanups.forEach((fn) => fn());
             cleanups = [];
         };
@@ -208,6 +220,7 @@
 {#if fullscreen}
     <div
         class="rr-mermaid-overlay"
+        class:rr-fs={browserFs}
         role="dialog"
         aria-modal="true"
         tabindex="-1"
@@ -226,7 +239,7 @@
                     <button type="button" class="rr-mermaid-btn" onclick={() => fsZoom(-ZOOM_STEP)} title="缩小">−</button>
                     <button type="button" class="rr-mermaid-btn" onclick={() => fsReset()} title="重置 100%">⊙</button>
                     <button type="button" class="rr-mermaid-btn" onclick={() => fsZoom(ZOOM_STEP)} title="放大">+</button>
-                    <button type="button" class="rr-mermaid-btn" onclick={() => fsToggleBrowserFullscreen()} title="浏览器全屏">⛶</button>
+                    <button type="button" class="rr-mermaid-btn" onclick={() => fsToggleBrowserFullscreen()} title="全屏">⛶</button>
                     <button
                         type="button"
                         class="rr-mermaid-btn"
@@ -344,5 +357,61 @@
         max-width: 100%;
         max-height: 80vh;
         height: auto;
+    }
+
+    /* 全屏（⛶）：去标题栏、控件浮右上角、图表占满视口。
+       class 驱动（.rr-fs）跨平台，:fullscreen 兜底桌面/Android 浏览器全屏。 */
+    .rr-mermaid-overlay.rr-fs {
+        background: var(--rr-bg, #f6f8fa);
+        padding: 0;
+        align-items: stretch;
+        justify-content: stretch;
+    }
+    .rr-mermaid-overlay.rr-fs .rr-mermaid-overlay-inner {
+        max-width: none;
+        max-height: none;
+        border: none;
+        border-radius: 0;
+    }
+    .rr-mermaid-overlay.rr-fs .rr-mermaid-bar {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        z-index: 10;
+        background: transparent;
+        border: none;
+        padding: 0;
+    }
+    .rr-mermaid-overlay.rr-fs .rr-mermaid-label {
+        display: none;
+    }
+    .rr-mermaid-overlay.rr-fs .rr-mermaid-svg-wrap :global(svg) {
+        max-height: 100vh;
+    }
+    :global(.rr-mermaid-overlay.rr-fs) {
+        background: var(--rr-bg, #f6f8fa);
+        padding: 0;
+    }
+    :global(.rr-mermaid-overlay:fullscreen) {
+        background: var(--rr-bg, #f6f8fa);
+        padding: 0;
+    }
+    :global(.rr-mermaid-overlay:fullscreen .rr-mermaid-overlay-inner) {
+        max-width: none;
+        max-height: none;
+        border: none;
+        border-radius: 0;
+    }
+    :global(.rr-mermaid-overlay:fullscreen .rr-mermaid-bar) {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        z-index: 10;
+        background: transparent;
+        border: none;
+        padding: 0;
+    }
+    :global(.rr-mermaid-overlay:fullscreen .rr-mermaid-label) {
+        display: none;
     }
 </style>
