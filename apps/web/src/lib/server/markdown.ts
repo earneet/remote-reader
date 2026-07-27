@@ -101,6 +101,8 @@ async function getMarkdown(): Promise<MarkdownIt> {
         `<span class="math inline">${md.utils.escapeHtml(tokens[idx].content)}</span>`;
     md.renderer.rules.math_block = (tokens: any, idx: number) =>
         `<div class="math block">${md.utils.escapeHtml(tokens[idx].content)}</div>\n`;
+    md.renderer.rules.table_open = () => '<div class="rr-table-wrap"><table>';
+    md.renderer.rules.table_close = () => '</table></div>';
     mdInstance = md;
     return md;
 }
