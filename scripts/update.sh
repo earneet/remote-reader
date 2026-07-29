@@ -7,7 +7,8 @@
 #   - 不要求重传 PORT / BASE_URL（从现有部署读取）
 #
 # 用法（在项目源码克隆根目录）：
-#   sudo ./scripts/update.sh
+#   sudo ./scripts/update.sh               # 用当前工作区代码升级（默认不 git pull）
+#   sudo ./scripts/update.sh --git         # 先 git pull 拉最新码再升级
 #   sudo ./scripts/update.sh -y            # 跳过确认（自动化）
 #
 # 运行参数全部从现有部署读取（/etc/remote-reader/env + systemd），无需重传；
@@ -31,18 +32,22 @@ HEALTH_WAIT=30
 
 # ---- 解析命令行参数 ----
 ASSUME_YES=0
+GIT_PULL=0
 usage() {
     cat <<EOF
-用法: sudo ./scripts/update.sh [-y|--yes] [-h|--help]
+用法: sudo ./scripts/update.sh [--git] [-y|--yes] [-h|--help]
+  --git        先 git pull 拉最新码（默认跳过，用当前工作区代码升级）
   -y, --yes    跳过确认（自动化场景）
   -h, --help   显示本帮助
 从现有部署读取参数（${ENV_FILE} + systemd），原地升级代码并 rebuild，
 保留全部配置与数据（不重新生成 SESSION_SECRET，不动 /var/lib）。
+默认用当前工作区代码（SRC_DIR）rsync 到部署目录，不 git pull；加 --git 才先拉取。
 环境变量覆盖: INSTALL_DIR / SERVICE_NAME / SERVICE_USER
 EOF
 }
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --git) GIT_PULL=1; shift ;;
         -y|--yes) ASSUME_YES=1; shift ;;
         -h|--help) usage; exit 0 ;;
         *) printf '未知参数: %s\n' "$1" >&2; usage >&2; exit 1 ;;
@@ -122,24 +127,30 @@ if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
     SUDO_HOME="$(getent passwd "${SUDO_USER}" | cut -d: -f6)"
 fi
 
-# 源码须是 git 仓库且工作区干净：update 要 git pull，脏工作区会冲突
+# git 检查：--git 模式必须 git 且工作区干净（pull 需要干净）；
+# 默认模式用当前工作区代码 rsync，不 pull、不要求干净——git 仅用于展示版本（非 git 仓库则显示 unknown）。
 GIT_BIN="$(command -v git || true)"
-[[ -n "${GIT_BIN}" ]] || die "未找到 git（update 需 git pull 拉取新码）"
 # git 操作一律以源码属主身份跑：
 # ① 用到属主用户级 ignore（~/.config/git/ignore），status 视图与其 `git status` 一致
 #    ——root 的 HOME=/root 读不到属主全局 ignore，会把 .claude/settings.local.json 等
 #    误判为未跟踪，假报"工作区不干净"（即便属主自己 git status 是干净的）；
 # ② 顺带免 dubious ownership；③ 避免以 root 写 .git/index 改属主、污染属主后续 git。
 git_cmd() {
+    [[ -n "${GIT_BIN}" ]] || return 1
     if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
         sudo -H -u "${SUDO_USER}" "${GIT_BIN}" -C "${SRC_DIR}" "$@"
     else
         "${GIT_BIN}" -C "${SRC_DIR}" "$@"
     fi
 }
-git_cmd rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "${SRC_DIR} 不是 git 仓库（update 需 git pull）"
-if [[ -n "$(git_cmd status --porcelain 2>/dev/null)" ]]; then
-    die "源码工作区不干净，git pull 可能冲突。请先处理：cd ${SRC_DIR} && git status"
+if [[ "${GIT_PULL}" -eq 1 ]]; then
+    [[ -n "${GIT_BIN}" ]] || die "未找到 git（--git 模式需 git pull 拉取新码）"
+    git_cmd rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "${SRC_DIR} 不是 git 仓库（--git 模式需 git pull）"
+    if [[ -n "$(git_cmd status --porcelain 2>/dev/null)" ]]; then
+        die "源码工作区不干净，git pull 可能冲突。请先处理：cd ${SRC_DIR} && git status"
+    fi
+else
+    [[ -n "${GIT_BIN}" ]] || warn "未找到 git（--git 未启用），版本号将显示 unknown"
 fi
 
 # sudo 重置 PATH（secure_path），需把原用户的 ~/.bun/bin 找回来（与 install.sh 同因）
@@ -189,7 +200,11 @@ printf '  数据目录          %s\n' "${DATA_ROOT}"
 printf '  当前版本          %s\n' "${OLD_REV}"
 echo
 log "将执行的操作："
-printf '  1) git pull 拉取最新代码\n'
+if [[ "${GIT_PULL}" -eq 1 ]]; then
+    printf '  1) git pull 拉取最新代码\n'
+else
+    printf '  1) 用当前工作区代码（默认不 git pull；加 --git 才拉取）\n'
+fi
 printf '  2) 备份 %s → %s\n' "${INSTALL_DIR}" "${BACKUP_DIR}"
 printf '  3) rsync 新码到 %s（排除 data / node_modules / build / .git / .env）\n' "${INSTALL_DIR}"
 printf '  4) chown root:root + bun install + build + 剥离 devDeps\n'
@@ -209,17 +224,23 @@ fi
 # 确认通过后才挂回滚 trap：此前任何 die/cancel 都未改动 INSTALL_DIR，无需回滚
 trap cleanup EXIT
 
-# ---- 4. git pull 拉最新码（只动克隆，不碰 INSTALL_DIR）----
-log "git pull 拉取最新代码"
-# --ff-only：部署克隆只应快进跟踪上游，避免意外产生 merge commit 把仓库搞乱
-if git_cmd pull --ff-only; then
-    ok "代码已更新到最新"
+# ---- 4. 拉取最新码（仅 --git 模式；默认模式直接用当前工作区代码）----
+if [[ "${GIT_PULL}" -eq 1 ]]; then
+    log "git pull 拉取最新代码"
+    # --ff-only：部署克隆只应快进跟踪上游，避免意外产生 merge commit 把仓库搞乱
+    if git_cmd pull --ff-only; then
+        ok "代码已更新到最新"
+    else
+        die "git pull 失败（可能有本地提交、无上游跟踪或网络问题）。INSTALL_DIR 未改动，服务不受影响。请手动 cd ${SRC_DIR} && git pull 后重试"
+    fi
 else
-    die "git pull 失败（可能有本地提交、无上游跟踪或网络问题）。INSTALL_DIR 未改动，服务不受影响。请手动 cd ${SRC_DIR} && git pull 后重试"
+    log "跳过 git pull（用当前工作区代码；加 --git 可先拉取）"
 fi
 NEW_REV="$(git_cmd rev-parse --short HEAD 2>/dev/null || echo unknown)"
-if [[ "${NEW_REV}" != "${OLD_REV}" ]]; then
+if [[ "${GIT_PULL}" -eq 1 && "${NEW_REV}" != "${OLD_REV}" ]]; then
     log "版本变化：${OLD_REV} → ${NEW_REV}"
+elif [[ "${GIT_PULL}" -eq 0 ]]; then
+    log "使用当前工作区代码（HEAD ${NEW_REV}）"
 else
     log "已是最新（${NEW_REV}），仍继续 rebuild 以保证构建一致"
 fi

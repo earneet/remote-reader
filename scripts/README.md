@@ -166,7 +166,7 @@ sudo systemctl restart remote-reader
 sudo ./scripts/update.sh
 ```
 
-`update.sh` 从现有部署读参数（PORT/BASE_URL 等）→ git pull → 备份 → rsync 新码 → rebuild → 重启 → health 校验，失败自动回滚。详见「[update.sh](#updatesh--一键原地升级)」一节。
+`update.sh` 从现有部署读参数（PORT/BASE_URL 等）→ 备份 → rsync 当前工作区代码 → rebuild → 重启 → health 校验，失败自动回滚（默认不 git pull，加 `--git` 才先拉取）。详见「[update.sh](#updatesh--一键原地升级)」一节。
 
 > `install.sh` 检测到同名 service 会中止（防覆盖），所以**不要直接重跑 install.sh 升级**。下面两种手动方式是 `update.sh` 不可用时的后备：
 
@@ -316,10 +316,10 @@ sudo ./scripts/uninstall.sh --yes           # 跳过所有确认（自动化）
 
 **做了什么**（每步 `[update]` 日志）：
 
-1. 前置检查（root、systemd、源码是 git 仓库且工作区干净、service/代码/env 齐备、node ≥ 22、bun、rsync、curl）
+1. 前置检查（root、systemd、service/代码/env 齐备、node ≥ 22、bun、rsync、curl；`--git` 模式额外要求源码是 git 仓库且工作区干净）
 2. 从 `/etc/remote-reader/env` 读 `PORT`/`BASE_URL` 等（无需重传）
 3. 打印读取到的参数 + 操作清单 + 升级前备份提示 → `y/N` 确认
-4. `git pull --ff-only` 拉取最新代码（只动克隆，不碰 `INSTALL_DIR`）
+4. `--git` 模式：`git pull --ff-only` 拉取最新代码（只动克隆，不碰 `INSTALL_DIR`）；默认模式：跳过，直接用当前工作区代码
 5. **整目录备份** `/opt/remote-reader` → `/opt/remote-reader.bak`（含 build + node_modules，兜底 better-sqlite3 ABI 坑）
 6. `rsync -a --delete` 新码到 `INSTALL_DIR`（排除 data / node_modules / build / .git / .env）
 7. `chown root:root` + `bun install` + `bun --filter remote-reader-web build` + 剥离 devDeps（与 install.sh 同 build 链路）
@@ -329,7 +329,8 @@ sudo ./scripts/uninstall.sh --yes           # 跳过所有确认（自动化）
 ### 基本用法
 
 ```bash
-sudo ./scripts/update.sh              # 一条命令原地升级
+sudo ./scripts/update.sh              # 用当前工作区代码原地升级（默认不 git pull）
+sudo ./scripts/update.sh --git        # 先 git pull 拉最新码再升级
 sudo ./scripts/update.sh -y           # 跳过确认（自动化）
 ```
 
@@ -337,6 +338,7 @@ sudo ./scripts/update.sh -y           # 跳过确认（自动化）
 
 | 参数 / 变量 | 默认 | 说明 |
 |---|---|---|
+| `--git` | 关 | 先 `git pull --ff-only` 拉最新码（默认跳过，用当前工作区代码升级） |
 | `-y` / `--yes` | 关 | 跳过确认 |
 | `-h` / `--help` | — | 显示帮助 |
 | `INSTALL_DIR` | `/opt/remote-reader` | 代码目录（须与安装时一致） |
@@ -352,9 +354,9 @@ sudo ./scripts/update.sh -y           # 跳过确认（自动化）
 - **整目录备份**（而非只备份 `build/`）：better-sqlite3 的 `.node` 在 `node_modules` 里，bun 重编译可能产出与生产 node ABI 不匹配的二进制，只备份 `build` 不足以回滚。
 - **health 校验**：生产跑 `node apps/web/build/index.js`，ABI 不匹配只在此时暴露；build 通过 ≠ 生产可跑。
 - **拒绝危险路径**：`INSTALL_DIR` 为空或 `/` 时中止（回滚要 `rm -rf INSTALL_DIR`）。
-- **git 工作区须干净**：脏工作区 `git pull` 会冲突，脚本先检查再拉。
+- **`--git` 模式才要求 git 工作区干净**：默认模式用当前工作区代码 rsync、不 pull、不要求干净；`--git` 模式才检查工作区干净再 `git pull`（脏工作区会冲突）。
 - **中断可识别**：上次升级中断留下的 `.bak` 会被检测到并拒绝盲跑，提示人工确认。
-- **幂等**：成功后自动清理 `.bak`，重复跑不报错；`git pull` / `systemctl restart` 本身幂等。
+- **幂等**：成功后自动清理 `.bak`，重复跑不报错；`systemctl restart` 本身幂等（默认模式不 `git pull`；`--git` 模式的 `git pull` 幂等）。
 
 ### 已知坑（实测踩过，脚本已处理）
 
