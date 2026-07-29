@@ -7,6 +7,13 @@
     let zoom = $state(1);
     let browserFs = $state(false);
     let overlayEl: HTMLDivElement | undefined = $state(undefined);
+    let rotated = $state(false);
+
+    // 横屏展示：设备竖屏(portrait)时把表格旋转 90° 铺满屏幕长边；设备已横屏(landscape)则不转，避免反向旋转。
+    // 用户点 ⛶ 进 overlay 时按当前方向决定；之后旋转设备会触发 orientationchange 自动同步。
+    function syncRotation() {
+        rotated = !window.matchMedia('(orientation: landscape)').matches;
+    }
 
     function ensureFsBtn(outer: HTMLElement, t: HTMLTableElement) {
         outer.classList.add('rr-wide');
@@ -25,6 +32,7 @@
         fs = { html: tableHtml };
         zoom = 1;
         browserFs = false;
+        syncRotation();
     }
 
     function closeOverlay() {
@@ -142,8 +150,14 @@
 
     $effect(() => {
         if (!fs) return;
+        const mq = window.matchMedia('(orientation: landscape)');
+        const onOrient = () => syncRotation();
+        mq.addEventListener('change', onOrient);
         document.addEventListener('fullscreenchange', onFsChange);
-        return () => document.removeEventListener('fullscreenchange', onFsChange);
+        return () => {
+            mq.removeEventListener('change', onOrient);
+            document.removeEventListener('fullscreenchange', onFsChange);
+        };
     });
 </script>
 
@@ -169,7 +183,7 @@
                 <button type="button" title="关闭" onclick={closeOverlay}>✕</button>
             </div>
         </div>
-        <div class="rr-tbl-stage" use:gestures>
+        <div class="rr-tbl-stage" class:rotated={rotated} use:gestures>
             <div class="rr-tbl-scroll" style={`transform: scale(${zoom})`}>{@html fs.html}</div>
         </div>
     </div>
@@ -183,7 +197,7 @@
     }
     .rr-tbl-bar {
         display: flex; align-items: center; justify-content: space-between;
-        padding: 6px 10px; flex-shrink: 0;
+        padding: 6px 10px; flex-shrink: 0; position: relative; z-index: 2;
         background: var(--rr-bg, #f6f8fa);
         border-bottom: 1px solid var(--rr-border-soft, #eaecef);
     }
@@ -200,13 +214,20 @@
         touch-action: pan-x pan-y;
         padding: 12px; box-sizing: border-box;
     }
+    .rr-tbl-stage.rotated {
+        position: fixed;
+        top: 50%; left: 50%;
+        width: 100vh; height: 100vw;
+        transform: translate(-50%, -50%) rotate(-90deg);
+        z-index: 1;
+    }
     .rr-tbl-scroll {
         transform-origin: top left; display: inline-block;
         user-select: text; -webkit-user-select: text;
         background: var(--rr-card-bg, #fff); color: var(--rr-text, #1f2328);
         padding: 8px; border-radius: 8px;
     }
-    .rr-tbl-scroll :global(table) { border-collapse: separate; border-spacing: 0; }
+    .rr-tbl-scroll :global(table) { border-collapse: separate; border-spacing: 0; width: 100%; }
     .rr-tbl-scroll :global(th),
     .rr-tbl-scroll :global(td) {
         overflow-wrap: break-word;
