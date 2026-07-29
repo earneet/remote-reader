@@ -8,7 +8,7 @@ Remote Reader 让远程工作的 Agent 通过 MCP 上传 Markdown 文档，用�
 
 ## 当前状态
 
-**子计划 1/2/3 全部已实现并 merge `master`**：Web 上传 API（`POST /api/v1/documents`，token 认证 + content_hash 幂等）+ 免登录查看页 `/s/<token>`（markdown-it + Shiki SSR + Mermaid + KaTeX）+ 注册/登录/session/logout；本地 MCP 桥（`apps/mcp-bridge`，stdio，`upload_document` 工具）；文件管理器（双栏列表/预览/删除）+ `/d/<id>` owner 查看页 + API token 管理 UI（`/settings/tokens`，创建/撤销 + 一次性 reveal）+ 分享 token 管理 UI（`/settings/shares`，撤销）；速率限制（上传/登录，见 `apps/web/src/lib/server/ratelimit.ts`）；Docker（多阶段 Dockerfile + docker-compose，非 root 运行）。200 单测 + svelte-check 0/0 + 桥 tsc 0 错 + Docker 构建冒烟全过。
+**子计划 1/2/3 全部已实现并 merge `master`**：Web 上传 API（`POST /api/v1/documents`，token 认证 + content_hash 幂等）+ 免登录查看页 `/s/<token>`（markdown-it + Shiki SSR + Mermaid + KaTeX）+ 注册/登录/session/logout；本地 MCP 桥（`apps/mcp-bridge`，stdio，`upload_document` 工具）；文件管理器（双栏列表/预览/删除）+ `/d/<id>` owner 查看页 + API token 管理 UI（`/settings/tokens`，创建/撤销 + 一次性 reveal）+ 分享 token 管理 UI（`/settings/shares`，撤销）；速率限制（上传/登录，见 `apps/web/src/lib/server/ratelimit.ts`）；Docker（多阶段 Dockerfile + docker-compose，非 root 运行）。后续已交付：`/s/<token>` 查看页视觉改造（精修 GitHub 调性 + 深色模式 + mermaid lightbox）+ 文件管理页修复（文件树点击导航改 SvelteKit `goto` + 重命名 inline edit）。212 单测 + svelte-check 0/0 + 桥 tsc 0 错 + Docker 构建冒烟全过。
 
 - 子计划 1：✅ 完成（`docs/superpowers/plans/2026-07-18-web-core.md`）
 - 子计划 2：✅ 完成（`docs/superpowers/specs/2026-07-19-mcp-bridge-design.md` + `docs/superpowers/plans/2026-07-19-mcp-bridge.md`）
@@ -80,7 +80,7 @@ API_TOKEN=rr_xxx BASE_URL=http://localhost:5173 bash scripts/e2e-check.sh   # �
 docker compose up --build                      # 一键起服务（:3000），data/ 挂载为卷
 ```
 
-**Docker 非 root 运行**：`docker-entrypoint.sh` 先 `chown -R node:node /app/data`（host 首次建卷常是 root 属主），再用 `runuser -u node` 降权跑 `node apps/web/build/index.js`；healthcheck 命中 `/`（<500 即活）。改 entrypoint / Dockerfile 前看 sub3 设计 spec。
+**Docker 非 root 运行**：`docker-entrypoint.sh` 先 `chown -R node:node /app/data`（host 首次建卷常是 root 属主），再用 `runuser -u node` 降权跑 `node apps/web/build/index.js`；healthcheck 命中 `/api/health`（含 DB `SELECT 1`，DB/磁盘故障返回 503）。改 entrypoint / Dockerfile 前看 sub3 设计 spec。
 
 ## 环境变量（完整清单见 `.env.example`）
 
