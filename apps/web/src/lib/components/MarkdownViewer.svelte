@@ -89,6 +89,7 @@
     .markdown-body :global(td) {
         border: 1px solid var(--rr-border, #d0d7de);
         padding: 0.4rem 0.8rem;
+        overflow-wrap: break-word;
     }
     .markdown-body :global(blockquote) {
         border-left: 3px solid var(--rr-border, #d0d7de);
