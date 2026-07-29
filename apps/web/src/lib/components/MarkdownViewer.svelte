@@ -1,5 +1,6 @@
 <script lang="ts">
     import MermaidViewer from '$components/MermaidViewer.svelte';
+    import TableFullscreen from '$components/TableFullscreen.svelte';
     let { html }: { html: string } = $props();
     let container: HTMLDivElement | undefined = $state(undefined);
 
@@ -28,6 +29,7 @@
     {@html html}
 </div>
 <MermaidViewer {container} {html} />
+<TableFullscreen {container} {html} />
 
 <style>
     .markdown-body {
@@ -81,6 +83,11 @@
         overflow-x: auto;
         max-width: 100%;
         margin: 1rem 0;
+    }
+    @media (max-width: 768px) {
+        .markdown-body :global(.rr-table-wrap.rr-shrink) {
+            font-size: 0.9em;
+        }
     }
     .markdown-body :global(table) {
         border-collapse: collapse;
