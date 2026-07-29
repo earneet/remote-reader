@@ -8,7 +8,7 @@ Remote Reader 让远程工作的 Agent 通过 MCP 上传 Markdown 文档，用�
 
 ## 当前状态
 
-**子计划 1/2/3 全部已实现并 merge `master`**：Web 上传 API（`POST /api/v1/documents`，token 认证 + content_hash 幂等）+ 免登录查看页 `/s/<token>`（markdown-it + Shiki SSR + Mermaid + KaTeX）+ 注册/登录/session/logout；本地 MCP 桥（`apps/mcp-bridge`，stdio，`upload_document` 工具）；文件管理器（双栏列表/预览/删除）+ `/d/<id>` owner 查看页 + API token 管理 UI（`/settings/tokens`，创建/撤销 + 一次性 reveal）+ 分享 token 管理 UI（`/settings/shares`，撤销）；速率限制（上传/登录，见 `apps/web/src/lib/server/ratelimit.ts`）；Docker（多阶段 Dockerfile + docker-compose，非 root 运行）。后续已交付：`/s/<token>` 查看页视觉改造（精修 GitHub 调性 + 深色模式 + mermaid lightbox）+ 文件管理页修复（文件树点击导航改 SvelteKit `goto` + 重命名 inline edit）。212 单测 + svelte-check 0/0 + 桥 tsc 0 错 + Docker 构建冒烟全过。
+**子计划 1/2/3 全部已实现并 merge `master`**：Web 上传 API（`POST /api/v1/documents`，token 认证 + content_hash 幂等）+ 免登录查看页 `/s/<token>`（markdown-it + Shiki SSR + Mermaid + KaTeX）+ 注册/登录/session/logout；本地 MCP 桥（`apps/mcp-bridge`，stdio，`upload_document` 工具）；文件管理器（双栏列表/预览/删除）+ `/d/<id>` owner 查看页 + API token 管理 UI（`/settings/tokens`，创建/撤销 + 一次性 reveal）+ 分享 token 管理 UI（`/settings/shares`，撤销）；速率限制（上传/登录，见 `apps/web/src/lib/server/ratelimit.ts`）；Docker（多阶段 Dockerfile + docker-compose，非 root 运行）。后续已交付：`/s/<token>` 查看页视觉改造（精修 GitHub 调性 + 深色模式 + mermaid lightbox）+ 文件管理页修复（文件树点击导航改 SvelteKit `goto` + 重命名 inline edit）+ 表格手机端渲染修复（`td/th overflow-wrap:break-word` 修竖条根因 + 客户端测量分档 `.rr-shrink`/`.rr-wide` + 宽表全屏 overlay 选字复制友好；多 Agent 交叉审核 v2 落地）。212 单测 + svelte-check 0/0 + 桥 tsc 0 错 + Docker 构建冒烟全过。
 
 - 子计划 1：✅ 完成（`docs/superpowers/plans/2026-07-18-web-core.md`）
 - 子计划 2：✅ 完成（`docs/superpowers/specs/2026-07-19-mcp-bridge-design.md` + `docs/superpowers/plans/2026-07-19-mcp-bridge.md`）
