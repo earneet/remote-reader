@@ -84,9 +84,19 @@
         max-width: 100%;
         margin: 1rem 0;
     }
+    .markdown-body :global(.rr-table-outer) { position: relative; }
+    .markdown-body :global(.rr-table-fs-btn) { display: none; }
     @media (max-width: 768px) {
         .markdown-body :global(.rr-table-wrap.rr-shrink) {
             font-size: 0.9em;
+        }
+        .markdown-body :global(.rr-table-outer.rr-wide .rr-table-fs-btn) {
+            display: inline-flex; align-items: center; justify-content: center;
+            position: absolute; top: 4px; right: 4px; z-index: 2;
+            width: 28px; height: 28px; border-radius: 5px;
+            border: 1px solid var(--rr-border, #d0d7de);
+            background: var(--rr-card-bg, #fff); color: var(--rr-text-muted, #57606a);
+            cursor: pointer; font-size: 14px; line-height: 1;
         }
     }
     .markdown-body :global(table) {

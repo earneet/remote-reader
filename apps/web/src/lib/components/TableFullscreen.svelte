@@ -1,22 +1,127 @@
 <script lang="ts">
+    import { clampZoom, nextZoom, formatZoom, ZOOM_STEP } from '$lib/shared/mermaid-zoom';
+
     let { container, html }: { container: HTMLDivElement | undefined; html: string } = $props();
+
+    let fs = $state<{ html: string } | null>(null);
+    let zoom = $state(1);
+    let browserFs = $state(false);
+    let overlayEl: HTMLDivElement | undefined = $state(undefined);
+
+    function ensureFsBtn(outer: HTMLElement, t: HTMLTableElement) {
+        outer.classList.add('rr-wide');
+        if (!outer.querySelector('.rr-table-fs-btn')) {
+            const btn = document.createElement('button');
+            btn.className = 'rr-table-fs-btn';
+            btn.type = 'button';
+            btn.textContent = '⛶';
+            btn.title = '全屏查看表格';
+            btn.addEventListener('click', () => openFullscreen(t.outerHTML));
+            outer.appendChild(btn);
+        }
+    }
+
+    function openFullscreen(tableHtml: string) {
+        fs = { html: tableHtml };
+        zoom = 1;
+        browserFs = false;
+    }
+
+    function closeOverlay() {
+        if (document.fullscreenElement) document.exitFullscreen()?.catch(() => {});
+        browserFs = false;
+        fs = null;
+    }
+
+    function toggleFs() {
+        browserFs = !browserFs;
+        const el = overlayEl;
+        if (browserFs) el?.requestFullscreen?.().catch(() => {});
+        else if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+    }
+
+    function onFsChange() {
+        browserFs = !!document.fullscreenElement;
+    }
+
+    function focusOnMount(node: HTMLElement) {
+        const prev = document.activeElement as HTMLElement | null;
+        node.focus();
+        return {
+            destroy() {
+                if (prev && typeof prev.focus === 'function') prev.focus();
+            }
+        };
+    }
+
+    function gestures(node: HTMLElement) {
+        let pointers = new Map<number, { x: number; y: number }>();
+        let pinchDist = 0;
+        let zoomStart = 1;
+        const down = (e: PointerEvent) => {
+            pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+            try { node.setPointerCapture(e.pointerId); } catch {}
+            if (pointers.size === 2) {
+                const [a, b] = [...pointers.values()];
+                pinchDist = Math.hypot(a.x - b.x, a.y - b.y);
+                zoomStart = zoom;
+            }
+        };
+        const move = (e: PointerEvent) => {
+            if (!pointers.has(e.pointerId)) return;
+            pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+            if (pointers.size >= 2 && pinchDist > 0) {
+                const [a, b] = [...pointers.values()];
+                const d = Math.hypot(a.x - b.x, a.y - b.y);
+                zoom = clampZoom(zoomStart * (d / pinchDist));
+            }
+        };
+        const up = (e: PointerEvent) => {
+            pointers.delete(e.pointerId);
+            try { node.releasePointerCapture(e.pointerId); } catch {}
+            if (pointers.size < 2) pinchDist = 0;
+        };
+        const wheel = (e: WheelEvent) => {
+            // H1: 仅 Ctrl/Meta+滚轮缩放，普通滚轮/触控板平移放行给原生滚动
+            if (!(e.ctrlKey || e.metaKey)) return;
+            e.preventDefault();
+            zoom = clampZoom(zoom - e.deltaY * 0.0015);
+        };
+        node.addEventListener('pointerdown', down);
+        node.addEventListener('pointermove', move);
+        node.addEventListener('pointerup', up);
+        node.addEventListener('pointercancel', up);
+        node.addEventListener('wheel', wheel, { passive: false });
+        return {
+            destroy() {
+                node.removeEventListener('pointerdown', down);
+                node.removeEventListener('pointermove', move);
+                node.removeEventListener('pointerup', up);
+                node.removeEventListener('pointercancel', up);
+                node.removeEventListener('wheel', wheel);
+            }
+        };
+    }
 
     $effect(() => {
         const _ = html;
         const root = container;
         if (!root) return;
+        root.querySelectorAll('.rr-table-fs-btn').forEach((b) => b.remove());
         const wraps = Array.from(root.querySelectorAll<HTMLElement>('.rr-table-wrap'));
         const apply = (w: HTMLElement) => {
             const t = w.querySelector('table');
             if (!t) return;
+            const outer = w.parentElement;
             w.classList.remove('rr-shrink', 'rr-wide');
+            if (outer) outer.classList.remove('rr-wide');
             const overflow = () => t.scrollWidth > w.clientWidth + 8;
             if (!overflow()) return;
             if (window.matchMedia('(max-width: 768px)').matches) {
                 w.classList.add('rr-shrink');
-                if (overflow()) w.classList.add('rr-wide');
-            } else {
-                w.classList.add('rr-wide');
+                if (overflow() && outer) ensureFsBtn(outer, t);
+            } else if (outer) {
+                ensureFsBtn(outer, t);
             }
         };
         wraps.forEach(apply);
@@ -34,4 +139,92 @@
             window.removeEventListener('resize', rerun);
         };
     });
+
+    $effect(() => {
+        if (!fs) return;
+        document.addEventListener('fullscreenchange', onFsChange);
+        return () => document.removeEventListener('fullscreenchange', onFsChange);
+    });
 </script>
+
+{#if fs}
+    <div
+        class="rr-tbl-overlay"
+        class:rr-fs={browserFs}
+        bind:this={overlayEl}
+        role="dialog"
+        aria-modal="true"
+        tabindex="-1"
+        use:focusOnMount
+        onclick={(e) => { if (e.target === e.currentTarget) closeOverlay(); }}
+        onkeydown={(e) => { if (e.key === 'Escape') closeOverlay(); }}
+    >
+        <div class="rr-tbl-bar">
+            <span class="rr-tbl-label">表格 · {formatZoom(zoom)}</span>
+            <div class="rr-tbl-ctrls">
+                <button type="button" title="缩小" onclick={() => (zoom = nextZoom(zoom, -ZOOM_STEP))}>−</button>
+                <button type="button" title="重置" onclick={() => (zoom = 1)}>⊙</button>
+                <button type="button" title="放大" onclick={() => (zoom = nextZoom(zoom, ZOOM_STEP))}>+</button>
+                <button type="button" title="全屏" onclick={toggleFs}>⛶</button>
+                <button type="button" title="关闭" onclick={closeOverlay}>✕</button>
+            </div>
+        </div>
+        <div class="rr-tbl-stage" use:gestures>
+            <div class="rr-tbl-scroll" style={`transform: scale(${zoom})`}>{@html fs.html}</div>
+        </div>
+    </div>
+{/if}
+
+<style>
+    .rr-tbl-overlay {
+        position: fixed; inset: 0; z-index: 1000;
+        background: rgba(0, 0, 0, 0.8);
+        display: flex; flex-direction: column;
+    }
+    .rr-tbl-bar {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 6px 10px; flex-shrink: 0;
+        background: var(--rr-bg, #f6f8fa);
+        border-bottom: 1px solid var(--rr-border-soft, #eaecef);
+    }
+    .rr-tbl-label { font-size: 12px; color: var(--rr-text-muted, #57606a); }
+    .rr-tbl-ctrls { display: flex; gap: 4px; }
+    .rr-tbl-ctrls button {
+        min-width: 28px; height: 28px; padding: 0 6px;
+        border: 1px solid var(--rr-border, #d0d7de); border-radius: 5px;
+        background: var(--rr-card-bg, #fff); color: var(--rr-text-muted, #57606a);
+        cursor: pointer; font-size: 14px; line-height: 1;
+    }
+    .rr-tbl-stage {
+        flex: 1; overflow: auto;
+        touch-action: pan-x pan-y;
+        padding: 12px; box-sizing: border-box;
+    }
+    .rr-tbl-scroll {
+        transform-origin: top left; display: inline-block;
+        user-select: text; -webkit-user-select: text;
+        background: var(--rr-card-bg, #fff); color: var(--rr-text, #1f2328);
+        padding: 8px; border-radius: 8px;
+    }
+    .rr-tbl-scroll :global(table) { border-collapse: separate; border-spacing: 0; }
+    .rr-tbl-scroll :global(th),
+    .rr-tbl-scroll :global(td) {
+        overflow-wrap: break-word;
+        border: 1px solid var(--rr-border, #d0d7de);
+        padding: 0.4rem 0.8rem; color: var(--rr-text, #1f2328);
+    }
+    .rr-tbl-scroll :global(th) {
+        position: sticky; top: 0; background: var(--rr-card-bg, #fff); z-index: 1;
+    }
+    .rr-tbl-scroll :global(a) { color: var(--rr-link, #0969da); }
+    .rr-tbl-scroll :global(:not(pre) > code) {
+        font-family: ui-monospace, "SF Mono", Menlo, monospace;
+        background: var(--rr-inline-code-bg, #eff2f5); color: var(--rr-inline-code-text, #bc4b00);
+        padding: 0.15em 0.35em; border-radius: 4px;
+    }
+    .rr-tbl-overlay.rr-fs .rr-tbl-bar {
+        position: absolute; top: 8px; right: 8px; z-index: 10;
+        background: transparent; border: none;
+    }
+    .rr-tbl-overlay.rr-fs .rr-tbl-label { display: none; }
+</style>
