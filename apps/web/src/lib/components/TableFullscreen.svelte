@@ -213,6 +213,7 @@
         flex: 1; overflow: auto;
         touch-action: pan-x pan-y;
         padding: 12px; box-sizing: border-box;
+        display: flex;
     }
     .rr-tbl-stage.rotated {
         position: fixed;
@@ -222,7 +223,10 @@
         z-index: 1;
     }
     .rr-tbl-scroll {
-        transform-origin: top left; display: inline-block;
+        margin: auto;
+        width: 100%;
+        transform-origin: center center;
+        box-sizing: border-box;
         user-select: text; -webkit-user-select: text;
         background: var(--rr-card-bg, #fff); color: var(--rr-text, #1f2328);
         padding: 8px; border-radius: 8px;
