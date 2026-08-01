@@ -88,12 +88,14 @@
     .markdown-body :global(.rr-table-fs-btn) { display: none; }
     @media (min-width: 769px) {
         .markdown-body :global(.rr-table-outer.rr-wide-d) {
-            width: fit-content;
             max-width: 95vw;
             min-width: 100%;
             position: relative;
             left: 50%;
             transform: translateX(-50%);
+        }
+        .markdown-body :global(.rr-table-outer.rr-wide-d .rr-table-wrap table) {
+            width: 100%;
         }
     }
     @media (max-width: 768px) {

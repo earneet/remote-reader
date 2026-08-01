@@ -145,13 +145,23 @@
             let next: 'none' | 'mobile' | 'desktop';
             if (!overflows) next = 'none';
             else next = isMobile ? 'mobile' : 'desktop';
-            if (states.get(w) === next) return;
-            states.set(w, next);
-            w.classList.toggle('rr-shrink', next === 'mobile');
-            if (outer) {
-                outer.classList.remove('rr-wide');
-                outer.classList.toggle('rr-wide-d', next === 'desktop');
-                if (next === 'mobile' && t.scrollWidth > base + 8) ensureFsBtn(outer, t);
+            if (states.get(w) !== next) {
+                states.set(w, next);
+                w.classList.toggle('rr-shrink', next === 'mobile');
+                if (outer) {
+                    outer.classList.remove('rr-wide');
+                    outer.classList.toggle('rr-wide-d', next === 'desktop');
+                    if (next === 'mobile' && t.scrollWidth > base + 8) ensureFsBtn(outer, t);
+                }
+            }
+            if (outer && !isMobile) {
+                if (next === 'desktop') {
+                    const target = Math.min(window.innerWidth * 0.95, natural + 8);
+                    const cur = parseFloat(outer.style.width) || 0;
+                    if (Math.abs(cur - target) > 1) outer.style.width = target + 'px';
+                } else if (outer.style.width) {
+                    outer.style.width = '';
+                }
             }
         };
         wraps.forEach(apply);
