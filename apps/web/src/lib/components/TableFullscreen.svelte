@@ -129,12 +129,22 @@
             if (!t) return;
             const outer = w.parentElement;
             const base = baseWidthOf(w);
-            // 比较表格内容固有宽(t.scrollWidth)与正文容器宽(base)——两者均不受外扩 class 影响，
-            // 故判定稳定，不会因 toggle class → 尺寸变 → RO 触发 → 翻转判定而无限抖动。
-            const overflows = t.scrollWidth > base + 8;
+            const isMobile = window.matchMedia('(max-width: 768px)').matches;
+            // 量"理想宽"(非 shrink 态、max-content 不换行宽)：临时摘 shrink + 设 max-content，量完恢复。
+            // 用 max-content 而非 scrollWidth：scrollWidth 是被容器压缩换行后的渲染宽，会漏判
+            // "靠换行勉强塞进容器、但理想宽其实更大"的表（外扩后能少换行、更易读）。
+            // 基于非 shrink 态测量 → 判定不依赖当前是否缩小，避免 shrink↔判定 的 RO 循环。
+            const wasShrink = w.classList.contains('rr-shrink');
+            if (wasShrink) w.classList.remove('rr-shrink');
+            const prevW = t.style.width;
+            t.style.width = 'max-content';
+            const natural = t.offsetWidth;
+            t.style.width = prevW;
+            if (wasShrink) w.classList.add('rr-shrink');
+            const overflows = natural > base + 8;
             let next: 'none' | 'mobile' | 'desktop';
             if (!overflows) next = 'none';
-            else next = window.matchMedia('(max-width: 768px)').matches ? 'mobile' : 'desktop';
+            else next = isMobile ? 'mobile' : 'desktop';
             if (states.get(w) === next) return;
             states.set(w, next);
             w.classList.toggle('rr-shrink', next === 'mobile');

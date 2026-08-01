@@ -88,7 +88,8 @@
     .markdown-body :global(.rr-table-fs-btn) { display: none; }
     @media (min-width: 769px) {
         .markdown-body :global(.rr-table-outer.rr-wide-d) {
-            width: 95vw;
+            width: fit-content;
+            max-width: 95vw;
             min-width: 100%;
             position: relative;
             left: 50%;
