@@ -117,19 +117,31 @@
         if (!root) return;
         root.querySelectorAll('.rr-table-fs-btn').forEach((b) => b.remove());
         const wraps = Array.from(root.querySelectorAll<HTMLElement>('.rr-table-wrap'));
+        const states = new WeakMap<HTMLElement, 'none' | 'mobile' | 'desktop'>();
+        const baseWidthOf = (w: HTMLElement) => {
+            const r = w.closest('.markdown-body') as HTMLElement | null;
+            if (!r) return w.clientWidth;
+            const cs = getComputedStyle(r);
+            return r.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+        };
         const apply = (w: HTMLElement) => {
             const t = w.querySelector('table');
             if (!t) return;
             const outer = w.parentElement;
-            w.classList.remove('rr-shrink', 'rr-wide');
-            if (outer) outer.classList.remove('rr-wide');
-            const overflow = () => t.scrollWidth > w.clientWidth + 8;
-            if (!overflow()) return;
-            if (window.matchMedia('(max-width: 768px)').matches) {
-                w.classList.add('rr-shrink');
-                if (overflow() && outer) ensureFsBtn(outer, t);
-            } else if (outer) {
-                ensureFsBtn(outer, t);
+            const base = baseWidthOf(w);
+            // 比较表格内容固有宽(t.scrollWidth)与正文容器宽(base)——两者均不受外扩 class 影响，
+            // 故判定稳定，不会因 toggle class → 尺寸变 → RO 触发 → 翻转判定而无限抖动。
+            const overflows = t.scrollWidth > base + 8;
+            let next: 'none' | 'mobile' | 'desktop';
+            if (!overflows) next = 'none';
+            else next = window.matchMedia('(max-width: 768px)').matches ? 'mobile' : 'desktop';
+            if (states.get(w) === next) return;
+            states.set(w, next);
+            w.classList.toggle('rr-shrink', next === 'mobile');
+            if (outer) {
+                outer.classList.remove('rr-wide');
+                outer.classList.toggle('rr-wide-d', next === 'desktop');
+                if (next === 'mobile' && t.scrollWidth > base + 8) ensureFsBtn(outer, t);
             }
         };
         wraps.forEach(apply);

@@ -86,6 +86,15 @@
     }
     .markdown-body :global(.rr-table-outer) { position: relative; }
     .markdown-body :global(.rr-table-fs-btn) { display: none; }
+    @media (min-width: 769px) {
+        .markdown-body :global(.rr-table-outer.rr-wide-d) {
+            width: 95vw;
+            min-width: 100%;
+            position: relative;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+    }
     @media (max-width: 768px) {
         .markdown-body :global(.rr-table-wrap.rr-shrink) {
             font-size: 0.9em;
