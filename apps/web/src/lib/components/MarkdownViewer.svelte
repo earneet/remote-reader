@@ -86,6 +86,7 @@
     }
     .markdown-body :global(.rr-table-outer) { position: relative; }
     .markdown-body :global(.rr-table-fs-btn) { display: none; }
+    .markdown-body :global(.rr-table-expand-btn) { display: none; }
     @media (min-width: 769px) {
         .markdown-body :global(.rr-table-outer.rr-wide-d) {
             max-width: 95vw;
@@ -96,6 +97,25 @@
         }
         .markdown-body :global(.rr-table-outer.rr-wide-d .rr-table-wrap table) {
             width: 100%;
+        }
+        .markdown-body :global(.rr-table-outer .rr-table-expand-btn) {
+            position: absolute;
+            top: 4px;
+            right: 4px;
+            z-index: 2;
+            display: inline-block;
+            padding: 2px 10px;
+            border-radius: 5px;
+            border: 1px solid var(--rr-border, #d0d7de);
+            background: var(--rr-card-bg, #fff);
+            color: var(--rr-text-muted, #57606a);
+            cursor: pointer;
+            font-size: 12px;
+            line-height: 1.5;
+            white-space: nowrap;
+        }
+        .markdown-body :global(.rr-table-outer .rr-table-expand-btn:hover) {
+            background: var(--rr-bg, #f6f8fa);
         }
     }
     @media (max-width: 768px) {

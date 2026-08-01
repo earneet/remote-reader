@@ -115,14 +115,45 @@
         const _ = html;
         const root = container;
         if (!root) return;
-        root.querySelectorAll('.rr-table-fs-btn').forEach((b) => b.remove());
+        root.querySelectorAll('.rr-table-fs-btn, .rr-table-expand-btn').forEach((b) => b.remove());
         const wraps = Array.from(root.querySelectorAll<HTMLElement>('.rr-table-wrap'));
-        const states = new WeakMap<HTMLElement, 'none' | 'mobile' | 'desktop'>();
+        const states = new WeakMap<HTMLElement, 'none' | 'mobile'>();
+        const expanded = new Set<HTMLElement>();
+        const naturalOf = new WeakMap<HTMLElement, number>();
         const baseWidthOf = (w: HTMLElement) => {
             const r = w.closest('.markdown-body') as HTMLElement | null;
             if (!r) return w.clientWidth;
             const cs = getComputedStyle(r);
             return r.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+        };
+        // 桌面端"展开/收缩"：按用户点击态(expanded)同步 class、外扩宽度、按钮文案
+        const syncExpand = (outer: HTMLElement) => {
+            const isExp = expanded.has(outer);
+            outer.classList.toggle('rr-wide-d', isExp);
+            const btn = outer.querySelector<HTMLButtonElement>('.rr-table-expand-btn');
+            if (btn) btn.textContent = isExp ? '收缩' : '展开';
+            if (isExp) {
+                const natural = naturalOf.get(outer) ?? 0;
+                const target = Math.min(window.innerWidth * 0.95, natural + 8);
+                const cur = parseFloat(outer.style.width) || 0;
+                if (Math.abs(cur - target) > 1) outer.style.width = target + 'px';
+            } else if (outer.style.width) {
+                outer.style.width = '';
+            }
+        };
+        const ensureExpandBtn = (outer: HTMLElement) => {
+            if (outer.querySelector('.rr-table-expand-btn')) return;
+            const btn = document.createElement('button');
+            btn.className = 'rr-table-expand-btn';
+            btn.type = 'button';
+            btn.textContent = '展开';
+            btn.title = '展开表格（利用屏幕两侧留白）';
+            btn.addEventListener('click', () => {
+                if (expanded.has(outer)) expanded.delete(outer);
+                else expanded.add(outer);
+                syncExpand(outer);
+            });
+            outer.appendChild(btn);
         };
         const apply = (w: HTMLElement) => {
             const t = w.querySelector('table');
@@ -130,10 +161,8 @@
             const outer = w.parentElement;
             const base = baseWidthOf(w);
             const isMobile = window.matchMedia('(max-width: 768px)').matches;
-            // 量"理想宽"(非 shrink 态、max-content 不换行宽)：临时摘 shrink + 设 max-content，量完恢复。
-            // 用 max-content 而非 scrollWidth：scrollWidth 是被容器压缩换行后的渲染宽，会漏判
-            // "靠换行勉强塞进容器、但理想宽其实更大"的表（外扩后能少换行、更易读）。
-            // 基于非 shrink 态测量 → 判定不依赖当前是否缩小，避免 shrink↔判定 的 RO 循环。
+            // 量"理想宽"(非 shrink 态、max-content 不换行宽)：scrollWidth 是被容器压缩换行后的渲染宽，
+            // 会漏判"靠换行勉强塞进容器、理想宽其实更大"的表。基于非 shrink 态测量避免 shrink↔判定 RO 循环。
             const wasShrink = w.classList.contains('rr-shrink');
             if (wasShrink) w.classList.remove('rr-shrink');
             const prevW = t.style.width;
@@ -142,26 +171,42 @@
             t.style.width = prevW;
             if (wasShrink) w.classList.add('rr-shrink');
             const overflows = natural > base + 8;
-            let next: 'none' | 'mobile' | 'desktop';
-            if (!overflows) next = 'none';
-            else next = isMobile ? 'mobile' : 'desktop';
-            if (states.get(w) !== next) {
-                states.set(w, next);
-                w.classList.toggle('rr-shrink', next === 'mobile');
+            if (isMobile) {
+                // 移动端策略不变：shrink + ⛊ 全屏 overlay
+                const next: 'none' | 'mobile' = overflows ? 'mobile' : 'none';
+                if (states.get(w) !== next) {
+                    states.set(w, next);
+                    w.classList.toggle('rr-shrink', next === 'mobile');
+                    if (outer) {
+                        outer.classList.remove('rr-wide');
+                        if (next === 'mobile' && t.scrollWidth > base + 8) ensureFsBtn(outer, t);
+                    }
+                }
+                // 跨断点切换到移动端时，清桌面展开态
                 if (outer) {
-                    outer.classList.remove('rr-wide');
-                    outer.classList.toggle('rr-wide-d', next === 'desktop');
-                    if (next === 'mobile' && t.scrollWidth > base + 8) ensureFsBtn(outer, t);
+                    expanded.delete(outer);
+                    outer.classList.remove('rr-wide-d');
+                    if (outer.style.width) outer.style.width = '';
                 }
+                return;
             }
-            if (outer && !isMobile) {
-                if (next === 'desktop') {
-                    const target = Math.min(window.innerWidth * 0.95, natural + 8);
-                    const cur = parseFloat(outer.style.width) || 0;
-                    if (Math.abs(cur - target) > 1) outer.style.width = target + 'px';
-                } else if (outer.style.width) {
-                    outer.style.width = '';
-                }
+            // 桌面端：宽表显示"展开"按钮，默认不外扩（原始正文宽 + 横向滚动），用户点击才外扩
+            w.classList.remove('rr-shrink');
+            if (!outer) return;
+            outer.classList.remove('rr-wide');
+            const fb = outer.querySelector('.rr-table-fs-btn');
+            if (fb) fb.remove();
+            if (overflows) {
+                naturalOf.set(outer, natural);
+                ensureExpandBtn(outer);
+                syncExpand(outer);
+            } else {
+                expanded.delete(outer);
+                naturalOf.delete(outer);
+                outer.classList.remove('rr-wide-d');
+                if (outer.style.width) outer.style.width = '';
+                const eb = outer.querySelector('.rr-table-expand-btn');
+                if (eb) eb.remove();
             }
         };
         wraps.forEach(apply);
