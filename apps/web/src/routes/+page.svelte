@@ -7,6 +7,8 @@
     let movingId = $state<string | null>(null);
     let moveError = $state<string | null>(null);
     let editingId = $state<string | null>(null);
+    let taggingId = $state<string | null>(null);
+    let tagInput = $state('');
 
     // 用 SvelteKit 标准导航：原生 history.pushState 只改地址栏、不更新 SvelteKit 内部 url，
     // invalidateAll 重跑 load 时 url.searchParams 仍读旧 dir → 切目录无反应。
@@ -85,6 +87,26 @@
                                     <span class="size">{item.sizeBytes} B</span>
                                 {/if}
                             </span>
+                            {#if item.type === 'file'}
+                                <span class="doc-tags">
+                                    {#each (data.tagsByDoc.get(item.id) ?? []) as tg (tg.id)}
+                                        <span class="chip-static">{tg.name}</span>
+                                    {/each}
+                                    {#if taggingId === item.id}
+                                        <form class="tag-form" method="POST" action="?/setTags"
+                                            use:enhance={() => async ({ result }) => { if (result.type === 'success') { taggingId = null; tagInput = ''; await invalidateAll(); } }}>
+                                            <input type="hidden" name="id" value={item.id}>
+                                            <input name="tags" value={tagInput || (data.tagsByDoc.get(item.id) ?? []).map(t => t.name).join(', ')}
+                                                placeholder="逗号分隔，如 周报, api" use:autofocus
+                                                onkeydown={(e) => { if (e.key === 'Escape') { taggingId = null; } }}>
+                                            <button type="submit" class="btn sm primary">保存</button>
+                                            <button type="button" class="btn sm" onclick={() => (taggingId = null)}>取消</button>
+                                        </form>
+                                    {:else}
+                                        <button class="icon-btn" title="编辑标签" onclick={() => { taggingId = item.id; tagInput = ''; }}>🏷</button>
+                                    {/if}
+                                </span>
+                            {/if}
                             <span class="actions">
                                 <button class="icon-btn" title="重命名" onclick={() => startRename(item.id)}>✏</button>
                                 {#if movingId === item.id}
@@ -172,4 +194,9 @@
     .error { color: #cf222e; font-size: 0.9em; }
     .link { border: none; background: none; color: #0969da; cursor: pointer; padding: 0; }
     .muted { color: #57606a; }
+
+    .doc-tags { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.25rem; }
+    .chip-static { display: inline-block; padding: 0 0.4rem; background: #ddf4ff; color: #0969da; border-radius: 999px; font-size: 0.72rem; }
+    .tag-form { display: inline-flex; align-items: center; gap: 0.3rem; }
+    .tag-form input { padding: 0.25rem 0.5rem; border: 1px solid #0969da; border-radius: 5px; font-size: 0.8rem; min-width: 12rem; }
 </style>

@@ -4,6 +4,7 @@ import type { Actions, PageServerLoad } from './$types';
 import { generateId } from '$server/auth';
 import { db, schema } from '$server/db';
 import { deleteNode, listChildren, listFolders, moveNode, renameNode } from '$server/documents';
+import { listTags, listTagsForDocs, setDocTags, SetTagsError } from '$server/tags';
 import { parsePath } from '@remote-reader/shared/paths';
 
 // M10: 文件管理器输入也经 sanitize，与 API 上传语义一致。名称必须是单段合法名。
@@ -19,7 +20,9 @@ export const load: PageServerLoad = async ({ locals, url }) => {
     const parentId = dir && dir.length > 0 ? dir : null;
     const children = listChildren(locals.user.id, parentId);
     const folders = listFolders(locals.user.id);
-    return { children, folders, currentDir: parentId };
+    const fileIds = children.filter(c => c.type === 'file').map(c => c.id);
+    const tagsByDoc = listTagsForDocs(fileIds, locals.user.id);
+    return { children, folders, currentDir: parentId, tagsByDoc, allTags: listTags(locals.user.id) };
 };
 
 export const actions: Actions = {
@@ -91,6 +94,25 @@ export const actions: Actions = {
         const id = String(form.get('id') ?? '');
         if (!id) error(400, '参数缺失');
         deleteNode(locals.user.id, id);
+        return { ok: true };
+    },
+    setTags: async ({ request, locals }) => {
+        if (!locals.user) redirect(302, '/login');
+        const form = await request.formData();
+        const id = String(form.get('id') ?? '');
+        const raw = String(form.get('tags') ?? '');
+        if (!id) error(400, '参数缺失');
+        const names = raw.split(',').map(s => s.trim()).filter(Boolean);
+        for (const n of names) {
+            const t = n.trim();
+            if (!t || t.length > 32 || t.includes('/')) error(400, `标签名非法：${t}`);
+        }
+        try {
+            setDocTags(locals.user.id, id, names);
+        } catch (e) {
+            if (e instanceof SetTagsError) error(404, '文档不存在或无权操作');
+            throw e;
+        }
         return { ok: true };
     }
 };

@@ -1,7 +1,7 @@
 import { test, expect, beforeEach, afterEach } from 'vitest';
 import { rmSync } from 'node:fs';
 import { and, eq } from 'drizzle-orm';
-import { db, schema } from '../src/lib/server/db';
+import { db, schema, sqlite } from '../src/lib/server/db';
 import { generateId } from '../src/lib/server/auth';
 import { uploadDocument } from '../src/lib/server/documents';
 
@@ -11,6 +11,9 @@ const TMP = `./data/test-fm-${Date.now().toString(36)}`;
 
 beforeEach(() => {
     process.env.DATA_DIR = TMP;
+    sqlite.prepare('DELETE FROM docs_fts').run();
+    db.delete(schema.documentTags).run();
+    db.delete(schema.tags).run();
     db.delete(schema.shareLinks).run();
     db.delete(schema.documents).run();
     db.delete(schema.apiTokens).run();
@@ -144,4 +147,30 @@ test('delete：正常删除文档', async () => {
 
 test('未登录 createFolder → redirect 302', async () => {
     await expect(invoke(mod.actions.createFolder, null, { name: 'x' })).rejects.toMatchObject({ status: 302 });
+});
+
+// ===== setTags =====
+
+test('setTags：正常设置标签', async () => {
+    const ownerId = generateId();
+    insertUser(ownerId);
+    const r = await uploadDocument(ownerId, 'a.md', 'x', []);
+    await invoke(mod.actions.setTags, ownerId, { id: r.id, tags: '周报, api' });
+    const data = await mod.load({ locals: { user: { id: ownerId } }, url: new URL('http://localhost/') } as any);
+    expect((data as any).tagsByDoc.get(r.id).map((t: any) => t.name).sort()).toEqual(['api', '周报']);
+});
+
+test('setTags：非法标签名 → 400', async () => {
+    const ownerId = generateId();
+    insertUser(ownerId);
+    const r = await uploadDocument(ownerId, 'a.md', 'x', []);
+    await expect(invoke(mod.actions.setTags, ownerId, { id: r.id, tags: 'a/b' })).rejects.toMatchObject({ status: 400 });
+});
+
+test('setTags：非 owner 文档 → 404', async () => {
+    const ownerId = generateId();
+    const other = generateId();
+    insertUser(ownerId); insertUser(other);
+    const r = await uploadDocument(ownerId, 'a.md', 'x', []);
+    await expect(invoke(mod.actions.setTags, other, { id: r.id, tags: 'x' })).rejects.toMatchObject({ status: 404 });
 });
