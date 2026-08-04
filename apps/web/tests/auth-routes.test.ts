@@ -1,5 +1,5 @@
 import { test, expect, beforeEach } from 'vitest';
-import { db, schema } from '../src/lib/server/db';
+import { db, schema, sqlite } from '../src/lib/server/db';
 import { eq } from 'drizzle-orm';
 
 // 放宽限流、设测试 invite，须在 import 路由模块前
@@ -10,9 +10,12 @@ const registerMod = await import('../src/routes/register/+page.server');
 const loginMod = await import('../src/routes/login/+page.server');
 
 beforeEach(() => {
+    sqlite.prepare('DELETE FROM docs_fts').run();
+    db.delete(schema.documentTags).run();
+    db.delete(schema.tags).run();
     db.delete(schema.shareLinks).run();
-    db.delete(schema.documents).run();
     db.delete(schema.apiTokens).run();
+    db.delete(schema.documents).run();
     db.delete(schema.users).run();
 });
 

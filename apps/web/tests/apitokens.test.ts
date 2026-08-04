@@ -1,14 +1,17 @@
 import { test, expect, beforeEach } from 'vitest';
 import { eq } from 'drizzle-orm';
-import { db, schema } from '../src/lib/server/db';
+import { db, schema, sqlite } from '../src/lib/server/db';
 import { generateId, hashPassword, hashToken } from '../src/lib/server/auth';
 import { listTokens, createTokenForUser, revokeToken } from '../src/lib/server/apitokens';
 
 let userId: string;
 
 beforeEach(async () => {
-    db.delete(schema.apiTokens).run();
+    sqlite.prepare('DELETE FROM docs_fts').run();
+    db.delete(schema.documentTags).run();
+    db.delete(schema.tags).run();
     db.delete(schema.shareLinks).run();
+    db.delete(schema.apiTokens).run();
     db.delete(schema.documents).run();
     db.delete(schema.users).run();
     userId = generateId();

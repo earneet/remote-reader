@@ -1,5 +1,5 @@
 import { test, expect, beforeEach } from 'vitest';
-import { db, schema } from '../src/lib/server/db';
+import { db, schema, sqlite } from '../src/lib/server/db';
 import { generateApiToken, generateId, hashPassword } from '../src/lib/server/auth';
 
 // 413 测试需要小上限；限流放宽避免测试间互相触发——须在 import +server 前设
@@ -29,9 +29,12 @@ async function call(headers: Record<string, string>, body: unknown, address?: st
 }
 
 beforeEach(async () => {
+    sqlite.prepare('DELETE FROM docs_fts').run();
+    db.delete(schema.documentTags).run();
+    db.delete(schema.tags).run();
     db.delete(schema.shareLinks).run();
-    db.delete(schema.documents).run();
     db.delete(schema.apiTokens).run();
+    db.delete(schema.documents).run();
     db.delete(schema.users).run();
     const ownerId = generateId();
     db.insert(schema.users).values({

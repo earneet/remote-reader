@@ -1,5 +1,5 @@
 import { test, expect, beforeEach } from 'vitest';
-import { db, schema } from '../src/lib/server/db';
+import { db, schema, sqlite } from '../src/lib/server/db';
 import { generateId } from '../src/lib/server/auth';
 import { writeFile } from '../src/lib/server/storage';
 import { createShareLink } from '../src/lib/server/shares';
@@ -8,9 +8,12 @@ import { join } from 'node:path';
 const { load } = await import('../src/routes/s/[token]/+page.server');
 
 beforeEach(() => {
+    sqlite.prepare('DELETE FROM docs_fts').run();
+    db.delete(schema.documentTags).run();
+    db.delete(schema.tags).run();
     db.delete(schema.shareLinks).run();
-    db.delete(schema.documents).run();
     db.delete(schema.apiTokens).run();
+    db.delete(schema.documents).run();
     db.delete(schema.users).run();
 });
 

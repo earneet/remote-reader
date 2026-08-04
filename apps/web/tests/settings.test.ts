@@ -1,7 +1,7 @@
 import { test, expect, beforeEach, afterEach } from 'vitest';
 import { rmSync } from 'node:fs';
 import { eq } from 'drizzle-orm';
-import { db, schema } from '../src/lib/server/db';
+import { db, schema, sqlite } from '../src/lib/server/db';
 import { generateId } from '../src/lib/server/auth';
 import { uploadDocument } from '../src/lib/server/documents';
 
@@ -12,9 +12,12 @@ const TMP = `./data/test-settings-${Date.now().toString(36)}`;
 
 beforeEach(() => {
     process.env.DATA_DIR = TMP;
+    sqlite.prepare('DELETE FROM docs_fts').run();
+    db.delete(schema.documentTags).run();
+    db.delete(schema.tags).run();
     db.delete(schema.shareLinks).run();
-    db.delete(schema.documents).run();
     db.delete(schema.apiTokens).run();
+    db.delete(schema.documents).run();
     db.delete(schema.users).run();
 });
 
