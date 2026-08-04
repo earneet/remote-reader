@@ -20,6 +20,7 @@
         <div class="menu">
             <a href="/settings/tokens">API Token</a>
             <a href="/settings/shares">分享链接</a>
+            <a href="/settings/tags">标签管理</a>
         </div>
     </details>
     <span class="email">{data.user?.email}</span>
