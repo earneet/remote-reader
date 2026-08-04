@@ -49,6 +49,24 @@ CREATE TABLE IF NOT EXISTS share_links (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS share_links_token_unique ON share_links (token);
 CREATE INDEX IF NOT EXISTS share_links_document_id_idx ON share_links (document_id);
+CREATE TABLE IF NOT EXISTS tags (
+    id text PRIMARY KEY NOT NULL,
+    owner_id text NOT NULL,
+    name text NOT NULL,
+    created_at integer NOT NULL,
+    FOREIGN KEY (owner_id) REFERENCES users(id) ON UPDATE no action ON DELETE no action
+);
+CREATE UNIQUE INDEX IF NOT EXISTS tags_owner_name_unique ON tags (owner_id, name);
+CREATE INDEX IF NOT EXISTS tags_owner_id_idx ON tags (owner_id);
+CREATE TABLE IF NOT EXISTS document_tags (
+    tag_id text NOT NULL,
+    document_id text NOT NULL,
+    FOREIGN KEY (tag_id) REFERENCES tags(id) ON UPDATE no action ON DELETE cascade,
+    FOREIGN KEY (document_id) REFERENCES documents(id) ON UPDATE no action ON DELETE cascade,
+    PRIMARY KEY (tag_id, document_id)
+);
+CREATE INDEX IF NOT EXISTS document_tags_document_id_idx ON document_tags (document_id);
+CREATE INDEX IF NOT EXISTS document_tags_tag_id_idx ON document_tags (tag_id);
 `;
 
 const dbPath = process.env.DATABASE_PATH ?? './data/app.db';

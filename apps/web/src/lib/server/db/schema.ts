@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, index } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, index, unique, primaryKey } from 'drizzle-orm/sqlite-core';
 
 export const users = sqliteTable('users', {
     id: text('id').primaryKey(),
@@ -44,4 +44,23 @@ export const shareLinks = sqliteTable('share_links', {
     createdAt: integer('created_at').notNull()
 }, (t) => ({
     documentIdIdx: index('share_links_document_id_idx').on(t.documentId)
+}));
+
+export const tags = sqliteTable('tags', {
+    id: text('id').primaryKey(),
+    ownerId: text('owner_id').notNull().references(() => users.id),
+    name: text('name').notNull(),
+    createdAt: integer('created_at').notNull()
+}, (t) => ({
+    ownerNameUnique: unique('tags_owner_name_unique').on(t.ownerId, t.name),
+    ownerIdx: index('tags_owner_id_idx').on(t.ownerId)
+}));
+
+export const documentTags = sqliteTable('document_tags', {
+    tagId: text('tag_id').notNull().references(() => tags.id, { onDelete: 'cascade' }),
+    documentId: text('document_id').notNull().references(() => documents.id, { onDelete: 'cascade' })
+}, (t) => ({
+    pk: primaryKey({ columns: [t.tagId, t.documentId] }),
+    docIdx: index('document_tags_document_id_idx').on(t.documentId),
+    tagIdx: index('document_tags_tag_id_idx').on(t.tagId)
 }));
