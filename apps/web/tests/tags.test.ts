@@ -1,7 +1,7 @@
 import { test, expect, beforeEach } from 'vitest';
 import { db, schema } from '../src/lib/server/db';
 import { generateId } from '../src/lib/server/auth';
-import { listTags, listTagsForDoc, listTagsForDocs } from '../src/lib/server/tags';
+import { listTags, listTagsForDoc, listTagsForDocs, setDocTags, SetTagsError } from '../src/lib/server/tags';
 
 let ownerId: string;
 let docId: string;
@@ -66,4 +66,65 @@ test('listTagsForDocs 批量返回映射', () => {
     const map = listTagsForDocs([docId, doc2], ownerId);
     expect(map.get(docId)!.map(t => t.name)).toEqual(['shared']);
     expect(map.get(doc2)!.map(t => t.name).sort()).toEqual(['only-b', 'shared']);
+});
+
+test('setDocTags 新增不存在的标签并建立关联', () => {
+    setDocTags(ownerId, docId, ['周报', 'api']);
+    expect(listTagsForDoc(docId, ownerId).map(t => t.name).sort()).toEqual(['api', '周报']);
+    expect(listTags(ownerId).length).toBe(2);
+});
+
+test('setDocTags 复用已存在的同名标签（不重复建 tag 行）', () => {
+    setDocTags(ownerId, docId, ['x']);
+    const doc2 = generateId();
+    db.insert(schema.documents).values({
+        id: doc2, ownerId, parentId: null, name: 'b.md', type: 'file',
+        storagePath: '/tmp/b', contentHash: 'h', sizeBytes: 1, createdAt: now(), updatedAt: now()
+    }).run();
+    setDocTags(ownerId, doc2, ['x', 'y']);
+    expect(listTags(ownerId).length).toBe(2);
+    expect(listTagsForDoc(doc2, ownerId).map(t => t.name).sort()).toEqual(['x', 'y']);
+});
+
+test('setDocTags 移除不再列出的关联', () => {
+    setDocTags(ownerId, docId, ['a', 'b']);
+    setDocTags(ownerId, docId, ['a']);
+    expect(listTagsForDoc(docId, ownerId).map(t => t.name)).toEqual(['a']);
+});
+
+test('setDocTags 传空数组移除全部关联（标签本身保留）', () => {
+    setDocTags(ownerId, docId, ['a']);
+    setDocTags(ownerId, docId, []);
+    expect(listTagsForDoc(docId, ownerId)).toEqual([]);
+    expect(listTags(ownerId).map(t => t.name)).toEqual(['a']);
+});
+
+test('setDocTags 去重 + 静默丢弃非法名', () => {
+    setDocTags(ownerId, docId, ['ok', 'ok', '  ', 'a/b', 'ok']);
+    expect(listTagsForDoc(docId, ownerId).map(t => t.name)).toEqual(['ok']);
+});
+
+test('setDocTags 非 owner 文档抛 not_found', () => {
+    try {
+        setDocTags('other', docId, ['x']);
+        throw new Error('should have thrown');
+    } catch (e) {
+        expect(e).toBeInstanceOf(SetTagsError);
+        expect((e as SetTagsError).code).toBe('not_found');
+    }
+});
+
+test('setDocTags 文件夹抛 not_found（仅 file 可打标签）', () => {
+    const folderId = generateId();
+    db.insert(schema.documents).values({
+        id: folderId, ownerId, parentId: null, name: 'fold', type: 'folder',
+        storagePath: null, contentHash: null, sizeBytes: null, createdAt: now(), updatedAt: now()
+    }).run();
+    try {
+        setDocTags(ownerId, folderId, ['x']);
+        throw new Error('should have thrown');
+    } catch (e) {
+        expect(e).toBeInstanceOf(SetTagsError);
+        expect((e as SetTagsError).code).toBe('not_found');
+    }
 });

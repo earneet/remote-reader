@@ -1,4 +1,6 @@
-import { sqlite } from './db';
+import { sqlite, db, schema } from './db';
+import { generateId } from './auth';
+import { eq, and } from 'drizzle-orm';
 
 export type Tag = { id: string; name: string };
 
@@ -38,4 +40,70 @@ export function listTagsForDocs(docIds: string[], ownerId: string): Map<string, 
         map.get(r.docId)!.push({ id: r.id, name: r.name });
     }
     return map;
+}
+
+const MAX_TAG_NAME = 32;
+
+export class SetTagsError extends Error {
+    code: 'not_found' | 'invalid';
+    constructor(code: 'not_found' | 'invalid', message?: string) {
+        super(message ?? code);
+        this.code = code;
+    }
+}
+
+function sanitizeTagName(raw: string): string | null {
+    const n = raw.trim();
+    if (!n || n.length > MAX_TAG_NAME || n.includes('/')) return null;
+    return n;
+}
+
+function sanitizeNames(names: string[]): string[] {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const raw of names) {
+        const n = sanitizeTagName(raw);
+        if (n && !seen.has(n)) { seen.add(n); out.push(n); }
+    }
+    return out;
+}
+
+export function setDocTags(ownerId: string, docId: string, names: string[]): void {
+    const doc = db.select().from(schema.documents)
+        .where(and(eq(schema.documents.id, docId), eq(schema.documents.ownerId, ownerId)))
+        .get();
+    if (!doc || doc.type !== 'file') throw new SetTagsError('not_found');
+
+    const clean = sanitizeNames(names);
+
+    db.transaction((tx) => {
+        const existing = tx.select().from(schema.tags).where(eq(schema.tags.ownerId, ownerId)).all();
+        const idByName = new Map(existing.map(t => [t.name, t.id]));
+        const targetIds: string[] = [];
+        const now = Date.now();
+        for (const name of clean) {
+            let id = idByName.get(name);
+            if (!id) {
+                id = generateId();
+                tx.insert(schema.tags).values({ id, ownerId, name, createdAt: now }).run();
+                idByName.set(name, id);
+            }
+            targetIds.push(id);
+        }
+        const current = tx.select().from(schema.documentTags)
+            .where(eq(schema.documentTags.documentId, docId)).all();
+        const currentIds = new Set(current.map(l => l.tagId));
+        const targetSet = new Set(targetIds);
+        for (const id of currentIds) {
+            if (!targetSet.has(id)) {
+                tx.delete(schema.documentTags)
+                    .where(and(eq(schema.documentTags.documentId, docId), eq(schema.documentTags.tagId, id))).run();
+            }
+        }
+        for (const id of targetIds) {
+            if (!currentIds.has(id)) {
+                tx.insert(schema.documentTags).values({ tagId: id, documentId: docId }).run();
+            }
+        }
+    });
 }
