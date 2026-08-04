@@ -2,7 +2,7 @@ import { eq, and, isNull, inArray, ne } from 'drizzle-orm';
 import { dirname, join } from 'node:path';
 import { renameSync, rmSync } from 'node:fs';
 import { unlink } from 'node:fs/promises';
-import { db, schema } from './db';
+import { db, schema, sqlite } from './db';
 import { generateId, sha256Hex } from './auth';
 import { writeFile } from './storage';
 import { createShareLink } from './shares';
@@ -288,6 +288,9 @@ export function deleteNode(ownerId: string, id: string): void {
 
     db.transaction((tx) => {
         tx.delete(schema.shareLinks).where(inArray(schema.shareLinks.documentId, subtreeIds)).run();
+        // docs_fts 非 Drizzle 表，同连接同步执行故落在事务内
+        const ph = subtreeIds.map(() => '?').join(',');
+        sqlite.prepare(`DELETE FROM docs_fts WHERE doc_id IN (${ph})`).run(...subtreeIds);
         tx.delete(schema.documents).where(inArray(schema.documents.id, subtreeIds)).run();
     });
 

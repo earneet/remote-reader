@@ -1,6 +1,6 @@
 import { test, expect, beforeEach, afterEach } from 'vitest';
 import { rmSync } from 'node:fs';
-import { db, schema } from '../src/lib/server/db';
+import { db, schema, sqlite } from '../src/lib/server/db';
 import { hashPassword, generateId, sha256Hex } from '../src/lib/server/auth';
 import {
     uploadDocument,
@@ -11,6 +11,8 @@ import {
     moveNode,
     deleteNode
 } from '../src/lib/server/documents';
+import { indexDoc } from '../src/lib/server/fts';
+import { setDocTags } from '../src/lib/server/tags';
 import { eq, and, isNull } from 'drizzle-orm';
 
 let ownerId: string;
@@ -18,6 +20,9 @@ const TMP_DOCS = `./data/test-docs-${Date.now().toString(36)}`;
 
 beforeEach(async () => {
     process.env.DATA_DIR = TMP_DOCS;
+    sqlite.prepare('DELETE FROM docs_fts').run();
+    db.delete(schema.documentTags).run();
+    db.delete(schema.tags).run();
     db.delete(schema.shareLinks).run();
     db.delete(schema.documents).run();
     db.delete(schema.apiTokens).run();
@@ -36,6 +41,9 @@ afterEach(() => {
     try {
         rmSync(TMP_DOCS, { recursive: true, force: true });
     } catch {}
+    sqlite.prepare('DELETE FROM docs_fts').run();
+    db.delete(schema.documentTags).run();
+    db.delete(schema.tags).run();
 });
 
 test('首次上传创建文档并返回 url', async () => {
@@ -249,4 +257,15 @@ test('deleteNode 遇到 parentId 环（DB 损坏）触发深度上限，不无�
     db.update(schema.documents).set({ parentId: p1.id }).where(eq(schema.documents.id, p2.id)).run();
     expect(() => deleteNode(ownerId, p1.id)).not.toThrow();
     expect(db.select().from(schema.documents).where(eq(schema.documents.id, p1.id)).get()).toBeUndefined();
+});
+
+test('deleteNode 删 file 同步清 docs_fts 与 document_tags', async () => {
+    const r = await uploadDocument(ownerId, 'a.md', 'x', []);
+    indexDoc(r.id, 'a.md', 'searchable text here');
+    setDocTags(ownerId, r.id, ['t1']);
+    const hit = () => (sqlite.prepare("SELECT doc_id FROM docs_fts WHERE docs_fts MATCH ?").all('"searchable"') as { doc_id: string }[]);
+    expect(hit().length).toBe(1);
+    deleteNode(ownerId, r.id);
+    expect(hit().length).toBe(0);
+    expect(db.select().from(schema.documentTags).all().length).toBe(0);
 });
