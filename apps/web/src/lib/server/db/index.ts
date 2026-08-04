@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS document_tags (
 );
 CREATE INDEX IF NOT EXISTS document_tags_document_id_idx ON document_tags (document_id);
 CREATE INDEX IF NOT EXISTS document_tags_tag_id_idx ON document_tags (tag_id);
+CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5(doc_id UNINDEXED, name, content, tokenize = 'unicode61');
 `;
 
 const dbPath = process.env.DATABASE_PATH ?? './data/app.db';
@@ -87,6 +88,7 @@ export function ensureSchema(): void {
     sqlite.exec(SCHEMA_SQL);
 }
 ensureSchema();
+void import('../fts').then((m) => m.backfillFts()).catch((e) => console.warn('[backfillFts] failed', e));
 
 export const db = drizzle(sqlite, { schema });
 export { schema };
