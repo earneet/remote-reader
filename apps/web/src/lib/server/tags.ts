@@ -107,3 +107,26 @@ export function setDocTags(ownerId: string, docId: string, names: string[]): voi
         }
     });
 }
+
+export function renameTag(
+    ownerId: string, oldName: string, newName: string
+): { ok: boolean; code?: 'not_found' | 'conflict' | 'invalid' } {
+    const clean = sanitizeTagName(newName);
+    if (!clean) return { ok: false, code: 'invalid' };
+    const tag = db.select().from(schema.tags)
+        .where(and(eq(schema.tags.ownerId, ownerId), eq(schema.tags.name, oldName))).get();
+    if (!tag) return { ok: false, code: 'not_found' };
+    if (oldName === clean) return { ok: true };
+    const dup = db.select().from(schema.tags)
+        .where(and(eq(schema.tags.ownerId, ownerId), eq(schema.tags.name, clean))).get();
+    if (dup) return { ok: false, code: 'conflict' };
+    db.update(schema.tags).set({ name: clean }).where(eq(schema.tags.id, tag.id)).run();
+    return { ok: true };
+}
+
+export function deleteTag(ownerId: string, name: string): void {
+    const tag = db.select().from(schema.tags)
+        .where(and(eq(schema.tags.ownerId, ownerId), eq(schema.tags.name, name))).get();
+    if (!tag) return;
+    db.delete(schema.tags).where(eq(schema.tags.id, tag.id)).run();
+}

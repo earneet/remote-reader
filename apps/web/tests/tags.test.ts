@@ -1,7 +1,8 @@
 import { test, expect, beforeEach } from 'vitest';
+import { eq } from 'drizzle-orm';
 import { db, schema } from '../src/lib/server/db';
 import { generateId } from '../src/lib/server/auth';
-import { listTags, listTagsForDoc, listTagsForDocs, setDocTags, SetTagsError } from '../src/lib/server/tags';
+import { listTags, listTagsForDoc, listTagsForDocs, setDocTags, SetTagsError, renameTag, deleteTag } from '../src/lib/server/tags';
 
 let ownerId: string;
 let docId: string;
@@ -127,4 +128,45 @@ test('setDocTags 文件夹抛 not_found（仅 file 可打标签）', () => {
         expect(e).toBeInstanceOf(SetTagsError);
         expect((e as SetTagsError).code).toBe('not_found');
     }
+});
+
+test('renameTag 改名影响所有关联文档', () => {
+    setDocTags(ownerId, docId, ['old']);
+    expect(renameTag(ownerId, 'old', 'new').ok).toBe(true);
+    expect(listTagsForDoc(docId, ownerId).map(t => t.name)).toEqual(['new']);
+});
+
+test('renameTag 目标名已存在返回 conflict', () => {
+    setDocTags(ownerId, docId, ['a', 'b']);
+    const r = renameTag(ownerId, 'a', 'b');
+    expect(r.ok).toBe(false);
+    expect(r.code).toBe('conflict');
+});
+
+test('renameTag 非法新名返回 invalid', () => {
+    setDocTags(ownerId, docId, ['a']);
+    expect(renameTag(ownerId, 'a', 'x/y').code).toBe('invalid');
+});
+
+test('renameTag 不存在的标签返回 not_found', () => {
+    expect(renameTag(ownerId, 'nope', 'x').code).toBe('not_found');
+});
+
+test('deleteTag 删 tag 并级联清关联', () => {
+    setDocTags(ownerId, docId, ['a', 'b']);
+    deleteTag(ownerId, 'a');
+    expect(listTagsForDoc(docId, ownerId).map(t => t.name)).toEqual(['b']);
+    expect(listTags(ownerId).map(t => t.name)).toEqual(['b']);
+});
+
+test('deleteTag 其他 owner 的同名标签不受影响', () => {
+    setDocTags(ownerId, docId, ['shared']);
+    const other = generateId();
+    db.insert(schema.users).values(
+        { id: other, email: `o-${Date.now()}@x.com`, passwordHash: 'x', role: 'member', createdAt: now() }
+    ).run();
+    db.insert(schema.tags).values({ id: generateId(), ownerId: other, name: 'shared', createdAt: now() }).run();
+    deleteTag(ownerId, 'shared');
+    expect(listTags(ownerId).length).toBe(0);
+    expect(db.select().from(schema.tags).where(eq(schema.tags.ownerId, other)).all().length).toBe(1);
 });
