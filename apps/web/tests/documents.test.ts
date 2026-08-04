@@ -293,3 +293,16 @@ test('uploadDocument 相同内容（skip）不重复写 FTS', async () => {
     const after = sqlite.prepare('SELECT COUNT(*) c FROM docs_fts').get() as { c: number };
     expect(after.c).toBe(before.c);
 });
+
+test('listChildren 默认排序：folder 优先，同层 file 按 updated_at 倒序', async () => {
+    await uploadDocument(ownerId, 'in_zfolder.md', 'z', ['zfolder']);
+    const older = await uploadDocument(ownerId, 'aaa.md', 'x', []);
+    db.update(schema.documents).set({ updatedAt: 1000 }).where(eq(schema.documents.id, older.id)).run();
+    const newer = await uploadDocument(ownerId, 'bbb.md', 'y', []);
+    db.update(schema.documents).set({ updatedAt: 2000 }).where(eq(schema.documents.id, newer.id)).run();
+    const children = listChildren(ownerId, null);
+    expect(children[0].type).toBe('folder');
+    const files = children.filter(c => c.type === 'file');
+    expect(files[0].name).toBe('bbb.md');
+    expect(files[1].name).toBe('aaa.md');
+});

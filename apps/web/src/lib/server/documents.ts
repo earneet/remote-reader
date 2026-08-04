@@ -1,4 +1,4 @@
-import { eq, and, isNull, inArray, ne } from 'drizzle-orm';
+import { eq, and, isNull, inArray, ne, sql } from 'drizzle-orm';
 import { dirname, join } from 'node:path';
 import { renameSync, rmSync } from 'node:fs';
 import { unlink } from 'node:fs/promises';
@@ -141,6 +141,10 @@ export function listChildren(ownerId: string, parentId: string | null): Document
                 ? isNull(schema.documents.parentId)
                 : eq(schema.documents.parentId, parentId)
         ))
+        .orderBy(
+            sql`CASE WHEN ${schema.documents.type} = 'folder' THEN 0 ELSE 1 END`,
+            sql`${schema.documents.updatedAt} DESC`
+        )
         .all();
 }
 
