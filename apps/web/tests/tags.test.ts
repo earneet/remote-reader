@@ -11,6 +11,7 @@ const now = () => Date.now();
 beforeEach(() => {
     db.delete(schema.documentTags).run();
     db.delete(schema.tags).run();
+    db.delete(schema.shareLinks).run();
     db.delete(schema.documents).run();
     db.delete(schema.users).run();
     ownerId = generateId();
