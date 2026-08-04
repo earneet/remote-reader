@@ -192,7 +192,7 @@ git commit -m "feat(tags): 数据模型新增 tags + document_tags 表（三处�
 在 `document_tags_tag_id_idx` 之后追加：
 
 ```sql
-CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5(doc_id UNINDEXED, name, content, tokenize = 'unicode61');
+CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5(doc_id UNINDEXED, name, content, tokenize = 'trigram');
 ```
 
 - [ ] **Step 2: 创建 `apps/web/src/lib/server/fts.ts`**
@@ -1009,12 +1009,19 @@ beforeEach(() => {
     ).run();
 });
 
-test('全文命中正文关键词', async () => {
+test('全文命中正文关键词（≥3 字走 FTS trigram，带 snippet）', async () => {
+    await uploadDocument(ownerId, 'a.md', '本周项目周报进展顺利', []);
+    const r = searchDocuments(ownerId, '周报进', []);
+    expect(r.length).toBe(1);
+    expect(r[0].doc.name).toBe('a.md');
+    expect(r[0].snippet).toContain('<mark>');
+});
+
+test('2 字查询走 content LIKE 兜底命中（trigram 不支持 2-gram，无 snippet）', async () => {
     await uploadDocument(ownerId, 'a.md', '本周项目周报进展顺利', []);
     const r = searchDocuments(ownerId, '周报', []);
     expect(r.length).toBe(1);
     expect(r[0].doc.name).toBe('a.md');
-    expect(r[0].snippet).toContain('<mark>');
 });
 
 test('文件名 LIKE 命中（正文无该词）', async () => {
@@ -1175,30 +1182,46 @@ export function searchDocuments(ownerId: string, query: string, tagNames: string
     const candidateIds = new Set<string>();
 
     if (q) {
-        const ftsQ = sanitizeFtsQuery(q);
-        let ftsRows: { id: string; raw: string }[] = [];
-        try {
-            ftsRows = sqlite.prepare(`
-                SELECT d.id, highlight(docs_fts, 2, char(57344), char(57345)) AS raw
-                FROM docs_fts JOIN documents d ON d.id = docs_fts.doc_id
-                WHERE d.owner_id = ? AND docs_fts MATCH ?
-                ORDER BY bm25(docs_fts)
+        const qChars = [...q].length;
+        if (qChars >= 3) {
+            // trigram：≥3 字子串走 FTS 索引（连续中文友好，支持 bm25 排序与 highlight）
+            const ftsQ = sanitizeFtsQuery(q);
+            let ftsRows: { id: string; raw: string }[] = [];
+            try {
+                ftsRows = sqlite.prepare(`
+                    SELECT d.id, highlight(docs_fts, 2, char(57344), char(57345)) AS raw
+                    FROM docs_fts JOIN documents d ON d.id = docs_fts.doc_id
+                    WHERE d.owner_id = ? AND docs_fts MATCH ?
+                    ORDER BY bm25(docs_fts)
+                    LIMIT ?
+                `).all(ownerId, ftsQ, SEARCH_LIMIT) as { id: string; raw: string }[];
+            } catch (e) {
+                console.warn('[searchDocuments] FTS query failed, falling back to content LIKE', e);
+            }
+            for (const r of ftsRows) {
+                candidateIds.add(r.id);
+                snippetById.set(r.id, safeSnippet(r.raw));
+            }
+        }
+        if (qChars < 3 || candidateIds.size === 0) {
+            // <3 字（trigram 不支持 2-gram）或 FTS 未命中：content LIKE 兜底（全扫，单 owner 小数据可接受）
+            const contentLike = `%${escapeLike(q)}%`;
+            const contentRows = sqlite.prepare(`
+                SELECT f.doc_id AS id FROM docs_fts f
+                JOIN documents d ON d.id = f.doc_id
+                WHERE d.owner_id = ? AND f.content LIKE ? ESCAPE '\\'
                 LIMIT ?
-            `).all(ownerId, ftsQ, SEARCH_LIMIT) as { id: string; raw: string }[];
-        } catch (e) {
-            console.warn('[searchDocuments] FTS query failed, falling back to LIKE-only', e);
-            ftsRows = [];
+            `).all(ownerId, contentLike, SEARCH_LIMIT) as { id: string }[];
+            for (const r of contentRows) {
+                if (!candidateIds.has(r.id)) candidateIds.add(r.id);
+            }
         }
-        for (const r of ftsRows) {
-            candidateIds.add(r.id);
-            snippetById.set(r.id, safeSnippet(r.raw));
-        }
-
-        const like = `%${escapeLike(q)}%`;
-        const likeRows = sqlite.prepare(`
+        // 始终补文件名 LIKE（文件名不受 tokenizer 影响）
+        const nameLike = `%${escapeLike(q)}%`;
+        const nameRows = sqlite.prepare(`
             SELECT id FROM documents WHERE owner_id = ? AND name LIKE ? ESCAPE '\\'
-        `).all(ownerId, like) as { id: string }[];
-        for (const r of likeRows) {
+        `).all(ownerId, nameLike) as { id: string }[];
+        for (const r of nameRows) {
             if (!candidateIds.has(r.id)) candidateIds.add(r.id);
         }
     }

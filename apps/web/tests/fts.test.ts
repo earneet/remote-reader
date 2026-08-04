@@ -24,10 +24,9 @@ beforeEach(() => {
 });
 afterEach(() => { try { rmSync(TMP, { recursive: true, force: true }); } catch {} });
 
-test('indexDoc 写入后可被 MATCH 命中', () => {
-    // unicode61 把连续 CJK 当单 token，故用空格让"周报"成独立 token 才能被短语命中
-    indexDoc('d1', 'weekly.md', '本周 周报 进展');
-    const r = sqlite.prepare("SELECT doc_id FROM docs_fts WHERE docs_fts MATCH ?").all('"周报"') as { doc_id: string }[];
+test('indexDoc 写入后可被 MATCH 命中（trigram 对连续中文 3 字子串命中）', () => {
+    indexDoc('d1', 'weekly.md', '本周项目周报进展');
+    const r = sqlite.prepare("SELECT doc_id FROM docs_fts WHERE docs_fts MATCH ?").all('"周项目"') as { doc_id: string }[];
     expect(r[0].doc_id).toBe('d1');
 });
 

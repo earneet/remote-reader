@@ -76,14 +76,14 @@ CREATE VIRTUAL TABLE docs_fts USING fts5(
     doc_id UNINDEXED,
     name,
     content,
-    tokenize = 'unicode61'
+    tokenize = 'trigram'
 );
 ```
 
 - `doc_id UNINDEXED`：只存储不索引，用于 JOIN 回 `documents`。
 - `name`：文件名（一并索引，支持按文件名全文匹配，与 §6 的 LIKE 互补）。
 - `content`：markdown 正文副本（从 `storage_path` 读取后写入）。
-- `tokenize = 'unicode61'`：对中文按 Unicode 字符切分，零配置；英文按词。
+- `tokenize = 'trigram'`：SQLite 3.34+ 的 3-gram 分词器，连续中文按 3 字子串匹配（`unicode61` 把连续中文当单 token、子串搜不到，实测已弃用）。
 
 ### 4.4 迁移「三处同步」（关键，极易漏改）
 
@@ -160,7 +160,9 @@ getDocPath(ownerId: string, docId: string): DocumentRow[]   // 祖先链（面�
 
 ### 7.1 分词器
 
-`unicode61`：中文按字、英文按词。实测 "周报" MATCH "周报" 命中。若后续需要中文按词，可换 `trigram`（SQLite 3.34+，支持子串匹配，索引更大）——v1 不用。
+`trigram`（SQLite 3.34+，3-gram）：对连续中文按 3 字子串匹配（搜"周项目"命中"本周项目周报进展"）。**不用 `unicode61`**——实测它把连续中文当单个 token，搜任何子串都命中 0，对中文文档搜索不可用。
+
+代价：trigram 是 3-gram，**2 字查询不命中**（无法构成 trigram）。应对：`searchDocuments` 按查询字符数分流——`[...q].length >= 3` 走 FTS 索引（快、支持 bm25 排序与 highlight），`< 3` 字走 `content LIKE` 兜底（全扫 `docs_fts.content`，单 owner 小数据可接受）；FTS 未命中时也 LIKE 兜底。索引体积比 unicode61 大（可接受）。
 
 ### 7.2 查询注入防护（安全关键）
 

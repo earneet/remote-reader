@@ -67,7 +67,7 @@ CREATE TABLE IF NOT EXISTS document_tags (
 );
 CREATE INDEX IF NOT EXISTS document_tags_document_id_idx ON document_tags (document_id);
 CREATE INDEX IF NOT EXISTS document_tags_tag_id_idx ON document_tags (tag_id);
-CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5(doc_id UNINDEXED, name, content, tokenize = 'unicode61');
+CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5(doc_id UNINDEXED, name, content, tokenize = 'trigram');
 `;
 
 const dbPath = process.env.DATABASE_PATH ?? './data/app.db';
