@@ -1,7 +1,7 @@
 import { test, expect, beforeEach, afterEach } from 'vitest';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { db, schema } from '../src/lib/server/db';
+import { db, schema, sqlite } from '../src/lib/server/db';
 import { generateId } from '../src/lib/server/auth';
 import { writeFile } from '../src/lib/server/storage';
 
@@ -11,6 +11,9 @@ const TMP = `./data/test-dview-${Date.now().toString(36)}`;
 
 beforeEach(() => {
     process.env.DATA_DIR = TMP;
+    sqlite.prepare('DELETE FROM docs_fts').run();
+    db.delete(schema.documentTags).run();
+    db.delete(schema.tags).run();
     db.delete(schema.shareLinks).run();
     db.delete(schema.documents).run();
     db.delete(schema.apiTokens).run();
@@ -78,4 +81,15 @@ test('磁盘文件缺失 → 404（M11）', async () => {
     insertUser(ownerId);
     const docId = insertDoc(ownerId, 'gone.md', '/nonexistent/path/gone.md');
     await expect(load(mkEvent(ownerId, docId))).rejects.toMatchObject({ status: 404 });
+});
+
+test('load 返回文档标签字段（数组）', async () => {
+    const ownerId = generateId();
+    insertUser(ownerId);
+    const diskPath = join(TMP, ownerId, 'd.md');
+    await writeFile(diskPath, '# x');
+    const docId = insertDoc(ownerId, 'd.md', diskPath);
+    const result = (await load(mkEvent(ownerId, docId))) as { tags: unknown[] };
+    expect(Array.isArray(result.tags)).toBe(true);
+    expect(result.tags.length).toBe(0);
 });
