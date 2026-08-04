@@ -12,6 +12,9 @@
 {#if showNav}
 <header class="topnav">
     <a href="/">我的文档</a>
+    <form class="nav-search" method="GET" action="/search">
+        <input name="q" placeholder="搜索文档…" aria-label="搜索文档">
+    </form>
     <details>
         <summary>设置</summary>
         <div class="menu">
@@ -46,4 +49,9 @@
     .topnav .menu a { padding: 0.4rem 0.75rem; text-decoration: none; color: #1f2328; }
     .topnav .menu a:hover { background: #f6f8fa; }
     .topnav .email { color: #57606a; margin-left: auto; }
+    .topnav .nav-search { margin-left: 0.5rem; }
+    .topnav .nav-search input {
+        padding: 0.3rem 0.6rem; border: 1px solid #d0d7de; border-radius: 5px;
+        font-size: 0.85rem; width: 14rem;
+    }
 </style>
