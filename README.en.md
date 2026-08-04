@@ -30,8 +30,8 @@ sequenceDiagram
     Bridge->>Web: POST /api/v1/documents (Bearer Token)
     Web->>Web: persist to disk + write DB + generate share token
     Web-->>Bridge: { id, url }
-    Bridge-->>Agent: Uploaded, view link: /s/<token>
-    Agent->>User: IM: "Doc is ready 👉 https://host/s/<token>"
+    Bridge-->>Agent: Uploaded, view link: /s/{token}
+    Agent->>User: IM: Doc is ready 👉 /s/{token}
     User->>Web: Click link (login-free)
     Web-->>User: SSR-rendered Markdown
 ```

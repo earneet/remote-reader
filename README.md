@@ -30,8 +30,8 @@ sequenceDiagram
     Bridge->>Web: POST /api/v1/documents (Bearer Token)
     Web->>Web: 落盘 + 写库 + 生成 share token
     Web-->>Bridge: { id, url }
-    Bridge-->>Agent: 已上传，查看链接：/s/<token>
-    Agent->>User: IM: "文档写好了 👉 https://host/s/<token>"
+    Bridge-->>Agent: 已上传，查看链接：/s/{token}
+    Agent->>User: IM: 文档写好了 👉 /s/{token}
     User->>Web: 点链接（免登录）
     Web-->>User: SSR 渲染的 Markdown
 ```
