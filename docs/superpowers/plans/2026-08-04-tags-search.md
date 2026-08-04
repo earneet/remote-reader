@@ -12,7 +12,7 @@
 - **三处同步**：改表必须同步 `schema.ts` + `db/index.ts` 的 `SCHEMA_SQL` + drizzle migration，否则全新部署起不来（C1）。
 - **运行时分工**：测试用 `bun run test`（vitest/node），dev 用 `bun --filter remote-reader-web dev`，类型检查 `bun --filter remote-reader-web check`。**不要用 `bun` 直接跑 .ts 测 better-sqlite3**（oven-sh/bun#4290）。
 - **代码风格**：UTF-8、4 空格缩进、默认不加注释（仅解释"为什么"）。
-- **FTS5 查询注入**：用户输入用双引号包裹成短语 + 转义内部双引号；LIKE 转义 `%`/`_`/`\`；snippet 用 `\x01`/`\x02` 占位 → 整体 HTML-escape → 替换为 `<mark>`（防 XSS）。
+- **FTS5 查询注入**：用户输入用双引号包裹成短语 + 转义内部双引号；LIKE 转义 `%`/`_`/`\`; snippet 用 Unicode 私用区占位符（U+E000/E001，正文不会出现） → 整体 HTML-escape → 替换为 `<mark>`（防 XSS）。
 
 **Spec：** `docs/superpowers/specs/2026-08-04-tags-search-design.md`
 
@@ -220,6 +220,9 @@ export async function backfillFts(): Promise<void> {
         .where(eq(schema.documents.type, 'file'))
         .all();
     if (files.length === 0) return;
+    // 快速跳过：FTS 行数已 >= file 数则视为已索引完整（绝大多数重启走这条，避免每次扫全表）
+    const ftsCount = (sqlite.prepare('SELECT COUNT(*) AS c FROM docs_fts').get() as { c: number }).c;
+    if (ftsCount >= files.length) return;
     const indexedRows = sqlite.prepare('SELECT DISTINCT doc_id FROM docs_fts').all() as { doc_id: string }[];
     const indexed = new Set(indexedRows.map(r => r.doc_id));
     for (const f of files) {
@@ -305,6 +308,16 @@ test('backfillFts 把历史文档（未经 uploadDocument）灌入索引', async
     await backfillFts();
     const r = sqlite.prepare("SELECT doc_id FROM docs_fts WHERE docs_fts MATCH ?").all('"legacy"') as { doc_id: string }[];
     expect(r[0].doc_id).toBe('old1');
+});
+
+test('backfillFts 遇缺文件跳过不抛', async () => {
+    db.insert(schema.documents).values({
+        id: 'missing', ownerId, parentId: null, name: 'gone.md', type: 'file',
+        storagePath: '/nonexistent/path/gone.md', contentHash: 'h', sizeBytes: 1,
+        createdAt: Date.now(), updatedAt: Date.now()
+    }).run();
+    await expect(backfillFts()).resolves.not.toThrow();
+    expect((sqlite.prepare('SELECT doc_id FROM docs_fts WHERE doc_id = ?').all('missing') as { doc_id: string }[]).length).toBe(0);
 });
 ```
 
@@ -1073,6 +1086,21 @@ test('getDocPath 返回祖先链（根→父，不含文档本身）', async () 
     const path = getDocPath(ownerId, r.id);
     expect(path.map(p => p.name)).toEqual(['rep', '2026']);
 });
+
+test('LIKE 通配符转义：文件名中的 _ 按字面匹配（不被当通配）', async () => {
+    await uploadDocument(ownerId, 'a_b.md', 'x', []);
+    await uploadDocument(ownerId, 'axb.md', 'y', []);
+    const r = searchDocuments(ownerId, 'a_b', []);
+    expect(r.length).toBe(1);
+    expect(r[0].doc.name).toBe('a_b.md');
+});
+
+test('标签交集为空（某标签无文档）返回 []', async () => {
+    const a = await uploadDocument(ownerId, 'a.md', 'x', []);
+    setDocTags(ownerId, a.id, ['t1']);
+    const r = searchDocuments(ownerId, '', ['t1', 'nonexistent']);
+    expect(r).toEqual([]);
+});
 ```
 
 > 文件顶部 `and` 未用则去掉；本测试用了 `and`（getDocPath 测试），保留 import `and, eq`。
@@ -1094,7 +1122,7 @@ import type { Tag } from './tags';
 
 type DocumentRow = typeof schema.documents.$inferSelect;
 const MAX_TREE_DEPTH = 1000;
-const SEARCH_LIMIT = 50;
+export const SEARCH_LIMIT = 50;
 
 export type SearchResult = {
     doc: DocumentRow;
@@ -1113,10 +1141,10 @@ function escapeLike(s: string): string {
     return s.replace(/[\\%_]/g, (c) => '\\' + c);
 }
 
-// FTS highlight 用 \x01/\x02 占位；整体 escape 后再换回 <mark>，避免正文 HTML 注入。
+// FTS highlight 用 Unicode 私用区 U+E000/E001 占位（正文几乎不可能出现），避免攻击者预置控制符操纵高亮位置；整体 escape 后再换回 <mark>。
 function safeSnippet(raw: string): string {
     const escaped = raw.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    return escaped.replace(/\x01/g, '<mark>').replace(/\x02/g, '</mark>');
+    return escaped.replace(/\uE000/g, '<mark>').replace(/\uE001/g, '</mark>');
 }
 
 export function getDocPath(ownerId: string, docId: string): DocumentRow[] {
@@ -1151,13 +1179,14 @@ export function searchDocuments(ownerId: string, query: string, tagNames: string
         let ftsRows: { id: string; raw: string }[] = [];
         try {
             ftsRows = sqlite.prepare(`
-                SELECT d.id, highlight(docs_fts, 2, char(1), char(2)) AS raw
+                SELECT d.id, highlight(docs_fts, 2, char(57344), char(57345)) AS raw
                 FROM docs_fts JOIN documents d ON d.id = docs_fts.doc_id
                 WHERE d.owner_id = ? AND docs_fts MATCH ?
                 ORDER BY bm25(docs_fts)
                 LIMIT ?
             `).all(ownerId, ftsQ, SEARCH_LIMIT) as { id: string; raw: string }[];
-        } catch {
+        } catch (e) {
+            console.warn('[searchDocuments] FTS query failed, falling back to LIKE-only', e);
             ftsRows = [];
         }
         for (const r of ftsRows) {
@@ -1245,7 +1274,7 @@ Create `apps/web/src/routes/search/+page.server.ts`:
 ```ts
 import { redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
-import { searchDocuments } from '$server/search';
+import { searchDocuments, SEARCH_LIMIT } from '$server/search';
 import { listTags } from '$server/tags';
 
 export const load: PageServerLoad = async ({ locals, url }) => {
@@ -1253,7 +1282,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
     const q = url.searchParams.get('q') ?? '';
     const tag = url.searchParams.getAll('tag');
     const results = searchDocuments(locals.user.id, q, tag);
-    return { results, q, selectedTags: tag, allTags: listTags(locals.user.id) };
+    return { results, q, selectedTags: tag, allTags: listTags(locals.user.id), truncated: results.length >= SEARCH_LIMIT };
 };
 ```
 
@@ -1311,6 +1340,9 @@ Create `apps/web/src/routes/search/+page.svelte`:
         {:else if data.results.length === 0}
             <p class="muted">没有匹配的文档。</p>
         {:else}
+            {#if data.truncated}
+                <p class="muted truncated">结果过多（仅显示前 {data.results.length} 条），请细化关键词或加标签筛选。</p>
+            {/if}
             <ul>
                 {#each data.results as r (r.doc.id)}
                     <li>
@@ -1355,6 +1387,7 @@ Create `apps/web/src/routes/search/+page.svelte`:
     .snippet { margin: 0.3rem 0 0; color: #57606a; font-size: 0.85rem; }
     .snippet :global(mark) { background: #fff8c5; padding: 0 1px; }
     .muted { color: #57606a; }
+    .truncated { background: #fff8c5; border: 1px solid #d4a72c; padding: 0.4rem 0.6rem; border-radius: 5px; margin-bottom: 0.5rem; }
 </style>
 ```
 
@@ -1831,6 +1864,12 @@ db.delete(schema.tags).run();
 ```
 
 > 若该文件未 import `sqlite`，加 `import { db, schema, sqlite } from '../src/lib/server/db';`（按需调整现有 import）。`docs_fts` 用 raw `sqlite.prepare` 清（非 Drizzle 表）。
+
+- [ ] **Step 1.5: 验证未清理时的污染（确认问题存在，TDD 纪律）**
+
+先**不**改任何 `beforeEach`，连跑两个会共享 `docs_fts`/`document_tags` 残留的文件：
+Run: `bun run test apps/web/tests/documents.test.ts apps/web/tests/search.test.ts`
+Expected: 出现因跨用例残留导致的断言失败或诡异通过（如 search 测试搜到上个用例遗留内容）。看到污染迹象 → 证明 Step 1 的清理必要。随后进入 Step 2 验证清理后全绿。
 
 - [ ] **Step 2: 跑全量测试**
 
