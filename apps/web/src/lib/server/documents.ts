@@ -7,6 +7,7 @@ import { generateId, sha256Hex } from './auth';
 import { writeFile } from './storage';
 import { createShareLink } from './shares';
 import { getBaseUrl } from './env';
+import { indexDoc } from './fts';
 
 type DocumentRow = typeof schema.documents.$inferSelect;
 
@@ -99,6 +100,7 @@ export async function uploadDocument(
             sizeBytes: Buffer.byteLength(content),
             updatedAt: now
         }).where(eq(schema.documents.id, existing.id)).run();
+        indexDoc(existing.id, name, content);
         const url = await ensureShareUrl(existing.id);
         return { id: existing.id, url };
     }
@@ -126,6 +128,7 @@ export async function uploadDocument(
         } catch {}
         throw e;
     }
+    indexDoc(id, name, content);
     const url = await ensureShareUrl(id);
     return { id, url };
 }

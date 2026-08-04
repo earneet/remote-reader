@@ -269,3 +269,27 @@ test('deleteNode 删 file 同步清 docs_fts 与 document_tags', async () => {
     expect(hit().length).toBe(0);
     expect(db.select().from(schema.documentTags).all().length).toBe(0);
 });
+
+test('uploadDocument 新建文档写入 FTS（可搜）', async () => {
+    await uploadDocument(ownerId, 'a.md', 'unique_token_xyz', []);
+    const r = sqlite.prepare("SELECT doc_id FROM docs_fts WHERE docs_fts MATCH ?").all('"unique_token_xyz"') as { doc_id: string }[];
+    expect(r.length).toBe(1);
+});
+
+test('uploadDocument 覆盖更新 FTS（搜新内容、搜不到旧内容）', async () => {
+    const r = await uploadDocument(ownerId, 'a.md', 'old_content_here', []);
+    await uploadDocument(ownerId, 'a.md', 'new_content_here', []);
+    const oldHit = sqlite.prepare("SELECT doc_id FROM docs_fts WHERE docs_fts MATCH ?").all('"old_content_here"') as { doc_id: string }[];
+    const newHit = sqlite.prepare("SELECT doc_id FROM docs_fts WHERE docs_fts MATCH ?").all('"new_content_here"') as { doc_id: string }[];
+    expect(oldHit.length).toBe(0);
+    expect(newHit.length).toBe(1);
+    expect(newHit[0].doc_id).toBe(r.id);
+});
+
+test('uploadDocument 相同内容（skip）不重复写 FTS', async () => {
+    await uploadDocument(ownerId, 'a.md', 'same', []);
+    const before = sqlite.prepare('SELECT COUNT(*) c FROM docs_fts').get() as { c: number };
+    await uploadDocument(ownerId, 'a.md', 'same', []);
+    const after = sqlite.prepare('SELECT COUNT(*) c FROM docs_fts').get() as { c: number };
+    expect(after.c).toBe(before.c);
+});
