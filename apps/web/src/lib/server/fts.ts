@@ -3,8 +3,11 @@ import { eq } from 'drizzle-orm';
 import { readFile } from './storage';
 
 export function indexDoc(docId: string, name: string, content: string): void {
-    sqlite.prepare('DELETE FROM docs_fts WHERE doc_id = ?').run(docId);
-    sqlite.prepare('INSERT INTO docs_fts (doc_id, name, content) VALUES (?, ?, ?)').run(docId, name, content);
+    const upsert = sqlite.transaction(() => {
+        sqlite.prepare('DELETE FROM docs_fts WHERE doc_id = ?').run(docId);
+        sqlite.prepare('INSERT INTO docs_fts (doc_id, name, content) VALUES (?, ?, ?)').run(docId, name, content);
+    });
+    upsert();
 }
 
 export function unindexDocs(docIds: string[]): void {

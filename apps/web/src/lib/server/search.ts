@@ -18,7 +18,7 @@ const MARK_OPEN = String.fromCodePoint(0xE000);
 const MARK_CLOSE = String.fromCodePoint(0xE001);
 
 function sanitizeFtsQuery(q: string): string {
-    const trimmed = q.slice(0, 100);
+    const trimmed = [...q].slice(0, 100).join('');
     const escaped = trimmed.replace(/"/g, '""');
     return `"${escaped}"`;
 }

@@ -104,8 +104,7 @@ export const actions: Actions = {
         if (!id) error(400, '参数缺失');
         const names = raw.split(',').map(s => s.trim()).filter(Boolean);
         for (const n of names) {
-            const t = n.trim();
-            if (!t || t.length > 32 || t.includes('/')) error(400, `标签名非法：${t}`);
+            if (!n || n.length > 32 || n.includes('/')) error(400, `标签名非法：${n}`);
         }
         try {
             setDocTags(locals.user.id, id, names);
