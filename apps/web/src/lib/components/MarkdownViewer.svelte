@@ -44,6 +44,7 @@
         line-height: 1.75;
         font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
         color: var(--rr-text, #1f2328);
+        --rr-mono: "Sarasa Mono SC", "Sarasa Term SC", "Sarasa Fixed SC", "Noto Sans Mono CJK SC", "Source Han Mono SC", "思源等宽", ui-monospace, SFMono-Regular, "SF Mono", "Cascadia Mono", "Cascadia Code", Consolas, "Liberation Mono", "DejaVu Sans Mono", Menlo, monospace;
     }
     .markdown-body :global(a) {
         color: var(--rr-link, #0969da);
@@ -63,13 +64,13 @@
         max-width: 100%;
         margin: 1rem 0;
         font-size: 0.9em;
-        font-family: ui-monospace, "SF Mono", "Cascadia Code", Consolas, "Liberation Mono", "DejaVu Sans Mono", Menlo, monospace;
+        font-family: var(--rr-mono);
         font-variant-ligatures: none;
         font-feature-settings: "liga" 0, "calt" 0;
         tab-size: 4;
     }
     .markdown-body :global(code) {
-        font-family: ui-monospace, "SF Mono", "Cascadia Code", Consolas, "Liberation Mono", "DejaVu Sans Mono", Menlo, monospace;
+        font-family: var(--rr-mono);
         font-variant-ligatures: none;
         font-feature-settings: "liga" 0, "calt" 0;
     }
