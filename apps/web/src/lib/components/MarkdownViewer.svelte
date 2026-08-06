@@ -32,6 +32,19 @@
 <TableFullscreen {container} {html} />
 
 <style>
+    @font-face {
+        font-family: "RR Mono";
+        src: local("Sarasa Mono SC"),
+             local("Sarasa Term SC"),
+             local("Sarasa Fixed SC"),
+             local("Noto Sans Mono CJK SC"),
+             local("Source Han Mono SC"),
+             local("思源等宽"),
+             url("/fonts/rr-mono-sc.woff2") format("woff2");
+        font-display: swap;
+        font-weight: 400;
+        font-style: normal;
+    }
     .markdown-body {
         width: 100%;
         max-width: 960px;
@@ -44,7 +57,7 @@
         line-height: 1.75;
         font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
         color: var(--rr-text, #1f2328);
-        --rr-mono: "Sarasa Mono SC", "Sarasa Term SC", "Sarasa Fixed SC", "Noto Sans Mono CJK SC", "Source Han Mono SC", "思源等宽", ui-monospace, SFMono-Regular, "SF Mono", "Cascadia Mono", "Cascadia Code", Consolas, "Liberation Mono", "DejaVu Sans Mono", Menlo, monospace;
+        --rr-mono: "RR Mono", "Sarasa Mono SC", "Noto Sans Mono CJK SC", "Source Han Mono SC", "思源等宽", ui-monospace, SFMono-Regular, "SF Mono", "Cascadia Mono", "Cascadia Code", Consolas, "Liberation Mono", "DejaVu Sans Mono", Menlo, monospace;
     }
     .markdown-body :global(a) {
         color: var(--rr-link, #0969da);
