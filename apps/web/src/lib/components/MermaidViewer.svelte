@@ -19,7 +19,9 @@
         m.initialize({
             startOnLoad: false,
             securityLevel: 'strict',
-            theme: currentTheme() === 'dark' ? 'dark' : 'default'
+            theme: currentTheme() === 'dark' ? 'dark' : 'default',
+            // wrappingWidth 默认 200px 会把长中文节点 label 强制断行成参差不齐；放大让节点按内容宽度、尊重作者的 <br/> 换行
+            flowchart: { wrappingWidth: 800 }
         });
         return m;
     }
