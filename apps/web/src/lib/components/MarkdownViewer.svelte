@@ -58,6 +58,7 @@
         font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
         color: var(--rr-text, #1f2328);
         --rr-mono: "RR Mono", "Sarasa Mono SC", "Noto Sans Mono CJK SC", "Source Han Mono SC", "思源等宽", ui-monospace, SFMono-Regular, "SF Mono", "Cascadia Mono", "Cascadia Code", Consolas, "Liberation Mono", "DejaVu Sans Mono", Menlo, monospace;
+        --rr-mono-west: ui-monospace, SFMono-Regular, "SF Mono", "Cascadia Mono", "Cascadia Code", Consolas, "Liberation Mono", "DejaVu Sans Mono", Menlo, monospace;
     }
     .markdown-body :global(a) {
         color: var(--rr-link, #0969da);
@@ -77,17 +78,23 @@
         max-width: 100%;
         margin: 1rem 0;
         font-size: 0.9em;
-        font-family: var(--rr-mono);
+        font-family: var(--rr-mono-west);
         font-variant-ligatures: none;
         font-feature-settings: "liga" 0, "calt" 0;
         tab-size: 4;
     }
-    .markdown-body :global(code) {
+    .markdown-body :global(pre[data-rr-code="ascii"]) {
         font-family: var(--rr-mono);
+    }
+    .markdown-body :global(pre[data-rr-code="ascii"] code) {
+        font-family: var(--rr-mono);
+    }
+    .markdown-body :global(code) {
         font-variant-ligatures: none;
         font-feature-settings: "liga" 0, "calt" 0;
     }
     .markdown-body :global(:not(pre) > code) {
+        font-family: var(--rr-mono-west);
         padding: 0.15em 0.35em;
         background: var(--rr-inline-code-bg, #eff2f5);
         color: var(--rr-inline-code-text, #bc4b00);

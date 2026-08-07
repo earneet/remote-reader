@@ -28,8 +28,17 @@ test('代码块带 shiki 高亮', async () => {
 
 test('未预载语言的代码块安全降级（不抛错、内容不丢失）', async () => {
     const html = await renderMarkdown('```brainfuck\n++++++++[>++++++++<-]>\n```');
-    expect(html).toContain('<pre>');
+    expect(html).toContain('<pre');
     expect(html).toContain('++++++++');
+});
+
+test('代码块按语言标记分流：无语言=text 标 ascii（CJK 等宽对齐），有语言标 prose（西文等宽）', async () => {
+    const ascii = await renderMarkdown('```\n┌───┐\n│ A │\n└───┘\n```');
+    expect(ascii).toContain('data-rr-code="ascii"');
+    const text = await renderMarkdown('```text\nplain\n```');
+    expect(text).toContain('data-rr-code="ascii"');
+    const prose = await renderMarkdown('```ts\nconst x = 1;\n```');
+    expect(prose).toContain('data-rr-code="prose"');
 });
 
 test('mermaid fence 输出 language-mermaid class 供客户端识别', async () => {

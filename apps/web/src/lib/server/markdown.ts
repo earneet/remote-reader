@@ -48,11 +48,15 @@ async function getMarkdown(): Promise<MarkdownIt> {
         typographer: true,
         highlight: (code, lang) => {
             if (lang === 'mermaid') return '';
+            const isAscii = !lang || lang === 'text';
+            const kind = isAscii ? 'ascii' : 'prose';
             try {
-                return hl.codeToHtml(code, { lang: lang || 'text', theme: THEME });
+                const html = hl.codeToHtml(code, { lang: lang || 'text', theme: THEME });
+                return html.replace(/<pre\b/, `<pre data-rr-code="${kind}"`);
             } catch (e) {
                 console.error('[markdown] shiki highlight failed for lang', lang, e);
-                return '';
+                const esc = code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                return `<pre data-rr-code="${kind}"><code>${esc}</code></pre>`;
             }
         }
     });
