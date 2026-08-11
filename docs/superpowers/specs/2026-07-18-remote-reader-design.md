@@ -286,7 +286,7 @@ Agent                   本地桥              Web应用              用户
 md 原文
   ↓ 服务端 (markdown-it + Shiki)
   │  ├─ GFM 表格/任务列表
-  │  ├─ 代码块语法高亮 (Shiki, 仅预载 ~15 常用语言)
+  │  ├─ 代码块语法高亮 (Shiki, 预载 ~38 种常用语言；未覆盖语言 text 保底降级，保证统一外观)
   │  └─ XSS 防护: 默认不渲染原始 HTML
   ↓ 产出 HTML
   ↓ 客户端增强 (按需)
@@ -310,7 +310,7 @@ md 原文
 | 测试 | **vitest（node 运行时）** | `bun run test` 经 vitest 的 node shebang 在 node 下执行；同上 better-sqlite3 原因，不能用 `bun test` |
 | 数据库访问 | **Drizzle ORM + better-sqlite3** | ⚠️ **不用 `bun:sqlite`**：Vite SSR 不解析 `bun:*`（详见 §15 运行时分工） |
 | md 解析 | **markdown-it** | 默认安全（`html:false`）+ 100% CommonMark，契合 XSS 防护 |
-| 代码高亮 | **Shiki** | 准确度最高（VS Code 同款）；只预载 ~15 常用语言，避免全语言 bundle 性能问题 |
+| 代码高亮 | **Shiki** | 准确度最高（VS Code 同款）；预载 ~38 种常用语言（tsx/cpp/vue/java/...），未覆盖语言用 text 保底降级（统一外观），避免全语言 bundle 性能问题 |
 | 图表/公式 | **Mermaid.js + KaTeX** | 客户端按需渲染（子计划 3） |
 | 密码哈希 | **`@node-rs/argon2` (argon2id)** | ⚠️ **不用 `Bun.password`**：同上 Vite SSR 不认 `Bun.*`。`Algorithm` 是 const enum，与 verbatimModuleSyntax/isolatedModules 冲突，故用字面量 `ARGON2ID=2` |
 | Session 签名 | **HMAC-SHA256 + timingSafeEqual** | `node:crypto`；token 含 exp 服务端校验；生产缺 `SESSION_SECRET` 启动期 fail-fast |

@@ -56,7 +56,7 @@ sequenceDiagram
 ### ✅ 当前已实现（子计划 1 + 2 + 3 全部完成）
 
 - **上传 API**：`POST /api/v1/documents`，API token 认证，content_hash 幂等，自动生成查看链接。
-- **免登录查看页** `/s/<token>`：服务端渲染 Markdown（GFM 表格、Shiki 代码高亮 ~15 语言、链接化），默认不渲染原始 HTML（XSS 防护）。
+- **免登录查看页** `/s/<token>`：服务端渲染 Markdown（GFM 表格、Shiki 代码高亮 ~38 语言（未覆盖语言 text 保底降级）、链接化），默认不渲染原始 HTML（XSS 防护）。
 - **Markdown 增强**：Mermaid 流程图、KaTeX 数学公式（客户端按需懒加载，纯文本零下载）。
 - **注册 / 登录**：邀请码注册（首用户自动管理员），argon2id 密码哈希，登录限流。
 - **安全会话**：HMAC-SHA256 + 常量时间比较 + 过期校验；生产缺密钥启动期 fail-fast。

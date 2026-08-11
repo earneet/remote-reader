@@ -43,7 +43,7 @@ Remote Reader 让远程工作的 Agent 通过 MCP 上传 Markdown 文档，用�
 
 ## 技术栈
 
-TypeScript · Bun（包管理 + dev/build 宿主；测试与生产跑在 node） · SvelteKit（全栈，SSR+CSR 混合） · Drizzle ORM + SQLite（`better-sqlite3` 驱动） · markdown-it（服务端渲染，`html:false` 防 XSS） · Shiki（代码高亮，仅预载 ~15 种语言） · Mermaid.js + KaTeX（客户端增强） · `@node-rs/argon2` argon2id（密码哈希） · vitest（node 下跑测试） · `@modelcontextprotocol/sdk`
+TypeScript · Bun（包管理 + dev/build 宿主；测试与生产跑在 node） · SvelteKit（全栈，SSR+CSR 混合） · Drizzle ORM + SQLite（`better-sqlite3` 驱动） · markdown-it（服务端渲染，`html:false` 防 XSS） · Shiki（代码高亮，预载 ~38 种语言 + 未覆盖语言 text 保底降级） · Mermaid.js + KaTeX（客户端增强） · `@node-rs/argon2` argon2id（密码哈希） · vitest（node 下跑测试） · `@modelcontextprotocol/sdk`
 
 > ⚠️ **为何不用 `bun:sqlite` / `Bun.password`**：SvelteKit 的 SSR 在 Vite 下运行，Vite 不解析 Bun 专属模块（`bun:*`/`Bun.*`）。故服务端一律用 node 兼容的 `better-sqlite3` / `@node-rs/argon2` / `node:crypto`。代价：`better-sqlite3` 在 bun 直接运行时加载失败，所以测试用 vitest（node）、生产用 `node apps/web/build/index.js`。详见下方「开发命令」的运行时分工注。
 

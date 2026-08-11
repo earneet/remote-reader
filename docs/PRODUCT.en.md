@@ -56,7 +56,7 @@ Three key properties:
 ### ✅ Currently implemented (sub-plans 1 + 2 + 3 all complete)
 
 - **Upload API**: `POST /api/v1/documents`, API token authentication, content_hash idempotency, auto-generated view link.
-- **Login-free view page** `/s/<token>`: server-side rendered Markdown (GFM tables, Shiki code highlighting for ~15 languages, autolinking); raw HTML is not rendered by default (XSS protection).
+- **Login-free view page** `/s/<token>`: server-side rendered Markdown (GFM tables, Shiki code highlighting for ~38 languages (with text fallback for uncovered languages), autolinking); raw HTML is not rendered by default (XSS protection).
 - **Markdown enhancements**: Mermaid flowcharts, KaTeX math formulas (lazy-loaded on the client as needed; plain-text documents download nothing extra).
 - **Register / Login**: invite-code registration (the first user becomes admin automatically), argon2id password hashing, login rate limiting.
 - **Secure session**: HMAC-SHA256 + constant-time comparison + expiry check; in production a missing secret fails fast at startup.

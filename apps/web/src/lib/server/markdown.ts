@@ -7,19 +7,43 @@ const THEME = 'github-dark';
 const LANGS = [
     'typescript',
     'javascript',
+    'tsx',
+    'jsx',
     'python',
     'go',
     'rust',
     'bash',
     'sql',
     'json',
+    'jsonc',
     'yaml',
     'html',
     'css',
+    'scss',
+    'less',
     'markdown',
     'docker',
     'diff',
-    'toml'
+    'toml',
+    'ini',
+    'xml',
+    'c',
+    'cpp',
+    'csharp',
+    'java',
+    'kotlin',
+    'swift',
+    'php',
+    'ruby',
+    'graphql',
+    'vue',
+    'svelte',
+    'powershell',
+    'bat',
+    'nginx',
+    'makefile',
+    'console',
+    'latex'
 ];
 
 let highlighterPromise: Promise<Highlighter> | null = null;
@@ -50,13 +74,18 @@ async function getMarkdown(): Promise<MarkdownIt> {
             if (lang === 'mermaid') return '';
             const isAscii = !lang || lang === 'text';
             const kind = isAscii ? 'ascii' : 'prose';
+            const stamp = (html: string) => html.replace(/<pre\b/, `<pre data-rr-code="${kind}"`);
             try {
-                const html = hl.codeToHtml(code, { lang: lang || 'text', theme: THEME });
-                return html.replace(/<pre\b/, `<pre data-rr-code="${kind}"`);
+                return stamp(hl.codeToHtml(code, { lang: lang || 'text', theme: THEME }));
             } catch (e) {
                 console.error('[markdown] shiki highlight failed for lang', lang, e);
-                const esc = code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-                return `<pre data-rr-code="${kind}"><code>${esc}</code></pre>`;
+                // 未预载语言：用 text 重渲染，保证与正常代码块一致的深色外观，而非透明裸块
+                try {
+                    return stamp(hl.codeToHtml(code, { lang: 'text', theme: THEME }));
+                } catch {
+                    const esc = code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                    return `<pre data-rr-code="${kind}" class="shiki ${THEME}" style="background-color:#24292e;color:#e1e4e8"><code>${esc}</code></pre>`;
+                }
             }
         }
     });
