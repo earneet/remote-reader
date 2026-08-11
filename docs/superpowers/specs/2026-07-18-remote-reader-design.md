@@ -294,6 +294,12 @@ md 原文
      └─ 数学公式 (KaTeX)
 ```
 
+**代码高亮策略**：Shiki 单主题 `github-dark`（代码块浅/深两态均深色，见子计划 3 视觉 spec），语言覆盖分两层：
+- **预载 38 种常用语言**走完整语法高亮：typescript/javascript/tsx/jsx/python/go/rust/bash/sql/json/jsonc/yaml/html/css/scss/less/markdown/docker/diff/toml/ini/xml/c/cpp/csharp/java/kotlin/swift/php/ruby/graphql/vue/svelte/powershell/bat/nginx/makefile/console/latex；
+- **未覆盖语言保底降级**：`codeToHtml` 对未预载语言抛 `ShikiError`，catch 改用 `lang='text'` 重渲染，保证任何语言都有一致的深色代码块外观（而非透明裸块）；`text` 仍失败的极端情况硬编码兜底背景。
+
+预载列表是「不全量加载语言 bundle 以保性能」与「覆盖率」的折中；保底降级确保边界语言外观不破裂（曾因预载列表仅 15 种、catch 直接返回裸 `<pre><code>` 导致 tsx/cpp/vue/java 等常见语言整块无色——已修，见 `markdown.ts` highlight 回调）。
+
 ### 9.2 重心
 
 查看页 `/s/<token>` 是主入口，文件管理器是次要整理工具。`/s/<token>` 与 `/d/<id>` 共用同一 md 渲染组件，区别仅在认证方式。
