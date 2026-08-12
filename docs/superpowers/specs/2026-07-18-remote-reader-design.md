@@ -425,10 +425,11 @@ API token：UI 内可生成（`/settings/tokens`），不再依赖 `node scripts
 
 ### 15.3 待做
 
-子计划 1/2/3 全部完成。剩余的仅为 Phase 3 扩展项（原 §12.3）：
+子计划 1/2/3 及后续增强（视觉改造 / 表格手机端渲染 / tags + 全文搜索 / 代码高亮语言扩充）均已完成。剩余仅为 Phase 3 扩展：
 
 - 远程 MCP server（Streamable HTTP，复用 `packages/shared` 的工具函数）
-- 文档标签、全文搜索
+
+> 已实现的 Phase 3 项：文档标签 + 全文搜索（`/settings/tags` + `/search` FTS5 trigram，见 `plans/2026-08-04-tags-search.md`）。
 
 ### 15.4 Pre-merge review 修复要点（多 Agent 交叉验证）
 
