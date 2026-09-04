@@ -1,8 +1,22 @@
+import { parseObjectStoreEnv } from './object-store';
+import { sqlite } from './db';
+
 const WEAK_SECRET = /^change-me|^dev-insecure|insecure|placeholder|example|^secret$|^password$/i;
 
 // M3/H4：生产启动 fail-fast——拒弱 SESSION_SECRET（占位值/过短）与未设/占位 INITIAL_INVITE_CODE。
 // dev 不校验。在 hooks.server.ts 模块级调用，使配置错误时服务拒绝启动而非带病运行。
 export function validateStartupConfig(): void {
+    // 冷热分层：任一 OBJECT_STORE_* 已配置但组合不完整 → fail-fast（全环境；确定性配置错误，spec §12）
+    const objectStore = parseObjectStoreEnv();
+    // 存量冷文档 + 未配置对象存储 → 这些文档将 503 直至恢复配置（数据仍在桶中，可恢复）：warn 不阻塞
+    if (objectStore === null) {
+        const cold = (sqlite.prepare("SELECT COUNT(*) AS c FROM documents WHERE storage_tier = 'cold'")
+            .get() as { c: number }).c;
+        if (cold > 0) {
+            console.warn(`[startup] 存在 ${cold} 篇已归档文档但未配置 OBJECT_STORE_*，这些文档将不可读（503）直至恢复对象存储配置`);
+        }
+    }
+
     if (process.env.NODE_ENV !== 'production') return;
 
     const secret = process.env.SESSION_SECRET;

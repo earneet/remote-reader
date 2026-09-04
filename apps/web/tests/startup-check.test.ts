@@ -1,7 +1,13 @@
-import { test, expect, afterEach } from 'vitest';
+import { test, expect, beforeEach, afterEach } from 'vitest';
 import { validateStartupConfig } from '../src/lib/server/startup-check';
 
 const ORIG: NodeJS.ProcessEnv = { ...process.env };
+
+beforeEach(() => {
+    for (const k of ['OBJECT_STORE_ENDPOINT', 'OBJECT_STORE_REGION', 'OBJECT_STORE_BUCKET', 'OBJECT_STORE_ACCESS_KEY_ID', 'OBJECT_STORE_SECRET_ACCESS_KEY']) {
+        delete process.env[k];
+    }
+});
 
 afterEach(() => {
     for (const k of Object.keys(process.env)) {
@@ -82,4 +88,22 @@ test('prod 127.0.0.1 BASE_URL 抛', () => {
         BASE_URL: 'http://127.0.0.1:3000'
     });
     expect(() => validateStartupConfig()).toThrow(/BASE_URL/);
+});
+
+test('OBJECT_STORE_* 部分配置 → dev 也 fail-fast（确定性配置错误）', () => {
+    process.env.NODE_ENV = 'development';
+    process.env.OBJECT_STORE_BUCKET = 'b';
+    expect(() => validateStartupConfig()).toThrow(/OBJECT_STORE|不完整/);
+});
+
+test('OBJECT_STORE_* 完整配置 → 不抛', () => {
+    process.env.NODE_ENV = 'development';
+    Object.assign(process.env, {
+        OBJECT_STORE_ENDPOINT: 'https://s3.cn-east-1.qiniucs.com',
+        OBJECT_STORE_REGION: 'cn-east-1',
+        OBJECT_STORE_BUCKET: 'b',
+        OBJECT_STORE_ACCESS_KEY_ID: 'ak',
+        OBJECT_STORE_SECRET_ACCESS_KEY: 'sk'
+    });
+    expect(() => validateStartupConfig()).not.toThrow();
 });

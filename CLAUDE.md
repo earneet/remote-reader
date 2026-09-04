@@ -18,6 +18,8 @@ Remote Reader 让远程工作的 Agent 通过 MCP 上传 Markdown 文档，用�
 
 **全项目审查 + 修复（2026-07-24，6-Agent 并行审查 + 逐条实测复核）**：真问题 2 个——auth-routes 测试 helper 未适配 `fail()` 语义（`cd8384e` 重设计回归致 7 用例断言失效）、`BASE_URL` 生产默认 localhost 无 fail-fast（M14 半修，已加 startup-check 非 localhost 校验）；加固——db `busy_timeout` 显式化（核验 better-sqlite3 默认已 5000ms，原"无 busy_timeout"系误判）、上传 API 认证失败按 IP 限流（`AUTH_FAIL_RATE_LIMIT_MAX` 默认 30）、`docker-entrypoint.sh` 改 `#!/bin/bash`+`set -euo pipefail`；补 session/`/d/[id]`/settings/logout/文件管理器 5 处测试盲点。第二阶段复核纠正 agent 幻觉 3 处（CSP"不完整"/M7"偏差"/crypto·auth·apitoken"无测试"）+ TDD 证伪"高优先"误判 3 处（busy_timeout/markdown 丢内容/deleteNode throw）。测试 159→200。
 
+**冷热分层归档（2026-09-04 设计定稿并实现）**：冷文档（默认 30 天未访问未更新）自动归档 S3 兼容对象存储（七牛/R2/OSS 网关/MinIO 通接），本地只留热文档；冷文档同步拉取可看+后台回热、标题可搜；未配置 OBJECT_STORE_* 行为不变。spec：`docs/superpowers/specs/2026-09-04-cold-hot-tiering-design.md`。
+
 **下一步（低优先）**：spec §12 Phase 3 扩展（远程 MCP server / 多文档批量上传等），详见 spec §15.3 待做；CSP 由 report-only 转 enforcing（需线上观察 mermaid/katex 违规）；session 服务端撤销表 / 审计日志（设计级，未做）。
 
 **桥运行时**：无原生依赖（纯 fetch + MCP SDK）→ `bun apps/mcp-bridge/src/index.ts` 直跑；`tsc --noEmit` 类型检查（`bun --filter remote-reader-mcp-bridge check`）。配置 = `~/.config/remote-reader/config.json`（XDG）默认 + `REMOTE_READER_URL`/`REMOTE_READER_TOKEN` env 覆盖。**注册进 MCP 客户端时入口必须用绝对路径**——客户端拉起 stdio 进程的 cwd 无保证（如 ZCode 设置页探针），相对路径会间歇性 Module not found（README/INSTALL/USER_GUIDE 的注册命令均已改为 `$(pwd)` 展开写法）。
@@ -87,6 +89,8 @@ docker compose up --build                      # 一键起服务（:3000），da
 核心：`DATABASE_PATH`、`DATA_DIR`、`BASE_URL`、`SESSION_SECRET`（生产必填，缺失 fail-fast）、`INITIAL_INVITE_CODE`（注册首个管理员所需）、`MAX_UPLOAD_BYTES`。运行时数据在 `data/`（已 gitignore，**绝不入库**）。
 
 速率限制 / 会话 / 网关：`RATE_LIMIT_MAX` + `RATE_LIMIT_WINDOW_MS`（每 token 上传）、`LOGIN_RATE_LIMIT_MAX`（每邮箱登录）、`SESSION_MAX_AGE`（session 有效期秒，默认 30 天）、`BODY_SIZE_LIMIT`（adapter-node 请求体字节数，须 > `MAX_UPLOAD_BYTES`）、`PORT`（生产端口，默认 3000）。
+
+冷热分层：`OBJECT_STORE_ENDPOINT/REGION/BUCKET/ACCESS_KEY_ID/SECRET_ACCESS_KEY`（S3 兼容，全部留空=关闭）、`OBJECT_STORE_FORCE_PATH_STYLE`、`COLD_TIER_AFTER_DAYS`（默认 30）。
 
 ## 安全要点（项目特有）
 
