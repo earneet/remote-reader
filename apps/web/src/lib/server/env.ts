@@ -15,3 +15,7 @@ export function getBaseUrl(): string {
 export function getSessionMaxAgeSeconds(): number {
     return envInt('SESSION_MAX_AGE', 2_592_000);
 }
+
+export function getColdTierAfterDays(): number {
+    return envInt('COLD_TIER_AFTER_DAYS', 30);
+}
