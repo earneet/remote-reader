@@ -3,7 +3,9 @@ import type { PageServerLoad } from './$types';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '$server/db';
 import { getDocumentIdByShareToken } from '$server/shares';
-import { readFile, FileNotFoundError } from '$server/storage';
+import { readDocumentContent } from '$server/documents';
+import { FileNotFoundError } from '$server/storage';
+import { ArchiveUnavailableError, ObjectNotFoundError } from '$server/object-store';
 import { renderMarkdown } from '$server/markdown';
 
 export const load: PageServerLoad = async ({ params, setHeaders }) => {
@@ -11,13 +13,15 @@ export const load: PageServerLoad = async ({ params, setHeaders }) => {
     if (!documentId) error(404, '链接已失效或不存在');
 
     const doc = db.select().from(schema.documents).where(eq(schema.documents.id, documentId)).get();
-    if (!doc || doc.type !== 'file' || !doc.storagePath) error(404, '文档不存在');
+    // 冷热分层：storage_tier 是内容位置事实源，storagePath 冷态保留 → 不再作为 404 条件
+    if (!doc || doc.type !== 'file') error(404, '文档不存在');
 
     let content: string;
     try {
-        content = await readFile(doc.storagePath);
+        content = await readDocumentContent(doc);
     } catch (e) {
-        if (e instanceof FileNotFoundError) error(404, '文档内容缺失');
+        if (e instanceof FileNotFoundError || e instanceof ObjectNotFoundError) error(404, '文档内容缺失');
+        if (e instanceof ArchiveUnavailableError) error(503, '归档存储暂时不可达，请稍后重试');
         throw e;
     }
     const html = await renderMarkdown(content);

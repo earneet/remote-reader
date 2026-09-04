@@ -4,7 +4,9 @@ import { renameSync, rmSync } from 'node:fs';
 import { unlink } from 'node:fs/promises';
 import { db, schema, sqlite } from './db';
 import { generateId, sha256Hex } from './auth';
-import { writeFile } from './storage';
+import { writeFile, readFile, FileNotFoundError } from './storage';
+import { rewarmDocument, withDocLock } from './tiering';
+import { getObjectStore, objectKeyFor, ObjectNotFoundError, ArchiveUnavailableError } from './object-store';
 import { createShareLink } from './shares';
 import { getBaseUrl } from './env';
 import { indexDoc } from './fts';
@@ -309,5 +311,53 @@ export function deleteNode(ownerId: string, id: string): void {
                 console.warn('[deleteNode] disk cleanup failed', f.storagePath, e);
             }
         }
+    }
+}
+
+// 冷热分层：访问时间戳（推迟冷却判定；只动 last_viewed_at，不动 updated_at 避免影响排序语义）
+export function touchDocument(docId: string): void {
+    db.update(schema.documents).set({ lastViewedAt: Date.now() })
+        .where(eq(schema.documents.id, docId)).run();
+}
+
+// 内容读取单点：hot → 本地（现状路径）；cold → 远端拉取 + fire-and-forget 回热
+// 错误语义：FileNotFoundError / ObjectNotFoundError → 路由 404；ArchiveUnavailableError → 路由 503
+// 自愈兜底（spec §7）：陈旧行判定与实际状态竞态时（他方刚回热/刚归档）重取行走另一条路径，防假 404
+export async function readDocumentContent(doc: DocumentRow): Promise<string> {
+    touchDocument(doc.id);
+    if (doc.storageTier === 'cold') {
+        const store = getObjectStore();
+        if (!store) throw new ArchiveUnavailableError('对象存储未配置，冷文档不可读');
+        let content: string;
+        try {
+            content = await store.get(objectKeyFor(doc));
+        } catch (e) {
+            if (e instanceof ObjectNotFoundError) {
+                // 读取期间他方回热已完成（远端对象已删、本地已写）→ 回落读本地
+                const refetch = db.select().from(schema.documents).where(eq(schema.documents.id, doc.id)).get();
+                if (refetch && refetch.storageTier === 'hot' && refetch.storagePath) {
+                    return readFile(refetch.storagePath);
+                }
+            }
+            throw e;
+        }
+        void rewarmDocument(doc.id, content).catch((e) => {
+            console.warn('[tiering] 回热失败（下次访问重试）', doc.id, e);
+        });
+        return content;
+    }
+    if (!doc.storagePath) throw new FileNotFoundError(doc.id); // 防御：hot 必有盘路径
+    try {
+        return await readFile(doc.storagePath);
+    } catch (e) {
+        if (e instanceof FileNotFoundError) {
+            // 读取期间归档刚完成（本地已删、远端已存）→ 转走远端
+            const refetch = db.select().from(schema.documents).where(eq(schema.documents.id, doc.id)).get();
+            if (refetch && refetch.storageTier === 'cold') {
+                const store = getObjectStore();
+                if (store) return store.get(objectKeyFor(refetch));
+            }
+        }
+        throw e;
     }
 }

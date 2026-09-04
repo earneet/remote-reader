@@ -1,20 +1,23 @@
 import { error, redirect } from '@sveltejs/kit';
 import type { PageServerLoad, Actions } from './$types';
-import { getOwnedDocument } from '$server/documents';
-import { readFile, FileNotFoundError } from '$server/storage';
+import { getOwnedDocument, readDocumentContent } from '$server/documents';
+import { FileNotFoundError } from '$server/storage';
+import { ArchiveUnavailableError, ObjectNotFoundError } from '$server/object-store';
 import { renderMarkdown } from '$server/markdown';
 import { listTagsForDoc, setDocTags, SetTagsError } from '$server/tags';
 
 export const load: PageServerLoad = async ({ locals, params, setHeaders }) => {
     if (!locals.user) redirect(302, '/login');
     const doc = getOwnedDocument(params.id, locals.user.id);
-    if (!doc || doc.type !== 'file' || !doc.storagePath) error(404, '文档不存在');
+    // 冷热分层：storage_tier 是内容位置事实源，storagePath 冷态保留 → 不再作为 404 条件
+    if (!doc || doc.type !== 'file') error(404, '文档不存在');
 
     let content: string;
     try {
-        content = await readFile(doc.storagePath);
+        content = await readDocumentContent(doc);
     } catch (e) {
-        if (e instanceof FileNotFoundError) error(404, '文档内容缺失');
+        if (e instanceof FileNotFoundError || e instanceof ObjectNotFoundError) error(404, '文档内容缺失');
+        if (e instanceof ArchiveUnavailableError) error(503, '归档存储暂时不可达，请稍后重试');
         throw e;
     }
     const html = await renderMarkdown(content);
