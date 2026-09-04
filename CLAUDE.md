@@ -20,7 +20,7 @@ Remote Reader 让远程工作的 Agent 通过 MCP 上传 Markdown 文档，用�
 
 **下一步（低优先）**：spec §12 Phase 3 扩展（远程 MCP server / 多文档批量上传等），详见 spec §15.3 待做；CSP 由 report-only 转 enforcing（需线上观察 mermaid/katex 违规）；session 服务端撤销表 / 审计日志（设计级，未做）。
 
-**桥运行时**：无原生依赖（纯 fetch + MCP SDK）→ `bun apps/mcp-bridge/src/index.ts` 直跑；`tsc --noEmit` 类型检查（`bun --filter remote-reader-mcp-bridge check`）。配置 = `~/.config/remote-reader/config.json`（XDG）默认 + `REMOTE_READER_URL`/`REMOTE_READER_TOKEN` env 覆盖。
+**桥运行时**：无原生依赖（纯 fetch + MCP SDK）→ `bun apps/mcp-bridge/src/index.ts` 直跑；`tsc --noEmit` 类型检查（`bun --filter remote-reader-mcp-bridge check`）。配置 = `~/.config/remote-reader/config.json`（XDG）默认 + `REMOTE_READER_URL`/`REMOTE_READER_TOKEN` env 覆盖。**注册进 MCP 客户端时入口必须用绝对路径**——客户端拉起 stdio 进程的 cwd 无保证（如 ZCode 设置页探针），相对路径会间歇性 Module not found（README/INSTALL/USER_GUIDE 的注册命令均已改为 `$(pwd)` 展开写法）。
 
 产品/使用/设计文档：`docs/PRODUCT.md`、`docs/USER_GUIDE.md`、`docs/superpowers/specs/`（含 §15 实现现状）。**改动架构前必读 spec。**
 

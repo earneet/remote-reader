@@ -90,14 +90,15 @@ Docker deployments: migrations are already applied during image build; schema ch
 
 ### 2.1 Recommended: Local MCP bridge ✅
 
-The bridge (`apps/mcp-bridge`) is a stdio MCP server that exposes the `upload_document` tool, holds the token locally, and forwards requests to the Web API. Agents need not write HTTP by hand. The bridge has no native dependencies — `bun apps/mcp-bridge/src/index.ts` runs directly.
+The bridge (`apps/mcp-bridge`) is a stdio MCP server that exposes the `upload_document` tool, holds the token locally, and forwards requests to the Web API. Agents need not write HTTP by hand. The bridge has no native dependencies — `bun apps/mcp-bridge/src/index.ts` runs directly. **When registering the entry with an MCP client, always use an absolute path** — the working directory a client spawns the stdio process from is not guaranteed, and a relative path fails intermittently with `Module not found` (typical symptom: the tool works but the status page shows failed).
 
 Two configuration options (env takes precedence over file):
 
 **Option 1: Environment variables** (recommended, passed in one shot by the MCP client)
 
 ```bash
-claude mcp add remote-reader bun apps/mcp-bridge/src/index.ts \
+# Run from the repo root; $(pwd) expands to an absolute path at registration time (Windows PowerShell: "$PWD/...")
+claude mcp add remote-reader bun "$(pwd)/apps/mcp-bridge/src/index.ts" \
   -e REMOTE_READER_URL=https://your-host \
   -e REMOTE_READER_TOKEN=rr_xxx
 ```
@@ -110,7 +111,21 @@ Write `~/.config/remote-reader/config.json` (or `$XDG_CONFIG_HOME/remote-reader/
 { "baseUrl": "https://your-host", "token": "rr_xxx" }
 ```
 
-Then just register the command: `claude mcp add remote-reader bun apps/mcp-bridge/src/index.ts`.
+Then just register the command: `claude mcp add remote-reader bun "$(pwd)/apps/mcp-bridge/src/index.ts"`.
+
+**Other MCP clients** (Cursor / Cline / Windsurf / opencode / ZCode and any client that reads a config file directly): use the standard `mcpServers` JSON with an absolute entry path (ZCode nests the same fields under `mcp.servers` in `~/.zcode/cli/config.json`):
+
+```json
+{
+  "mcpServers": {
+    "remote-reader": {
+      "command": "bun",
+      "args": ["/absolute/path/to/remote-reader/apps/mcp-bridge/src/index.ts"],
+      "env": { "REMOTE_READER_URL": "https://your-host", "REMOTE_READER_TOKEN": "rr_xxx" }
+    }
+  }
+}
+```
 
 If configuration is missing (neither env nor file), the bridge exits at startup (exit 1) and prints guidance. Once configured, the Agent calls `upload_document({ name, content, path? })` and receives a tool result like `Uploaded (id=...). View link: https://.../s/<token>`.
 

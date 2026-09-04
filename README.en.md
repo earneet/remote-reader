@@ -79,11 +79,27 @@ For full deployment (reverse proxy, HTTPS, backup, upgrade migrations), see [Ins
 
 The local MCP bridge lets an agent upload via an MCP tool call; the bridge holds the token locally and never exposes it to the agent. Once configured, the agent just calls `upload_document({ name, content, path? })` to get the view link.
 
+> **The bridge entry path must be absolute.** The working directory an MCP client spawns the stdio process from is not guaranteed (some clients/launch paths do not pass `cwd`); a relative path fails intermittently with `Module not found` — the typical symptom is "the tool clearly works, but the client's status page shows failed".
+
 ```bash
-# Claude Code integration (pass url + token via env)
-claude mcp add remote-reader bun apps/mcp-bridge/src/index.ts \
+# Claude Code integration (run from the repo root; $(pwd) expands to an absolute path at registration time)
+claude mcp add remote-reader bun "$(pwd)/apps/mcp-bridge/src/index.ts" \
   -e REMOTE_READER_URL=http://localhost:5173 \
   -e REMOTE_READER_TOKEN=rr_xxx
+```
+
+For any other MCP client that reads a config file directly (Cursor / Cline / Windsurf / opencode / ZCode …), use the standard `mcpServers` JSON with an absolute entry path (on Windows PowerShell use `"$PWD/apps/mcp-bridge/src/index.ts"`; ZCode nests the same fields under `mcp.servers` in `~/.zcode/cli/config.json`):
+
+```json
+{
+  "mcpServers": {
+    "remote-reader": {
+      "command": "bun",
+      "args": ["/absolute/path/to/remote-reader/apps/mcp-bridge/src/index.ts"],
+      "env": { "REMOTE_READER_URL": "http://localhost:5173", "REMOTE_READER_TOKEN": "rr_xxx" }
+    }
+  }
+}
 ```
 
 Alternatively, write `{ baseUrl, token }` into `~/.config/remote-reader/config.json` and register only the command (env takes precedence over the file; if config is missing, the bridge exits on startup). See [User Guide](./docs/USER_GUIDE.en.md).

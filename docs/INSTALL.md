@@ -231,12 +231,13 @@ your-domain {
 
 ## 7. MCP 桥配置（Agent 上传）
 
-桥无原生依赖，`bun apps/mcp-bridge/src/index.ts` 直跑。两种配置（env 优先于文件）：
+桥无原生依赖，`bun apps/mcp-bridge/src/index.ts` 直跑。**注册到 MCP 客户端时入口必须写绝对路径**——客户端拉起 stdio 进程的工作目录没有保证（部分客户端/启动路径不传 `cwd`），相对路径会间歇性 `Module not found`（典型症状：工具能用但状态页显示 failed）。两种配置（env 优先于文件）：
 
 **方式一：环境变量**（推荐）
 
 ```bash
-claude mcp add remote-reader bun apps/mcp-bridge/src/index.ts \
+# 在仓库根目录执行，$(pwd) 在注册时展开为绝对路径（Windows PowerShell 用 "$PWD/..."）
+claude mcp add remote-reader bun "$(pwd)/apps/mcp-bridge/src/index.ts" \
   -e REMOTE_READER_URL=https://your-host \
   -e REMOTE_READER_TOKEN=rr_xxx
 ```
@@ -249,7 +250,21 @@ claude mcp add remote-reader bun apps/mcp-bridge/src/index.ts \
 { "baseUrl": "https://your-host", "token": "rr_xxx" }
 ```
 
-然后只注册命令：`claude mcp add remote-reader bun apps/mcp-bridge/src/index.ts`。
+然后只注册命令：`claude mcp add remote-reader bun "$(pwd)/apps/mcp-bridge/src/index.ts"`。
+
+**其他 MCP 客户端**（Cursor / Cline / Windsurf / opencode / ZCode 等直接读配置文件的）：用标准 `mcpServers` JSON，入口同样写绝对路径（ZCode 放在 `~/.zcode/cli/config.json` 的 `mcp.servers` 下，字段含义相同；GUI 启动的客户端若不继承 shell PATH，`command` 也写 bun 的绝对路径更稳）：
+
+```json
+{
+  "mcpServers": {
+    "remote-reader": {
+      "command": "bun",
+      "args": ["/absolute/path/to/remote-reader/apps/mcp-bridge/src/index.ts"],
+      "env": { "REMOTE_READER_URL": "https://your-host", "REMOTE_READER_TOKEN": "rr_xxx" }
+    }
+  }
+}
+```
 
 配置缺失（既无 env 又无文件）桥启动即退（exit 1）并打印指引。配置好后 Agent 调 `upload_document({ name, content, path? })`，拿到查看链接。
 
