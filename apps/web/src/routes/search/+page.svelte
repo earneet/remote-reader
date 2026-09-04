@@ -62,6 +62,8 @@
                         {/if}
                         {#if r.snippet}
                             <p class="snippet">{@html r.snippet}</p>
+                        {:else if r.doc.storageTier === 'cold'}
+                            <p class="snippet muted">☁️ 已归档（仅标题可搜）</p>
                         {/if}
                     </li>
                 {/each}

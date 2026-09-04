@@ -127,7 +127,11 @@ export function searchDocuments(ownerId: string, query: string, tagNames: string
     const ids = [...candidateIds];
     const ph = ids.map(() => '?').join(',');
     const docs = sqlite.prepare(`
-        SELECT * FROM documents WHERE owner_id = ? AND id IN (${ph})
+        SELECT d.id, d.owner_id AS "ownerId", d.parent_id AS "parentId", d.name, d.type,
+               d.storage_path AS "storagePath", d.content_hash AS "contentHash",
+               d.size_bytes AS "sizeBytes", d.created_at AS "createdAt", d.updated_at AS "updatedAt",
+               d.storage_tier AS "storageTier", d.last_viewed_at AS "lastViewedAt", d.archived_at AS "archivedAt"
+        FROM documents d WHERE d.owner_id = ? AND d.id IN (${ph})
     `).all(ownerId, ...ids) as DocumentRow[];
 
     return docs.map(doc => ({

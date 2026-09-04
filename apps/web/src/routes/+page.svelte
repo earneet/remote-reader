@@ -82,6 +82,7 @@
                                     <a href="/?dir={item.id}">📁 {item.name}</a>
                                 {:else}
                                     <a href="/d/{item.id}">📄 {item.name}</a>
+                                    {#if item.storageTier === 'cold'}<span class="chip-static cold-chip">☁️ 已归档</span>{/if}
                                 {/if}
                                 {#if item.type !== 'folder' && item.sizeBytes != null}
                                     <span class="size">{item.sizeBytes} B</span>
@@ -162,6 +163,7 @@
     .name { display: flex; align-items: baseline; gap: 0.5rem; flex: 1; min-width: 0; }
     .name a { color: #0969da; text-decoration: none; overflow-wrap: anywhere; }
     .name a:hover { text-decoration: underline; }
+    .cold-chip { color: #57606a; font-weight: 400; }
     .size { color: #57606a; font-size: 0.8em; flex-shrink: 0; }
 
     .actions { display: inline-flex; align-items: center; gap: 0.2rem; flex-shrink: 0; }
