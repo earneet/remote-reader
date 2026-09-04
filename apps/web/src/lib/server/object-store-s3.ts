@@ -1,4 +1,5 @@
 import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { NodeHttpHandler } from '@smithy/node-http-handler';
 import type { ObjectStore, ObjectStoreConfig } from './object-store';
 import { ObjectNotFoundError, ArchiveUnavailableError } from './object-store';
 
@@ -22,7 +23,7 @@ export class S3ObjectStore implements ObjectStore {
                 secretAccessKey: config.secretAccessKey
             },
             // SDK 默认无请求超时：挂起端点会拖死冷读请求与文档锁，快速失败交给 503 语义（spec §5）
-            requestTimeout: 5_000,
+            requestHandler: new NodeHttpHandler({ requestTimeout: 5_000 }),
             maxAttempts: 2
         });
         this.bucket = config.bucket;
