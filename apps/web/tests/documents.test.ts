@@ -13,9 +13,14 @@ import {
 } from '../src/lib/server/documents';
 import { indexDoc } from '../src/lib/server/fts';
 import { setDocTags } from '../src/lib/server/tags';
+import { runArchiveCycle } from '../src/lib/server/tiering';
+import { MemoryObjectStore, __setObjectStoreForTest, objectKeyFor } from '../src/lib/server/object-store';
+import { join, dirname } from 'node:path';
 import { eq, and, isNull } from 'drizzle-orm';
 
 let ownerId: string;
+let store: MemoryObjectStore;
+const DAY = 86_400_000;
 const TMP_DOCS = `./data/test-docs-${Date.now().toString(36)}`;
 
 beforeEach(async () => {
@@ -35,6 +40,8 @@ beforeEach(async () => {
         role: 'member',
         createdAt: Date.now()
     }).run();
+    store = new MemoryObjectStore();
+    __setObjectStoreForTest(store);
 });
 
 afterEach(() => {
@@ -44,6 +51,7 @@ afterEach(() => {
     sqlite.prepare('DELETE FROM docs_fts').run();
     db.delete(schema.documentTags).run();
     db.delete(schema.tags).run();
+    __setObjectStoreForTest(undefined);
 });
 
 test('首次上传创建文档并返回 url', async () => {
@@ -305,4 +313,58 @@ test('listChildren 默认排序：folder 优先，同层 file 按 updated_at 倒
     const files = children.filter(c => c.type === 'file');
     expect(files[0].name).toBe('bbb.md');
     expect(files[1].name).toBe('aaa.md');
+});
+
+// ── 冷热分层：写路径冷态交互 ────────────────────────────────
+async function makeCold(content: string, name = 'c.md'): Promise<string> {
+    const r = await uploadDocument(ownerId, name, content, []);
+    db.update(schema.documents)
+        .set({ updatedAt: Date.now() - 40 * DAY, createdAt: Date.now() - 40 * DAY })
+        .where(eq(schema.documents.id, r.id)).run();
+    await runArchiveCycle(store);
+    return r.id;
+}
+
+test('冷文档·覆盖上传（新内容）→ 回热 + 本地 v2 + 删旧远端对象', async () => {
+    const id = await makeCold('v1');
+    const oldKey = objectKeyFor(db.select().from(schema.documents).where(eq(schema.documents.id, id)).get()!);
+    expect(store.data.has(oldKey)).toBe(true);
+    await uploadDocument(ownerId, 'c.md', 'v2', []);
+    const row = db.select().from(schema.documents).where(eq(schema.documents.id, id)).get()!;
+    expect(row.storageTier).toBe('hot');
+    expect(row.contentHash).toBe(sha256Hex('v2'));
+    const { readFile } = await import('../src/lib/server/storage');
+    expect(await readFile(row.storagePath!)).toBe('v2');
+    await new Promise((r) => setTimeout(r, 20)); // 旧对象删除 fire-and-forget
+    expect(store.data.has(oldKey)).toBe(false);
+});
+
+test('冷文档·幂等命中（同内容）→ 保持冷态、不写盘、时间戳未动', async () => {
+    const id = await makeCold('same');
+    const before = db.select().from(schema.documents).where(eq(schema.documents.id, id)).get()!;
+    await uploadDocument(ownerId, 'c.md', 'same', []);
+    const row = db.select().from(schema.documents).where(eq(schema.documents.id, id)).get()!;
+    expect(row.storageTier).toBe('cold');
+    expect(row.updatedAt).toBe(before.updatedAt); // 时间戳未动
+});
+
+test('冷文档·重命名 → 仅 DB（name+storagePath 更新），不触碰磁盘/远端', async () => {
+    const id = await makeCold('x', 'old.md');
+    const row0 = db.select().from(schema.documents).where(eq(schema.documents.id, id)).get()!;
+    const key = objectKeyFor(row0);
+    const r = renameNode(ownerId, id, 'new.md');
+    expect(r.ok).toBe(true);
+    const row = db.select().from(schema.documents).where(eq(schema.documents.id, id)).get()!;
+    expect(row.name).toBe('new.md');
+    expect(row.storagePath).toBe(join(dirname(row0.storagePath!), 'new.md'));
+    expect(store.data.has(key)).toBe(true); // 远端对象未动（key 不含 name）
+});
+
+test('冷文档·删除 → 行删除 + 远端对象删除', async () => {
+    const id = await makeCold('gone');
+    const key = objectKeyFor(db.select().from(schema.documents).where(eq(schema.documents.id, id)).get()!);
+    deleteNode(ownerId, id);
+    expect(db.select().from(schema.documents).where(eq(schema.documents.id, id)).get()).toBeUndefined();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(store.data.has(key)).toBe(false);
 });

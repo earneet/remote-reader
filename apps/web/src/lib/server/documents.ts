@@ -95,16 +95,40 @@ export async function uploadDocument(
     }
 
     if (existing) {
-        await writeFile(diskPath, content);
-        db.update(schema.documents).set({
-            storagePath: diskPath,
-            contentHash,
-            sizeBytes: Buffer.byteLength(content),
-            updatedAt: now
-        }).where(eq(schema.documents.id, existing.id)).run();
-        indexDoc(existing.id, name, content);
-        const url = await ensureShareUrl(existing.id);
-        return { id: existing.id, url };
+        // §4.2：覆盖上传写段持 doc 锁（与归档/回热串行，防竞态丢内容）；锁内重取行拿最新状态
+        return withDocLock(existing.id, async () => {
+            const row = db.select().from(schema.documents).where(eq(schema.documents.id, existing.id)).get();
+            // 锁等待期间行被删：重取与递归之间无 await（原子窗口），递归走全新插入、不会重入本锁
+            if (!row) return uploadDocument(ownerId, name, content, pathSegments);
+            // 锁内复查幂等：等锁期间内容可能已被并发上传改为相同内容
+            if (row.contentHash === contentHash) {
+                const url = await ensureShareUrl(row.id);
+                return { id: row.id, url };
+            }
+            await writeFile(diskPath, content);
+            db.update(schema.documents).set({
+                storagePath: diskPath,
+                contentHash,
+                sizeBytes: Buffer.byteLength(content),
+                updatedAt: now,
+                // 覆盖上传即回热：内容已重新落盘
+                storageTier: 'hot',
+                lastViewedAt: now,
+                archivedAt: null
+            }).where(eq(schema.documents.id, row.id)).run();
+            indexDoc(row.id, name, content);
+            // 旧态为 cold：清理旧远端对象（旧 key 含旧 hash；失败仅留孤儿对象，无害）
+            if (row.storageTier === 'cold') {
+                const store = getObjectStore();
+                if (store) {
+                    void store.delete(objectKeyFor(row)).catch((e) => {
+                        console.warn('[upload] 删除旧归档对象失败（孤儿对象，无害）', row.id, e);
+                    });
+                }
+            }
+            const url = await ensureShareUrl(row.id);
+            return { id: row.id, url };
+        });
     }
 
     const id = generateId();
@@ -190,12 +214,15 @@ export function renameNode(
         .get();
     if (dup) return { ok: false, reason: '同名节点已存在', code: 'conflict' };
     // #42: 文件重命名同步磁盘文件与 storagePath，避免 DB 名字与磁盘路径错位、覆盖上传留孤儿
+    // 冷热分层：cold 无本地文件，跳过磁盘 rename，仅更新 DB（对象 key 不含 name，远端无需动）
     if (node.type === 'file' && node.storagePath) {
         const newPath = join(dirname(node.storagePath), newName);
-        try {
-            renameSync(node.storagePath, newPath);
-        } catch {
-            return { ok: false, reason: '磁盘重命名失败', code: 'invalid' };
+        if (node.storageTier === 'hot') {
+            try {
+                renameSync(node.storagePath, newPath);
+            } catch {
+                return { ok: false, reason: '磁盘重命名失败', code: 'invalid' };
+            }
         }
         db.update(schema.documents).set({ name: newName, storagePath: newPath, updatedAt: Date.now() })
             .where(and(eq(schema.documents.id, id), eq(schema.documents.ownerId, ownerId)))
@@ -290,7 +317,13 @@ export function deleteNode(ownerId: string, id: string): void {
         frontier = childIds;
     }
 
-    const files = db.select({ id: schema.documents.id, storagePath: schema.documents.storagePath })
+    const files = db.select({
+        id: schema.documents.id,
+        storagePath: schema.documents.storagePath,
+        storageTier: schema.documents.storageTier,
+        contentHash: schema.documents.contentHash,
+        ownerId: schema.documents.ownerId
+    })
         .from(schema.documents)
         .where(and(inArray(schema.documents.id, subtreeIds), eq(schema.documents.type, 'file')))
         .all();
@@ -303,8 +336,16 @@ export function deleteNode(ownerId: string, id: string): void {
         tx.delete(schema.documents).where(inArray(schema.documents.id, subtreeIds)).run();
     });
 
+    const store = getObjectStore();
     for (const f of files) {
-        if (f.storagePath) {
+        if (f.storageTier === 'cold') {
+            // 冷文档：内容在远端（失败仅留孤儿对象，无害）
+            if (store) {
+                void store.delete(objectKeyFor(f)).catch((e) => {
+                    console.warn('[deleteNode] 远端对象删除失败', f.id, e);
+                });
+            }
+        } else if (f.storagePath) {
             try {
                 rmSync(f.storagePath, { recursive: true, force: true });
             } catch (e) {

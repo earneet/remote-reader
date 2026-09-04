@@ -158,3 +158,65 @@ test('批量上限 50：60 个候选单轮只归档 50，下一轮清尾', async
     expect(await runArchiveCycle(store)).toBe(50);
     expect(await runArchiveCycle(store)).toBe(10);
 });
+// ── 竞态回归（spec §4.2，双 Agent 交叉审查发现，用 gate 注入交错）──
+class GatedMemoryStore extends MemoryObjectStore {
+    gate: Promise<void> = Promise.resolve();
+    async put(key: string, content: string): Promise<void> {
+        await this.gate;
+        return super.put(key, content);
+    }
+    async get(key: string): Promise<string> {
+        await this.gate;
+        return super.get(key);
+    }
+}
+
+test('竞态：归档 PUT 窗口内覆盖上传 → doc 锁串行化，v2 完好不丢（P0 回归）', async () => {
+    const gated = new GatedMemoryStore();
+    __setObjectStoreForTest(gated);
+    const r = await uploadDocument(ownerId, 'a.md', 'v1', []);
+    db.update(schema.documents).set({ updatedAt: Date.now() - 40 * DAY, createdAt: Date.now() - 40 * DAY }).where(eq(schema.documents.id, r.id)).run();
+    let release!: () => void;
+    gated.gate = new Promise((res) => { release = res; });
+    const cycle = runArchiveCycle(gated);                       // 卡在 PUT
+    await new Promise((res) => setTimeout(res, 30));            // 等 PUT 到达 gate
+    // 注意：上传只发起不 await——它会阻塞在被 gate 卡住的 doc 锁上，先 await 会死锁（永远到不了 release）
+    const upload = uploadDocument(ownerId, 'a.md', 'v2', []);   // PUT 窗口内到达，被 doc 锁挡住
+    await new Promise((res) => setTimeout(res, 30));            // 等上传抵达锁队列
+    release!();                                                 // 归档完成 → 锁释放 → 上传继续
+    await cycle;
+    await upload;
+    const row = getDoc(r.id);
+    expect(row.storageTier).toBe('hot');
+    expect(row.contentHash).toBe(sha256Hex('v2'));
+    const { readFile } = await import('../src/lib/server/storage');
+    expect(await readFile(row.storagePath!)).toBe('v2');
+    const fts = sqlite.prepare('SELECT content FROM docs_fts WHERE doc_id = ?').get(r.id) as { content: string };
+    expect(fts.content).toBe('v2');
+    expect(gated.data.size).toBe(0);                            // 旧 v1 对象被覆盖上传清理
+});
+
+test('竞态：回热 GET 窗口内覆盖上传 → FTS 不倒退、终态 v2 一致（P1 回归）', async () => {
+    const gated = new GatedMemoryStore();
+    __setObjectStoreForTest(gated);
+    const r = await uploadDocument(ownerId, 'a.md', 'v1', []);
+    db.update(schema.documents).set({ updatedAt: Date.now() - 40 * DAY, createdAt: Date.now() - 40 * DAY }).where(eq(schema.documents.id, r.id)).run();
+    await runArchiveCycle(gated);                                // v1 落远端，tier=cold
+    let release!: () => void;
+    gated.gate = new Promise((res) => { release = res; });
+    const rewarm = rewarmDocument(r.id);                         // 无 content → GET 卡 gate
+    await new Promise((res) => setTimeout(res, 30));
+    const upload = uploadDocument(ownerId, 'a.md', 'v2', []);    // GET 窗口内到达，被 doc 锁挡住（同样只发起不 await，防死锁）
+    await new Promise((res) => setTimeout(res, 30));
+    release!();                                                  // 回热完成 → 锁释放 → 上传继续
+    await rewarm;
+    await upload;
+    const row = getDoc(r.id);
+    expect(row.storageTier).toBe('hot');
+    expect(row.contentHash).toBe(sha256Hex('v2'));
+    const { readFile } = await import('../src/lib/server/storage');
+    expect(await readFile(row.storagePath!)).toBe('v2');
+    const fts = sqlite.prepare('SELECT content FROM docs_fts WHERE doc_id = ?').get(r.id) as { content: string };
+    expect(fts.content).toBe('v2');                              // 索引不倒退回 v1
+    expect(gated.data.size).toBe(0);
+});
