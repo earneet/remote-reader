@@ -30,7 +30,10 @@ export const documents = sqliteTable('documents', {
     contentHash: text('content_hash'),
     sizeBytes: integer('size_bytes'),
     createdAt: integer('created_at').notNull(),
-    updatedAt: integer('updated_at').notNull()
+    updatedAt: integer('updated_at').notNull(),
+    storageTier: text('storage_tier', { enum: ['hot', 'cold'] }).notNull().default('hot'),
+    lastViewedAt: integer('last_viewed_at'),
+    archivedAt: integer('archived_at')
 }, (t) => ({
     ownerParentIdx: index('documents_owner_parent_idx').on(t.ownerId, t.parentId),
     ownerParentNameTypeIdx: index('documents_owner_parent_name_type_idx').on(t.ownerId, t.parentId, t.name, t.type)

@@ -1,4 +1,4 @@
-import Database from 'better-sqlite3';
+import Database, { type Database as SqliteDb } from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -35,6 +35,9 @@ CREATE TABLE IF NOT EXISTS documents (
     size_bytes integer,
     created_at integer NOT NULL,
     updated_at integer NOT NULL,
+    storage_tier text NOT NULL DEFAULT 'hot',
+    last_viewed_at integer,
+    archived_at integer,
     FOREIGN KEY (owner_id) REFERENCES users(id) ON UPDATE no action ON DELETE no action
 );
 CREATE INDEX IF NOT EXISTS documents_owner_parent_idx ON documents (owner_id, parent_id);
@@ -84,8 +87,25 @@ sqlite.pragma('busy_timeout = 5000');
 // C1: 启动时 idempotent 建表 + 索引，全新部署（含 Docker 容器）无需手动 migrate 即可工作，
 // 避免首请求 500 (no such table)。dev 的 drizzle-kit migrate 仍可用；IF NOT EXISTS 保证两者共存不冲突。
 // 改 schema 时须同步 schema.ts 声明与 drizzle migration，保持三处一致。
+
+// 冷热分层三列：存量库升级（CREATE TABLE IF NOT EXISTS 对已存在的表是 no-op）
+export function ensureTierColumns(target: SqliteDb): void {
+    const cols = target.prepare('PRAGMA table_info(documents)').all() as { name: string }[];
+    const names = new Set(cols.map((c) => c.name));
+    if (!names.has('storage_tier')) {
+        target.exec("ALTER TABLE documents ADD COLUMN storage_tier text NOT NULL DEFAULT 'hot'");
+    }
+    if (!names.has('last_viewed_at')) {
+        target.exec('ALTER TABLE documents ADD COLUMN last_viewed_at integer');
+    }
+    if (!names.has('archived_at')) {
+        target.exec('ALTER TABLE documents ADD COLUMN archived_at integer');
+    }
+}
+
 export function ensureSchema(): void {
     sqlite.exec(SCHEMA_SQL);
+    ensureTierColumns(sqlite);
 }
 ensureSchema();
 void import('../fts').then((m) => m.backfillFts()).catch((e) => console.warn('[backfillFts] failed', e));
