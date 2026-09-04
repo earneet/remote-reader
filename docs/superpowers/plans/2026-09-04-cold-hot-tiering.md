@@ -178,8 +178,8 @@ git commit -m "feat(web): 冷热分层 schema——documents 加 storage_tier/la
 
 - [ ] **Step 2.1: 安装依赖**
 
-Run（workdir `apps/web`）: `bun add @aws-sdk/client-s3`
-Expected: `apps/web/package.json` dependencies 出现 `"@aws-sdk/client-s3": "^3..."`
+Run（workdir `apps/web`）: `bun add @aws-sdk/client-s3 @smithy/node-http-handler`
+Expected: `apps/web/package.json` dependencies 出现 `"@aws-sdk/client-s3"` 与 `"@smithy/node-http-handler"`（后者供请求超时配置，见 Step 2.5 执行修正）
 
 - [ ] **Step 2.2: 写失败测试**
 
@@ -380,6 +380,7 @@ export class MemoryObjectStore implements ObjectStore {
 
 ```ts
 import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { NodeHttpHandler } from '@smithy/node-http-handler';
 import type { ObjectStore, ObjectStoreConfig } from './object-store';
 import { ObjectNotFoundError, ArchiveUnavailableError } from './object-store';
 
@@ -403,7 +404,8 @@ export class S3ObjectStore implements ObjectStore {
                 secretAccessKey: config.secretAccessKey
             },
             // SDK 默认无请求超时：挂起端点会拖死冷读请求与文档锁，快速失败交给 503 语义（spec §5）
-            requestTimeout: 5_000,
+            // 执行修正：requestTimeout 非 S3ClientConfig 合法键（SDK v3 须走 requestHandler）
+            requestHandler: new NodeHttpHandler({ requestTimeout: 5_000 }),
             maxAttempts: 2
         });
         this.bucket = config.bucket;
@@ -1717,3 +1719,16 @@ git commit -m "chore(web): 冷热分层回归收尾——全量测试/svelte-che
    - **P1 并发双读假 404**（Oracle 3）+ P2 热读撞归档 unlink（Oracle 4）→ readDocumentContent 双向自愈兜底（Task 4.3）+ 2 个测试（Task 4.1 tiering-view）。
    - **P2×5**（Oracle 5-8）→ 锁内复查冷判定（Task 3.4）、S3 requestTimeout/maxAttempts（Task 2.5）、冷存量启动告警（Task 7.3）、spec §4.1 孤儿措辞降级、30ms 固定等待改轮询。
    - **Momus P1 d/[id] 重复 import 指令** → Task 4.4 改为整行替换说明；**P2×4** → Task 5.2/7.2 预期输出修正（3/4、1/2 红例）、Task 3.5 计数 ×11、Step 8.1 计数 35；ObjectNotFoundError 未用 import 随自愈兜底自然转为已用。
+
+---
+
+## 执行记录（2026-09-04 实际落地，分支 feature/cold-hot-tiering）
+
+| 项 | 计划 | 实际 | 说明 |
+|---|---|---|---|
+| Step 2.1/2.5 S3 超时 | `requestTimeout: 5_000` 直配 | `requestHandler: new NodeHttpHandler({ requestTimeout: 5_000 })` | `requestTimeout` 非 `S3ClientConfig` 合法键（svelte-check 抓出），v3 须走 requestHandler；`@smithy/node-http-handler` 加为显式依赖 |
+| Task 3 测试夹具 | 回拨仅 `updatedAt` | 回拨 `updatedAt` + `createdAt` | `isColdCandidate` 取 `max(last_viewed ?? created, updated)`，单拨 updatedAt 时 max=now 永不判冷——夹具不真实（真实旧文档两时间戳都旧）；纯函数夹具同步修正 |
+| Task 3 竞态测试 | 11 例含 2 个 gate 竞态 | Task 3 提交 9 例，2 个竞态回归移至 Task 5 落地 | 竞态测试依赖 Task 5.3 的覆盖上传上锁；Task 3 时正确地红（证明 P0 检测有效），Task 5 后正确地绿 |
+| Step 8.1 计数 | 259+35 | **294/294 全过** | 另：svelte-check 0 错（3 个存量 autofocus warning 非本次引入）、桥 tsc 0 错、adapter-node 生产构建冒烟通过（9.5M） |
+
+提交序列：351886b（Task 1）→ cb20737（Task 2）→ deb08aa（Task 3）→ a2dd334（Task 4）→ 4f34571（Task 5）→ e27b4bd+06f7394（Task 6）→ 3bf6ef8（Task 7）。
