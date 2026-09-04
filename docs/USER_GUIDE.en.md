@@ -207,6 +207,8 @@ To browse / delete / organize your own document library: visit the site home →
 | `SESSION_MAX_AGE` | `2592000` (30 days, seconds) | Session lifetime; exp is embedded in the token and validated server-side |
 | `PORT` / `HOST` / `ORIGIN` | `3000` / `0.0.0.0` / — | adapter-node listen address and origin validation |
 | `NODE_ENV` | — | Set to `production` to enable secure cookies and require SESSION_SECRET |
+| `OBJECT_STORE_*` (5 vars) | — (all empty = off) | S3-compatible object store (Qiniu/R2/OSS gateway/MinIO) for cold/hot tiering; all-or-nothing — partial config fails startup |
+| `COLD_TIER_AFTER_DAYS` | `30` | Cold threshold in days; cold docs rewarm on open and stay viewable & title-searchable |
 
 > Numeric variables are parsed strictly by `envInt`: non-positive integers throw at module load time (fail-closed) and do not silently degrade.
 

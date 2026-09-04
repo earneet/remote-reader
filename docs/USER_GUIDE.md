@@ -207,6 +207,8 @@ Response 200: { "id": "...", "url": "https://<host>/s/<share-token>" }
 | `SESSION_MAX_AGE` | `2592000`（30 天，秒） | session 有效期；token 内嵌 exp 服务端校验 |
 | `PORT` / `HOST` / `ORIGIN` | `3000` / `0.0.0.0` / — | adapter-node 监听与 origin 校验 |
 | `NODE_ENV` | — | 设 `production` 启用安全 cookie + 强制 SESSION_SECRET |
+| `OBJECT_STORE_ENDPOINT` 等 5 项 | —（全空=关闭） | S3 兼容对象存储（七牛/R2/OSS 网关/MinIO 通接），冷热分层归档；5 项要么全填要么全空，缺一启动报错 |
+| `COLD_TIER_AFTER_DAYS` | `30` | 冷判定阈值（天）：超期未访问未更新自动归档；冷文档点开自动回热，仍可看、标题可搜 |
 
 > 数值型变量用 `envInt` 严格解析：非正整数会在模块加载时抛错（fail-closed），不静默退化。
 

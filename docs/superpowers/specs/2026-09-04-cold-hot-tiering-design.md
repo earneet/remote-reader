@@ -210,4 +210,5 @@ COLD_TIER_AFTER_DAYS=30
 
 ## 15. 实现现状
 
-- [ ] 未实现。实现顺序建议：schema 迁移 → ObjectStore 抽象 + fake → readDocumentContent + 路由改造 → 归档/回热引擎 → 写路径交互 → FTS/UI 适配 → startup-check/env → 测试补全 → e2e 冒烟
+- [x] **已实现并合入 master**（2026-09-04，分支 `feature/cold-hot-tiering`，294 测试全绿；审查残留加固后 298）。执行偏离与待办见 plans 文件「执行记录」；真实七牛冒烟（§13 可选项）待部署侧凭证就绪后执行。
+- 加固轮（同日，5-Agent 完成后审查的残留修复）：rewarm×rename 竞态自收敛守卫（翻转事务 WHERE 加 storagePath）、!flipped 防御分支补 3 测、mapGetError HTTP 404 兜底、全量文档同步（INSTALL/USER_GUIDE/PRODUCT）。

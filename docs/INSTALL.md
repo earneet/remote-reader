@@ -296,6 +296,8 @@ sudo systemctl start remote-reader
 sudo sqlite3 /var/lib/remote-reader/app.db ".backup /var/lib/remote-reader/backup-$(date +%F).db"
 ```
 
+> **启用冷热分层后（配置了 `OBJECT_STORE_*`）**：超过 `COLD_TIER_AFTER_DAYS` 未访问的冷文档内容**只在对象存储桶中**（对象前缀 `archive/`），上述 `data/` 备份不再包含它们——需把桶一并纳入备份（如七牛的跨区域同步 / 生命周期导出），否则备份不完整。
+
 ### 8.2 升级 / 迁移
 
 **schema 变更**后重新生成并执行 migration：
@@ -333,6 +335,10 @@ bun --filter remote-reader-web db:migrate    # 应用（生产在停服/维护�
 | `SESSION_MAX_AGE` | `2592000`（30 天，秒） | session 有效期 |
 | `PORT` / `HOST` | `3000` / `0.0.0.0` | adapter-node 监听 |
 | `NODE_ENV` | — | 设 `production` 启用安全 cookie + 强制 SESSION_SECRET |
+| `OBJECT_STORE_ENDPOINT` / `OBJECT_STORE_REGION` / `OBJECT_STORE_BUCKET` | —（全空=关闭） | S3 兼容对象存储，冷热分层归档（七牛示例 `https://s3.<region>.qiniucs.com`）；5 项**要么全填要么全空**，缺一启动报错点名 |
+| `OBJECT_STORE_ACCESS_KEY_ID` / `OBJECT_STORE_SECRET_ACCESS_KEY` | — | 对象存储凭证（仅存服务端 env，不落库） |
+| `OBJECT_STORE_FORCE_PATH_STYLE` | `false` | path-style 寻址开关（自建 MinIO 才需 `true`；七牛/AWS/R2 保持 false） |
+| `COLD_TIER_AFTER_DAYS` | `30` | 冷判定阈值：N 天未访问未更新 → 自动归档到对象存储（本地只留元数据；点开自动回热，冷文档仍可看、标题可搜） |
 
 > 数值型变量用 `envInt` 严格解析：非正整数会在模块加载时抛错（fail-closed），不静默退化。
 

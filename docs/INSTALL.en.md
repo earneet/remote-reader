@@ -225,6 +225,8 @@ tar czf backup-$(date +%F).tar.gz data/
 sqlite3 data/app.db ".backup data/backup-$(date +%F).db"
 ```
 
+> **With cold/hot tiering enabled** (`OBJECT_STORE_*` configured): content of cold docs (unaccessed beyond `COLD_TIER_AFTER_DAYS`) lives **only in the object storage bucket** (under the `archive/` prefix) — the `data/` backup above no longer includes it. Include the bucket in your backup strategy (e.g. Qiniu cross-region sync / lifecycle export), otherwise the backup is incomplete.
+
 ### 7.2 Upgrade / migrate
 
 After a schema change, regenerate and apply the migration:
@@ -254,6 +256,10 @@ Docker deployments: migrations are already executed at image build time; a schem
 | `SESSION_MAX_AGE` | `2592000` (30 days, seconds) | Session lifetime |
 | `PORT` / `HOST` / `ORIGIN` | `3000` / `0.0.0.0` / — | adapter-node listen address and origin validation |
 | `NODE_ENV` | — | Set to `production` to enable secure cookies and enforce SESSION_SECRET |
+| `OBJECT_STORE_ENDPOINT` / `OBJECT_STORE_REGION` / `OBJECT_STORE_BUCKET` | — (all empty = off) | S3-compatible object store for cold/hot tiering (Qiniu example: `https://s3.<region>.qiniucs.com`); the 5 vars must be **all set or all empty** — partial config fails startup with the missing names |
+| `OBJECT_STORE_ACCESS_KEY_ID` / `OBJECT_STORE_SECRET_ACCESS_KEY` | — | Object store credentials (server-side env only, never stored in DB) |
+| `OBJECT_STORE_FORCE_PATH_STYLE` | `false` | Path-style addressing (self-hosted MinIO needs `true`; Qiniu/AWS/R2 keep false) |
+| `COLD_TIER_AFTER_DAYS` | `30` | Cold threshold: docs unaccessed & unupdated for N days auto-archive to object storage (local keeps metadata only; opening a doc rewarms it automatically — cold docs stay viewable and title-searchable) |
 
 > Numeric variables are parsed strictly by `envInt`: non-positive integers throw at module load (fail-closed), with no silent fallback.
 
