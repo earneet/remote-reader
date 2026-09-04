@@ -2,7 +2,7 @@ import { test, expect, beforeEach, afterEach } from 'vitest';
 import { rmSync, existsSync } from 'node:fs';
 import { db, schema, sqlite } from '../src/lib/server/db';
 import { generateId, sha256Hex } from '../src/lib/server/auth';
-import { uploadDocument } from '../src/lib/server/documents';
+import { uploadDocument, renameNode, deleteNode } from '../src/lib/server/documents';
 import { isColdCandidate, runArchiveCycle, rewarmDocument, withDocLock } from '../src/lib/server/tiering';
 import { MemoryObjectStore, __setObjectStoreForTest, objectKeyFor } from '../src/lib/server/object-store';
 import { eq } from 'drizzle-orm';
@@ -219,4 +219,75 @@ test('竞态：回热 GET 窗口内覆盖上传 → FTS 不倒退、终态 v2 �
     const fts = sqlite.prepare('SELECT content FROM docs_fts WHERE doc_id = ?').get(r.id) as { content: string };
     expect(fts.content).toBe('v2');                              // 索引不倒退回 v1
     expect(gated.data.size).toBe(0);
+});
+
+test('竞态：回热 GET 窗口内重命名 → 翻转守卫拦截保持 cold，二次回热收敛到新路径（终审 MINOR 回归）', async () => {
+    const gated = new GatedMemoryStore();
+    __setObjectStoreForTest(gated);
+    const r = await uploadDocument(ownerId, 'old.md', '# rn', []);
+    db.update(schema.documents)
+        .set({ updatedAt: Date.now() - 40 * DAY, createdAt: Date.now() - 40 * DAY })
+        .where(eq(schema.documents.id, r.id)).run();
+    await runArchiveCycle(gated);                                // cold，对象已上桶
+    let release!: () => void;
+    gated.gate = new Promise((res) => { release = res; });
+    const rewarm = rewarmDocument(r.id);                         // 无 content → GET 卡 gate
+    await new Promise((res) => setTimeout(res, 30));
+    expect(renameNode(ownerId, r.id, 'new.md').ok).toBe(true);   // 同步 rename：行指向新路径（本地无文件可动）
+    release!();
+    await rewarm;
+    let row = getDoc(r.id);                                      // 守卫拦截：不翻转、保持 cold、对象保留
+    expect(row.storageTier).toBe('cold');
+    expect(row.name).toBe('new.md');
+    expect(gated.data.size).toBe(1);
+    await rewarmDocument(r.id, '# rn');                          // 二次回热：fresh 行→新路径，自动收敛
+    row = getDoc(r.id);
+    expect(row.storageTier).toBe('hot');
+    const { readFile } = await import('../src/lib/server/storage');
+    expect(await readFile(row.storagePath!)).toBe('# rn');
+    expect(gated.data.size).toBe(0);
+    const fts = sqlite.prepare('SELECT content FROM docs_fts WHERE doc_id = ?').get(r.id) as { content: string };
+    expect(fts.content).toBe('# rn');
+});
+
+test('!flipped 防御：归档 PUT 窗口内 deleteNode → 不翻转、best-effort 清刚 PUT 对象、无孤儿', async () => {
+    const gated = new GatedMemoryStore();
+    __setObjectStoreForTest(gated);
+    const r = await uploadDocument(ownerId, 'a.md', 'v1', []);
+    db.update(schema.documents)
+        .set({ updatedAt: Date.now() - 40 * DAY, createdAt: Date.now() - 40 * DAY })
+        .where(eq(schema.documents.id, r.id)).run();
+    let release!: () => void;
+    gated.gate = new Promise((res) => { release = res; });
+    const cycle = runArchiveCycle(gated);                        // 卡在 PUT
+    await new Promise((res) => setTimeout(res, 30));
+    deleteNode(ownerId, r.id);                                   // 同步删除：行+FTS+本地文件（tier 仍 hot → rmSync 本地）
+    release!();
+    expect(await cycle).toBe(0);                                 // 守卫拦截：UPDATE 落空 → skipped，计数 0
+    expect(db.select().from(schema.documents).where(eq(schema.documents.id, r.id)).get()).toBeUndefined();
+    expect(gated.data.size).toBe(0);                             // 刚 PUT 的对象被清理——不留永久孤儿
+});
+
+test('!flipped 防御：回热窗口内行被删 → 不恢复 FTS、不删远端，静默返回', async () => {
+    const gated = new GatedMemoryStore();
+    __setObjectStoreForTest(gated);
+    const r = await uploadDocument(ownerId, 'b.md', 'v1', []);
+    db.update(schema.documents)
+        .set({ updatedAt: Date.now() - 40 * DAY, createdAt: Date.now() - 40 * DAY })
+        .where(eq(schema.documents.id, r.id)).run();
+    await runArchiveCycle(gated);                                // cold
+    let release!: () => void;
+    gated.gate = new Promise((res) => { release = res; });
+    const rewarm = rewarmDocument(r.id);                         // GET 卡 gate
+    await new Promise((res) => setTimeout(res, 30));
+    // 模拟行已被删除（deleteNode 语义的 DB 部分；保留桶对象以直达 !flipped 分支）
+    sqlite.prepare('DELETE FROM docs_fts WHERE doc_id = ?').run(r.id);
+    db.delete(schema.shareLinks).where(eq(schema.shareLinks.documentId, r.id)).run();
+    db.delete(schema.documents).where(eq(schema.documents.id, r.id)).run();
+    release!();
+    await rewarm;                                                // 不抛错
+    expect(db.select().from(schema.documents).where(eq(schema.documents.id, r.id)).get()).toBeUndefined();
+    const ftsCnt = (sqlite.prepare('SELECT COUNT(*) AS c FROM docs_fts WHERE doc_id = ?').get(r.id) as { c: number }).c;
+    expect(ftsCnt).toBe(0);                                      // 未插入孤儿 FTS 行（无守卫时会插入）
+    expect(gated.data.size).toBe(1);                             // 未删远端对象（留孤儿，无害）
 });

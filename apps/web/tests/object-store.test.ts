@@ -65,3 +65,8 @@ test('mapGetError：NoSuchKey → ObjectNotFoundError，其余 → ArchiveUnavai
     expect(mapGetError('k', new Error('network'))).toBeInstanceOf(ArchiveUnavailableError);
     expect(mapGetError('k', {})).toBeInstanceOf(ArchiveUnavailableError);
 });
+
+test('mapGetError：非标准网关的 HTTP 404（无 NoSuchKey Code）→ ObjectNotFoundError 兜底', () => {
+    expect(mapGetError('k', { $metadata: { httpStatusCode: 404 } })).toBeInstanceOf(ObjectNotFoundError);
+    expect(mapGetError('k', { $metadata: { httpStatusCode: 500 } })).toBeInstanceOf(ArchiveUnavailableError);
+});

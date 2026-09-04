@@ -3,9 +3,13 @@ import { NodeHttpHandler } from '@smithy/node-http-handler';
 import type { ObjectStore, ObjectStoreConfig } from './object-store';
 import { ObjectNotFoundError, ArchiveUnavailableError } from './object-store';
 
-// GET 错误映射：NoSuchKey → 对象缺失（404 语义）；其余 → 不可达（503 语义）
+// GET 错误映射：NoSuchKey / HTTP 404 → 对象缺失（404 语义）；其余 → 不可达（503 语义）
+// 404 兜底：部分 S3 兼容网关对缺失对象返回非标准错误体（无 NoSuchKey Code），按状态码归类
 export function mapGetError(key: string, e: unknown): Error {
     if ((e as { name?: string }).name === 'NoSuchKey') return new ObjectNotFoundError(key);
+    if ((e as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode === 404) {
+        return new ObjectNotFoundError(key);
+    }
     return new ArchiveUnavailableError(`get ${key} 失败`, { cause: e });
 }
 

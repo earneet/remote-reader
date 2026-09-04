@@ -112,14 +112,22 @@ export async function rewarmDocument(docId: string, content?: string): Promise<v
             return;
         }
         await writeFile(row.storagePath, body);
+        const writtenPath = row.storagePath;
         let flipped = false;
         db.transaction((tx) => {
             tx.update(schema.documents)
                 .set({ storageTier: 'hot', lastViewedAt: Date.now(), archivedAt: null })
-                .where(and(eq(schema.documents.id, docId), eq(schema.documents.storageTier, 'cold')))
+                .where(and(
+                    eq(schema.documents.id, docId),
+                    eq(schema.documents.storageTier, 'cold'),
+                    // 竞态加固（终审 MINOR）：writeFile 的 await 窗口内 renameNode 可能把行指向新路径
+                    // （rename 冷文档只改 DB 不动磁盘）——路径不符即不翻转，保持 cold 由下次访问自收敛，
+                    // 防"行指新路径、文件在旧路径"的错位
+                    eq(schema.documents.storagePath, writtenPath)
+                ))
                 .run();
             // §4.2 状态翻转验证 + FTS 与 tier 翻转同事务（deleteNode 相同模式）：
-            // 未翻转（被同步 deleteNode 删行等）则跳过 FTS 恢复，防孤儿 FTS 行与索引倒退；
+            // 未翻转（被同步 deleteNode 删行 / rename 改路径等）则跳过 FTS 恢复，防孤儿 FTS 行与索引倒退；
             // 覆盖上传与回热的交错已由 doc 锁串行化，此处防御不可上锁路径
             flipped = (sqlite.prepare('SELECT changes() AS n').get() as { n: number }).n > 0;
             if (flipped) {

@@ -356,7 +356,7 @@ export function deleteNode(ownerId: string, id: string): void {
 }
 
 // 冷热分层：访问时间戳（推迟冷却判定；只动 last_viewed_at，不动 updated_at 避免影响排序语义）
-export function touchDocument(docId: string): void {
+function touchDocument(docId: string): void {
     db.update(schema.documents).set({ lastViewedAt: Date.now() })
         .where(eq(schema.documents.id, docId)).run();
 }
