@@ -1,4 +1,4 @@
-import { eq, and, isNull, inArray, ne, sql } from 'drizzle-orm';
+import { eq, and, isNull, isNotNull, inArray, ne, sql } from 'drizzle-orm';
 import { dirname, join } from 'node:path';
 import { renameSync, rmSync } from 'node:fs';
 import { unlink } from 'node:fs/promises';
@@ -181,6 +181,29 @@ export function listFolders(ownerId: string): DocumentRow[] {
             eq(schema.documents.type, 'folder')
         ))
         .all();
+}
+
+// 目录树子项计数：每个 folder 的直接子 folder / 子 file 数（parent_id 即 folder id）
+export function folderChildCounts(ownerId: string): Map<string, { folders: number; files: number }> {
+    const rows = db.select({
+        parentId: schema.documents.parentId,
+        type: schema.documents.type,
+        cnt: sql<number>`count(*)`
+    }).from(schema.documents)
+        .where(and(
+            eq(schema.documents.ownerId, ownerId),
+            isNotNull(schema.documents.parentId)
+        ))
+        .groupBy(schema.documents.parentId, schema.documents.type)
+        .all() as { parentId: string; type: string; cnt: number }[];
+    const out = new Map<string, { folders: number; files: number }>();
+    for (const r of rows) {
+        const entry = out.get(r.parentId) ?? { folders: 0, files: 0 };
+        if (r.type === 'folder') entry.folders = r.cnt;
+        else entry.files = r.cnt;
+        out.set(r.parentId, entry);
+    }
+    return out;
 }
 
 export function getOwnedDocument(id: string, ownerId: string): DocumentRow | undefined {

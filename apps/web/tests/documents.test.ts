@@ -6,6 +6,7 @@ import {
     uploadDocument,
     listChildren,
     listFolders,
+    folderChildCounts,
     getOwnedDocument,
     renameNode,
     moveNode,
@@ -367,4 +368,59 @@ test('冷文档·删除 → 行删除 + 远端对象删除', async () => {
     expect(db.select().from(schema.documents).where(eq(schema.documents.id, id)).get()).toBeUndefined();
     await new Promise((r) => setTimeout(r, 20));
     expect(store.data.has(key)).toBe(false);
+});
+
+// ── folderChildCounts：目录树子项计数 ────────────────────────
+
+test('folderChildCounts 按直接子项聚合 folder/file 数', async () => {
+    // 结构：reports/（1 文件 + 1 子文件夹 reports/2026）、reports/2026/（1 文件）、根（1 文件 + 1 文件夹）、
+    // pf/（仅 1 个子文件夹 pf/sub，文件在 sub 里 → 纯文件夹父级）
+    await uploadDocument(ownerId, 'r1.md', 'x', ['reports']);
+    await uploadDocument(ownerId, 'y.md', 'y', ['reports', '2026']);
+    await uploadDocument(ownerId, 'root.md', 'z', []);
+    await uploadDocument(ownerId, 'pf.md', 'w', ['pf', 'sub']);
+    const reports = folderByName('reports')!;
+    const y2026 = folderByName('2026')!;
+    const pf = folderByName('pf')!;
+    const counts = folderChildCounts(ownerId);
+    expect(counts.get(reports.id)).toEqual({ folders: 1, files: 1 });
+    expect(counts.get(y2026.id)).toEqual({ folders: 0, files: 1 });
+    expect(counts.get(pf.id)).toEqual({ folders: 1, files: 0 }); // 纯文件夹父级
+});
+
+test('folderChildCounts 空文件夹不入 map，有子项的准确计数', async () => {
+    // empty-dir 里有 1 个 file 子项；truly-empty 直接插行、无任何子项
+    await uploadDocument(ownerId, 'a.md', 'x', ['empty-dir']);
+    const fid = generateId();
+    db.insert(schema.documents).values({
+        id: fid, ownerId, parentId: null, name: 'truly-empty', type: 'folder',
+        storagePath: null, contentHash: null, sizeBytes: null,
+        createdAt: Date.now(), updatedAt: Date.now()
+    }).run();
+    const counts = folderChildCounts(ownerId);
+    expect(counts.get(fid)).toBeUndefined(); // 无子项的 folder 不出现在 map（UI 侧 ?? {0,0} 兜底）
+    expect(counts.get(folderByName('empty-dir')!.id)).toEqual({ folders: 0, files: 1 });
+});
+
+test('folderChildCounts owner 隔离：不数别人的子项；无文档 owner 返回空 Map', async () => {
+    await uploadDocument(ownerId, 'mine.md', 'x', ['shared-name']);
+    // 另一个 owner：必须先建 users 行——documents.owner_id 有 FK → users.id 且 foreign_keys=ON（H3），
+    // 直接插 documents 行会抛 FOREIGN KEY constraint failed
+    db.insert(schema.users).values({
+        id: 'user-x', email: 'user-x@t.com', passwordHash: 'x', role: 'member', createdAt: Date.now()
+    }).run();
+    expect(folderChildCounts('user-x').size).toBe(0); // 空 owner：无任何文档 → 空 Map
+    db.insert(schema.documents).values({
+        id: generateId(), ownerId: 'user-x', parentId: null, name: 'fx', type: 'folder',
+        storagePath: null, contentHash: null, sizeBytes: null,
+        createdAt: Date.now(), updatedAt: Date.now()
+    }).run();
+    db.insert(schema.documents).values({
+        id: generateId(), ownerId: 'user-x', parentId: db.select().from(schema.documents)
+            .where(and(eq(schema.documents.ownerId, 'user-x'), eq(schema.documents.name, 'fx'))).get()!.id,
+        name: 'child.md', type: 'file', storagePath: null, contentHash: null, sizeBytes: 1,
+        createdAt: Date.now(), updatedAt: Date.now()
+    }).run();
+    const counts = folderChildCounts(ownerId);
+    expect(counts.size).toBe(1); // 只有 shared-name，user-x 的子项不串
 });
