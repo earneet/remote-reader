@@ -187,3 +187,4 @@ let expanded = $state<Set<string>>(new Set());
 ## 9. 实现现状
 
 - 2026-09-07：spec 定稿，未实现。
+- 2026-09-07：已实现并 merge `master`——folderChildCounts 聚合、folder-tree 纯函数（11 用例，含同父兄弟顺序契约）、FolderTree 折叠/记忆/自动定位/计数/SVG 视觉重写（effect② 仅依赖 currentId + untrack 防折叠回弹）；全量测试 312 通过 + svelte-check 0 错 + 12 项手动冒烟通过。
