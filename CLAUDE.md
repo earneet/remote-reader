@@ -74,6 +74,11 @@ bun run test -t "测试名片段"                    # 按测试名过滤
 
 ⚠️ **部署注意**：用 `adapter-node` 产物 + **`node apps/web/build/index.js`** 启动（不要 `bun run` 启服务，会触发 better-sqlite3 加载失败），**不要用 `bun build --compile`** 打单二进制（oven-sh/bun#15734 已知不兼容，详见 spec §10）。生产必填 `SESSION_SECRET`（缺失 fail-fast）；`BODY_SIZE_LIMIT` 必须是字节数（数字，须 > `MAX_UPLOAD_BYTES`）。
 
+## Git 工作流（用户明确规则）
+
+- **commit**：完成一组改动并通过验证后**主动提交**（原子化拆分、跟随项目 semantic 中文风格），无需等用户开口。
+- **push**：**必须等用户明确允许**后才推远端，永远不擅自 push。
+
 ## 运维 / 部署辅助脚本
 
 ```bash
