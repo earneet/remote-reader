@@ -9,13 +9,16 @@
     let editingId = $state<string | null>(null);
     let taggingId = $state<string | null>(null);
     let tagInput = $state('');
+    let rightPane = $state<HTMLElement | null>(null);
 
     // 用 SvelteKit 标准导航：原生 history.pushState 只改地址栏、不更新 SvelteKit 内部 url，
     // invalidateAll 重跑 load 时 url.searchParams 仍读旧 dir → 切目录无反应。
-    // 不用 noScroll：切目录 = 进入新目录，页面应回顶（左树是 sticky 独立滚动，其内部
-    // 滚动位置不受页面回顶影响，用户"翻树找目录"的进度不丢）。
+    // 回顶：切目录 = 进入新目录应从头看起。桌面右栏是独立滚动容器（app-shell），
+    // goto 的页面级回顶滚不动它，须手动重置；移动端右栏随页面流滚动，此处为 no-op，
+    // 页面回顶由 goto 默认行为完成。左树滚动位置不动——用户"翻树找目录"的进度保留。
     async function selectDir(id: string | null) {
         await goto(id ? `/?dir=${encodeURIComponent(id)}` : '/', { keepFocus: true });
+        rightPane?.scrollTo(0, 0);
     }
 
     function startMove(id: string) { movingId = id; moveError = null; }
@@ -52,7 +55,7 @@
             {#if moveError}<p class="error">{moveError}</p>{/if}
         {/if}
     </aside>
-    <section class="fm-right">
+    <section class="fm-right" bind:this={rightPane}>
         <div class="fm-head">
             <h1>{currentDir ? '子目录' : '根目录'}</h1>
             <form class="create-folder" method="POST" action="?/createFolder" use:enhance={() => async ({ result }) => { if (result.type === 'success') await invalidateAll(); }}>
@@ -140,29 +143,34 @@
 </div>
 
 <style>
-    .fm { display: flex; gap: 1.5rem; padding: 1.5rem; font-family: system-ui, sans-serif; }
-    /* sticky + 限高：左树在视口内独立滚动，不撑高页面（否则与右栏共享页面级滚动，
-       树一长右侧文件列表会被推出视口）。align-self 防 flex stretch 拉高导致 sticky 失效；
-       overscroll-behavior 防左树滚到底后滚动链传给页面。 */
+    /* app-shell：顶栏 + 内容区恰好铺满视口（--nav-h 由 +layout 实测注入，-1rem 是 body
+       上下 margin），滚动只发生在左右栏内部，页面级滚动条不再出现。
+       左右栏均由 flex 交叉轴 stretch 拉满容器高，各自 overflow-y 内部滚。 */
+    .fm {
+        display: flex; gap: 1.5rem; padding: 1.5rem; font-family: system-ui, sans-serif;
+        box-sizing: border-box;
+        height: calc(100dvh - var(--nav-h, 53px) - 1rem);
+    }
     .fm-left {
         width: 16rem; flex-shrink: 0; border-right: 1px solid #d0d7de; padding-right: 1rem;
-        position: sticky; top: 1rem; align-self: flex-start;
-        max-height: calc(100vh - 2rem); overflow-y: auto; overscroll-behavior: contain;
+        overflow-y: auto; overscroll-behavior: contain;
     }
-    .fm-right { flex: 1; min-width: 0; }
+    .fm-right {
+        flex: 1; min-width: 0;
+        overflow-y: auto; overscroll-behavior: contain;
+    }
 
-    /* 窄屏纵向堆叠：双栏 16rem 左栏会把右栏挤到不可读。改上下堆叠，
-       左树置顶限高独立滚动（切目录会回顶，树+新列表同时可见），
-       sticky 布局在纵向下无意义，还原为 static。 */
+    /* 窄屏回到整页滚动：触屏上嵌套双滚动区体验差，纵排 + 页面滚更自然。
+       桌面 app-shell 的定高/内部滚动均在此还原（height 回 auto、右栏 overflow 回可见、
+       左树改 max-height 限高自己滚）。 */
     @media (max-width: 768px) {
-        .fm { flex-direction: column; gap: 1rem; padding: 1rem; }
+        .fm { flex-direction: column; gap: 1rem; padding: 1rem; height: auto; }
         .fm-left {
-            position: static; width: auto; max-height: 32vh; top: auto;
-            /* 桌面为 sticky 设的 flex-start 会阻止纵向布局的交叉轴拉伸，须还原 */
-            align-self: stretch;
+            width: auto; max-height: 32vh;
             border-right: none; border-bottom: 1px solid #d0d7de;
             padding: 0 0 0.75rem;
         }
+        .fm-right { overflow-y: visible; }
     }
     .fm-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
     .fm-head h1 { margin: 0; font-size: 1.15rem; }
