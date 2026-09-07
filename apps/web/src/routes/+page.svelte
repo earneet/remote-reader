@@ -150,6 +150,20 @@
         max-height: calc(100vh - 2rem); overflow-y: auto; overscroll-behavior: contain;
     }
     .fm-right { flex: 1; min-width: 0; }
+
+    /* 窄屏纵向堆叠：双栏 16rem 左栏会把右栏挤到不可读。改上下堆叠，
+       左树置顶限高独立滚动（切目录会回顶，树+新列表同时可见），
+       sticky 布局在纵向下无意义，还原为 static。 */
+    @media (max-width: 768px) {
+        .fm { flex-direction: column; gap: 1rem; padding: 1rem; }
+        .fm-left {
+            position: static; width: auto; max-height: 32vh; top: auto;
+            /* 桌面为 sticky 设的 flex-start 会阻止纵向布局的交叉轴拉伸，须还原 */
+            align-self: stretch;
+            border-right: none; border-bottom: 1px solid #d0d7de;
+            padding: 0 0 0.75rem;
+        }
+    }
     .fm-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
     .fm-head h1 { margin: 0; font-size: 1.15rem; }
     .create-folder { display: flex; gap: 0.5rem; }
