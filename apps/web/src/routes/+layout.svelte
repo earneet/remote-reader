@@ -55,4 +55,15 @@
         padding: 0.3rem 0.6rem; border: 1px solid #d0d7de; border-radius: 5px;
         font-size: 0.85rem; width: 14rem;
     }
+
+    /* 窄屏两行布局：搜索框固定 14rem 不收缩会把其余元素挤到竖排换行，
+       故令其独占第二行满宽；email 截断防长地址撑爆。 */
+    @media (max-width: 640px) {
+        .topnav { flex-wrap: wrap; row-gap: 0.6rem; padding: 0.75rem 1rem; }
+        .topnav .nav-search { order: 9; flex-basis: 100%; margin-left: 0; }
+        .topnav .nav-search input { width: 100%; box-sizing: border-box; }
+        .topnav .email {
+            max-width: 7rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+    }
 </style>
