@@ -68,6 +68,16 @@ test('visibleNodes 展开集含已删 id（脏 localStorage）无影响', () => 
 
 test('visibleNodes 保留子项计数字段', () => {
     const out = visibleNodes(fixture(), new Set());
-    const d = out.find(n => n.id === 'e');
-    expect(d?.childFiles).toBe(3);
+    const e = out.find(n => n.id === 'e');
+    expect(e?.childFiles).toBe(3);
+});
+
+test('visibleNodes 同父兄弟保持输入顺序（非名字序）', () => {
+    const fam = [
+        f('a', null, 1, 0),
+        f('z', 'a'),
+        f('y', 'a')
+    ];
+    const out = visibleNodes(fam, new Set(['a']));
+    expect(out.map(n => n.id)).toEqual(['a', 'z', 'y']); // z 先于 y：输入序，非字母序
 });
