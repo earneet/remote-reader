@@ -26,20 +26,24 @@
 // ── folderChildCounts：目录树子项计数 ────────────────────────
 
 test('folderChildCounts 按直接子项聚合 folder/file 数', async () => {
-    // 结构：reports/（1 文件 + 1 子文件夹 reports/2026）、reports/2026/（1 文件）、根（1 文件 + 1 文件夹）
+    // 结构：reports/（1 文件 + 1 子文件夹 reports/2026）、reports/2026/（1 文件）、根（1 文件 + 1 文件夹）、
+    // pf/（仅 1 个子文件夹 pf/sub，文件在 sub 里 → 纯文件夹父级）
     await uploadDocument(ownerId, 'r1.md', 'x', ['reports']);
     await uploadDocument(ownerId, 'y.md', 'y', ['reports', '2026']);
     await uploadDocument(ownerId, 'root.md', 'z', []);
+    await uploadDocument(ownerId, 'pf.md', 'w', ['pf', 'sub']);
     const reports = folderByName('reports')!;
     const y2026 = folderByName('2026')!;
+    const pf = folderByName('pf')!;
     const counts = folderChildCounts(ownerId);
     expect(counts.get(reports.id)).toEqual({ folders: 1, files: 1 });
     expect(counts.get(y2026.id)).toEqual({ folders: 0, files: 1 });
+    expect(counts.get(pf.id)).toEqual({ folders: 1, files: 0 }); // 纯文件夹父级
 });
 
-test('folderChildCounts 空目录与无子项 owner 返回空计数', async () => {
-    await uploadDocument(ownerId, 'a.md', 'x', ['empty-dir']);// 等等：这会让 empty-dir 有 1 个 file 子项
-    // 正确构造空文件夹：上传到深层再移走文件，或直接 DB 插入。最简：直接插一个 folder 行
+test('folderChildCounts 空文件夹不入 map，有子项的准确计数', async () => {
+    // empty-dir 里有 1 个 file 子项；truly-empty 直接插行、无任何子项
+    await uploadDocument(ownerId, 'a.md', 'x', ['empty-dir']);
     const fid = generateId();
     db.insert(schema.documents).values({
         id: fid, ownerId, parentId: null, name: 'truly-empty', type: 'folder',
@@ -47,13 +51,18 @@ test('folderChildCounts 空目录与无子项 owner 返回空计数', async () =
         createdAt: Date.now(), updatedAt: Date.now()
     }).run();
     const counts = folderChildCounts(ownerId);
-    expect(counts.get(fid)).toBeUndefined(); // 无子项的 folder 不出现在 map
+    expect(counts.get(fid)).toBeUndefined(); // 无子项的 folder 不出现在 map（UI 侧 ?? {0,0} 兜底）
     expect(counts.get(folderByName('empty-dir')!.id)).toEqual({ folders: 0, files: 1 });
 });
 
-test('folderChildCounts owner 隔离：不数别人的子项', async () => {
+test('folderChildCounts owner 隔离：不数别人的子项；无文档 owner 返回空 Map', async () => {
     await uploadDocument(ownerId, 'mine.md', 'x', ['shared-name']);
-    // 另一个 owner 的同结构（直接插行，避免再建 user）
+    // 另一个 owner：必须先建 users 行——documents.owner_id 有 FK → users.id 且 foreign_keys=ON（H3），
+    // 直接插 documents 行会抛 FOREIGN KEY constraint failed
+    db.insert(schema.users).values({
+        id: 'user-x', email: 'user-x@t.com', passwordHash: 'x', role: 'member', createdAt: Date.now()
+    }).run();
+    expect(folderChildCounts('user-x').size).toBe(0); // 空 owner：无任何文档 → 空 Map
     db.insert(schema.documents).values({
         id: generateId(), ownerId: 'user-x', parentId: null, name: 'fx', type: 'folder',
         storagePath: null, contentHash: null, sizeBytes: null,
@@ -66,7 +75,7 @@ test('folderChildCounts owner 隔离：不数别人的子项', async () => {
         createdAt: Date.now(), updatedAt: Date.now()
     }).run();
     const counts = folderChildCounts(ownerId);
-    expect(counts.size).toBe(1); // 只有 shared-name
+    expect(counts.size).toBe(1); // 只有 shared-name，user-x 的子项不串
 });
 ```
 
@@ -370,6 +379,7 @@ script 顶部 import 区加：
 
 ```svelte
 <script lang="ts">
+    import { untrack } from 'svelte';
     import { fade } from 'svelte/transition';
     import { ancestorsOf, visibleNodes, type TreeFolder } from '$lib/shared/folder-tree';
 
@@ -407,16 +417,22 @@ script 顶部 import 区加：
         }
     });
 
-    // ② currentId 变化 → 祖先链并入（只增不减，spec §3.2）
+    // ② currentId 变化 → 祖先链并入（只增不减，spec §3.2）。
+    // 关键：effect 仅依赖 currentId——folders/expanded 的读写都包进 untrack。
+    // 若对 expanded 建立依赖：用户手动折叠当前目录的祖先 → toggle 写 expanded → 本 effect 重跑 →
+    // 祖先被立即加回（折叠回弹）。若对 folders 建立依赖：任何 invalidateAll（新建/重命名/删除/移动）
+    // 后 folders 数组更新 → 同样回弹。spec 的触发条件是"currentId 变化"，故仅依赖 currentId。
     $effect(() => {
         if (!currentId) return;
-        const anc = ancestorsOf(folders, currentId);
-        let changed = false;
-        const next = new Set(expanded);
-        for (const id of anc) {
-            if (!next.has(id)) { next.add(id); changed = true; }
-        }
-        if (changed) expanded = next;
+        untrack(() => {
+            const anc = ancestorsOf(folders, currentId);
+            let changed = false;
+            const next = new Set(expanded);
+            for (const id of anc) {
+                if (!next.has(id)) { next.add(id); changed = true; }
+            }
+            if (changed) expanded = next;
+        });
     });
 
     // ③ 持久化：恢复完成后的每次变化写回 localStorage（隐私模式写失败忽略）
@@ -554,16 +570,18 @@ curl -X POST http://localhost:5173/api/v1/documents -H "Authorization: Bearer $T
 
 浏览器（或 Playwright MCP）登录后验证清单（spec §7.4）：
 
-1. 首次进入 `/`：左树只显示顶层文件夹 `a`（折叠态、chevron 朝右、计数 1）
+1. 首次进入 `/`：左树只显示顶层文件夹 `a`（折叠态、chevron 朝右、计数 **2**）
 2. 点 chevron：展开子级、chevron 旋转 90°、新行 80ms 淡入；**不发生导航**（右栏不变）
 3. 点文件夹名 `a`：导航进 `/?dir=<a>`，右栏变子项，左树 `a` 行蓝底高亮
 4. 刷新页面：展开状态恢复（localStorage 记忆）
 5. 直接访问深链 `/?dir=<c 的 id>`（从右栏逐层点进 a→b→c）：祖先链 a、b 自动展开、c 高亮
 6. 移动模式：对任意文档点"移动到…"，左树出现绿框 pick 态，点目标文件夹完成移动、hint 消失；期间 chevron 仍可折叠
-7. 空文件夹（右侧"新建文件夹"建一个）：整行 opacity 0.6、无 chevron、无计数
-8. 计数正确：`a` 行显示 1（1 个子文件夹 b）、hover title "1 个子文件夹 · 1 个文件"（若 a 里有 l1.md）
-9. Tab 键盘：焦点环出现，Enter 触发对应按钮（chevron 展开 / 名字导航）
-10. 窄屏（<768px 视口）：左树纵向置顶限高滚动正常，折叠后不再占满
+7. 折叠回弹验证（关键）：仍位于 c 内，点 `a` 的 chevron 折叠 → a 及其子孙立即收起、**不回弹**；随后在右栏新建一个文件夹（触发 invalidateAll 刷新数据）→ a 仍保持折叠、不回弹
+8. 回到根目录，"新建文件夹"建 `tmp`：树上出现 `tmp`（整行 opacity 0.6、无 chevron、无计数——空文件夹淡化）
+9. 删除 `tmp`：从树上消失；刷新后 localStorage 中残留的已删 id 不影响渲染（树仍正常）
+10. 计数正确：`a` 行显示 **2**（1 个子文件夹 b + 1 个文件 l1.md）、hover title "1 个子文件夹 · 1 个文件"；`b` 行显示 **2**（1 个子文件夹 c + 1 个文件 l2.md）
+11. Tab 键盘：焦点环出现，Enter 触发对应按钮（chevron 展开 / 名字导航）
+12. 窄屏（<768px 视口）：左树纵向置顶限高滚动正常，折叠后不再占满
 
 - [ ] **Step 7: Commit**
 
@@ -620,5 +638,5 @@ git commit -m "docs: 目录树改造实现状态同步——spec §9 翻转 + CL
 
 - [ ] `bun run test` 全绿（含 folder-tree.test.ts 10 用例、documents.test.ts +3 用例）
 - [ ] `bun --filter remote-reader-web check` 0 错
-- [ ] spec §7.4 手动冒烟 10 项全过
+- [ ] spec §7.4 手动冒烟 12 项全过
 - [ ] 4 个 commit 落库、工作区干净（`git status` 无未跟踪的实现文件）

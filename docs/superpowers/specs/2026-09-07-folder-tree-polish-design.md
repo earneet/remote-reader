@@ -125,6 +125,8 @@ let expanded = $state<Set<string>>(new Set());
 
 // ① 初始化（挂载后跑一次）：读 localStorage，有记忆则替换 expanded
 // ② currentId 变化：ancestorsOf(currentId) 并入 expanded
+//（实现约束：该 effect 仅依赖 currentId——folders/expanded 的读写须 untrack，
+//  否则用户折叠当前目录祖先后，toggle 或任意 invalidateAll 都会把祖先弹回）
 // ③ expanded 变化：写 localStorage（JSON 数组；①②触发③属正常收敛，最终态=实际展开集）
 ```
 
@@ -173,7 +175,7 @@ let expanded = $state<Set<string>>(new Set());
 
 ### 7.4 手动冒烟（dev）
 
-建 3 层嵌套目录，验证：chevron 切换不导航 / 点名导航 / 刷新后展开状态恢复 / 深链 `/?dir=<深层id>` 进入自动展开祖先并高亮 / 移动模式选目标 / 空文件夹淡化 / 计数与 title / Tab 键盘操作。
+建 3 层嵌套目录，验证：chevron 切换不导航 / 点名导航 / 刷新后展开状态恢复 / 深链 `/?dir=<深层id>` 进入自动展开祖先并高亮 / **位于深层目录时折叠其祖先立即生效且不回弹（含触发数据刷新的列表操作后）** / 移动模式选目标 / 空文件夹淡化 / 计数与 title / Tab 键盘操作。
 
 ## 8. 验收清单
 
