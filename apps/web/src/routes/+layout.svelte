@@ -7,10 +7,18 @@
           page.url.pathname === '/register' ||
           page.url.pathname.startsWith('/s/'))
     );
+
+    // topnav 实际高度（换行/字体差异会变）→ CSS 变量，供文件管理器页做
+    // 「顶栏 + 内容恰好铺满视口」的 app-shell 高度计算，避免硬编码魔法数字。
+    // 用 offsetHeight（border-box）：clientHeight 不含 border-bottom 会少算 1px 导致整页溢出。
+    let navH = $state(0);
+    $effect(() => {
+        if (navH > 0) document.documentElement.style.setProperty('--nav-h', `${navH}px`);
+    });
 </script>
 
 {#if showNav}
-<header class="topnav">
+<header class="topnav" bind:offsetHeight={navH}>
     <a href="/">我的文档</a>
     <form class="nav-search" method="GET" action="/search">
         <input name="q" placeholder="搜索文档…" aria-label="搜索文档">
