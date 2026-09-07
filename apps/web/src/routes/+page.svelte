@@ -12,8 +12,10 @@
 
     // 用 SvelteKit 标准导航：原生 history.pushState 只改地址栏、不更新 SvelteKit 内部 url，
     // invalidateAll 重跑 load 时 url.searchParams 仍读旧 dir → 切目录无反应。
+    // 不用 noScroll：切目录 = 进入新目录，页面应回顶（左树是 sticky 独立滚动，其内部
+    // 滚动位置不受页面回顶影响，用户"翻树找目录"的进度不丢）。
     async function selectDir(id: string | null) {
-        await goto(id ? `/?dir=${encodeURIComponent(id)}` : '/', { keepFocus: true, noScroll: true });
+        await goto(id ? `/?dir=${encodeURIComponent(id)}` : '/', { keepFocus: true });
     }
 
     function startMove(id: string) { movingId = id; moveError = null; }
@@ -139,7 +141,14 @@
 
 <style>
     .fm { display: flex; gap: 1.5rem; padding: 1.5rem; font-family: system-ui, sans-serif; }
-    .fm-left { width: 16rem; flex-shrink: 0; border-right: 1px solid #d0d7de; padding-right: 1rem; }
+    /* sticky + 限高：左树在视口内独立滚动，不撑高页面（否则与右栏共享页面级滚动，
+       树一长右侧文件列表会被推出视口）。align-self 防 flex stretch 拉高导致 sticky 失效；
+       overscroll-behavior 防左树滚到底后滚动链传给页面。 */
+    .fm-left {
+        width: 16rem; flex-shrink: 0; border-right: 1px solid #d0d7de; padding-right: 1rem;
+        position: sticky; top: 1rem; align-self: flex-start;
+        max-height: calc(100vh - 2rem); overflow-y: auto; overscroll-behavior: contain;
+    }
     .fm-right { flex: 1; min-width: 0; }
     .fm-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
     .fm-head h1 { margin: 0; font-size: 1.15rem; }
