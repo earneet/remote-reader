@@ -1,5 +1,6 @@
 <script lang="ts">
     import FolderTree from '$components/FolderTree.svelte';
+    import type { TreeFolder } from '$lib/shared/folder-tree';
     import { enhance } from '$app/forms';
     import { goto, invalidateAll } from '$app/navigation';
     let { data } = $props();
@@ -10,6 +11,14 @@
     let taggingId = $state<string | null>(null);
     let tagInput = $state('');
     let rightPane = $state<HTMLElement | null>(null);
+
+    // 组装目录树入参：folder 行 + 直接子项计数合成 TreeFolder（组件不感知后端结构，spec §5.1）
+    const treeFolders = $derived<TreeFolder[]>(
+        data.folders.map(fr => {
+            const c = data.folderCounts.get(fr.id) ?? { folders: 0, files: 0 };
+            return { id: fr.id, name: fr.name, parentId: fr.parentId, childFolders: c.folders, childFiles: c.files };
+        })
+    );
 
     // 用 SvelteKit 标准导航：原生 history.pushState 只改地址栏、不更新 SvelteKit 内部 url，
     // invalidateAll 重跑 load 时 url.searchParams 仍读旧 dir → 切目录无反应。
@@ -45,10 +54,11 @@
 <div class="fm">
     <aside class="fm-left">
         <FolderTree
-            folders={data.folders}
+            folders={treeFolders}
             currentId={currentDir}
             selecting={movingId !== null}
             onSelect={movingId !== null ? pickTarget : selectDir}
+            storageKey="rr:tree-expanded:{data.user?.id ?? 'anon'}"
         />
         {#if movingId !== null}
             <p class="hint">移动模式：点左树选目标，或<button class="link" onclick={() => (movingId = null)}>取消</button></p>

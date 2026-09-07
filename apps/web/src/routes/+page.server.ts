@@ -3,7 +3,7 @@ import { and, eq, isNull } from 'drizzle-orm';
 import type { Actions, PageServerLoad } from './$types';
 import { generateId } from '$server/auth';
 import { db, schema } from '$server/db';
-import { deleteNode, listChildren, listFolders, moveNode, renameNode } from '$server/documents';
+import { deleteNode, listChildren, listFolders, folderChildCounts, moveNode, renameNode } from '$server/documents';
 import { listTags, listTagsForDocs, setDocTags, SetTagsError } from '$server/tags';
 import { parsePath } from '@remote-reader/shared/paths';
 
@@ -22,7 +22,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
     const folders = listFolders(locals.user.id);
     const fileIds = children.filter(c => c.type === 'file').map(c => c.id);
     const tagsByDoc = listTagsForDocs(fileIds, locals.user.id);
-    return { children, folders, currentDir: parentId, tagsByDoc, allTags: listTags(locals.user.id) };
+    return { children, folders, currentDir: parentId, tagsByDoc, allTags: listTags(locals.user.id), folderCounts: folderChildCounts(locals.user.id) };
 };
 
 export const actions: Actions = {
