@@ -1109,17 +1109,43 @@ git commit -m "feat(web): 最近文档视图接线——右栏分段切换/无�
 - Modify: `docs/superpowers/specs/2026-09-08-recent-documents-view-design.md`（头部状态行）
 - Modify: `CLAUDE.md`（当前状态段追加一句）
 
-- [ ] **Step 1: 全量测试**
+- [ ] **Step 1: 补 Task 3 质量审查的 3 条边界测试**
+
+`apps/web/tests/format-relative.test.ts` 末尾追加：
+
+```ts
+test('未来时间戳（负 diff）→ 刚刚（时钟偏差优雅降级）', () => {
+    expect(formatRelative(NOW + 5_000, NOW)).toBe('刚刚');
+});
+
+test('恰好 7d 整 → 日期分支', () => {
+    expect(formatRelative(NOW - 7 * 86_400_000, NOW)).toBe(
+        `${new Date(NOW - 7 * 86_400_000).getFullYear()}-` +
+        `${String(new Date(NOW - 7 * 86_400_000).getMonth() + 1).padStart(2, '0')}-` +
+        `${String(new Date(NOW - 7 * 86_400_000).getDate()).padStart(2, '0')}`
+    );
+});
+```
+
+`apps/web/tests/folder-tree.test.ts` 的「folderNamesOf parentId 环不死循环」测试追加断言：
+
+```ts
+    expect(folderNamesOf(cyc, 'x').length).toBeLessThanOrEqual(1001);
+```
+
+跑 `bun run test apps/web/tests/format-relative.test.ts apps/web/tests/folder-tree.test.ts` 确认全绿后提交：`git add -A apps/web/tests/format-relative.test.ts apps/web/tests/folder-tree.test.ts && git commit -m "test(web): 补边界用例——负 diff/整 7d/环截断长度（Task 3 审查跟进）"`
+
+- [ ] **Step 2: 全量测试**
 
 Run: `bun run test`
 Expected: 全绿（存量 + 新增 ~20 条）
 
-- [ ] **Step 2: 类型检查**
+- [ ] **Step 3: 类型检查**
 
 Run: `bun --filter remote-reader-web check`
 Expected: 0 errors
 
-- [ ] **Step 3: 冒烟（dev server + curl）**
+- [ ] **Step 4: 冒烟（dev server + curl）**
 
 ```bash
 bun --filter remote-reader-web dev & DEV_PID=$!
@@ -1131,11 +1157,11 @@ kill $DEV_PID
 
 Expected: 两行分别输出 `401`、`302`。
 
-- [ ] **Step 4: （可选，若环境有浏览器工具）浏览器走查**
+- [ ] **Step 5: （可选，若环境有浏览器工具）浏览器走查**
 
 登录后：切「最近文档」→ 看到列表与面包屑/相对时间 → 上传新文档（另一终端 `scripts/seed-token.mjs` + curl 上传）→ 刷新浮顶 → 删除一行 → 列表不缩回、滚动位置保留 → 点左树目录 → 回目录视图。
 
-- [ ] **Step 5: spec 状态翻转**
+- [ ] **Step 6: spec 状态翻转**
 
 `docs/superpowers/specs/2026-09-08-recent-documents-view-design.md` 头部状态行改为：
 
@@ -1143,7 +1169,7 @@ Expected: 两行分别输出 `401`、`302`。
 - **状态**: 已实现并 merge `master`（实现计划：`../plans/2026-09-08-recent-documents-view.md`）
 ```
 
-- [ ] **Step 6: CLAUDE.md 当前状态同步**
+- [ ] **Step 7: CLAUDE.md 当前状态同步**
 
 `CLAUDE.md` 「当前状态」段第一段末尾（`259 单测 + svelte-check 0 错 + 桥 tsc 0 错 + Docker 构建冒烟全过。` 所在长段落之后）追加一句：
 
@@ -1153,7 +1179,7 @@ Expected: 两行分别输出 `401`、`302`。
 
 （测试计数若有变化，顺带更新该段落的测试总数数字。）
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add docs/superpowers/specs/2026-09-08-recent-documents-view-design.md CLAUDE.md
