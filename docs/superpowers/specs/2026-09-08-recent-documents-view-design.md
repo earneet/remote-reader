@@ -90,7 +90,7 @@ export function recentFiles(
 
 ### 5.2 索引（migration）
 
-新增 `documents_owner_type_updated_idx ON documents(owner_id, type, updated_at DESC, id DESC)`，精确覆盖 §5.1 查询。drizzle sqlite-core 索引列不支持 `desc()` 时手写 migration SQL（实现时确认）。
+新增 `documents_owner_type_updated_idx ON documents(owner_id, type, updated_at DESC, id DESC)`，精确覆盖 §5.1 查询。实现方式（已对照安装版 drizzle 0.36.4 类型定义验证）：sqlite-core 索引列无 `.asc()/.desc()` 方法，但 `on()` 的参数类型 `IndexColumn = SQLiteColumn | SQL` 接受 SQL 片段——`sql`${t.updatedAt} DESC`` 写在 schema 里，`db:generate` 即可产出 DESC；即使生成器退化为全 ASC 列，SQLite 对等值前缀后的纯 DESC 排序可反向扫描同一索引，正确性不受影响。
 
 ### 5.3 端点 `GET /api/recent`
 
