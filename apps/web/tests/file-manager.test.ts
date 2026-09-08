@@ -214,3 +214,13 @@ test('load：缺省 view=dir，行为不变（children 正常、recent 空）', 
     expect((data as any).children.length).toBe(1);
     expect((data as any).recent).toEqual([]);
 });
+
+test('load：view=recent 时 dir 参数被忽略（recent 优先级锁定）', async () => {
+    const ownerId = generateId();
+    insertUser(ownerId);
+    const a = await uploadDocument(ownerId, 'a.md', 'x', ['d1']);
+    const data = await mod.load({ locals: { user: { id: ownerId } }, url: new URL(`http://localhost/?view=recent&dir=${a.id}`) } as any);
+    expect((data as any).view).toBe('recent');
+    expect((data as any).currentDir).toBe(null);
+    expect((data as any).recent.length).toBe(1);
+});

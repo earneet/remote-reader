@@ -103,4 +103,5 @@ test('folderNamesOf 父缺失即止（脏数据安全）', () => {
 test('folderNamesOf parentId 环不死循环', () => {
     const cyc = new Map([f('x', 'y'), f('y', 'x')].map((x) => [x.id, x]));
     expect(() => folderNamesOf(cyc, 'x')).not.toThrow();
+    expect(folderNamesOf(cyc, 'x').length).toBeLessThanOrEqual(1001);
 });

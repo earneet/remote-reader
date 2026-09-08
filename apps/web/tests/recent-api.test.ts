@@ -101,3 +101,10 @@ test('owner 隔离：只返回自己的文档', async () => {
     const body = await r.json() as { items: { name: string }[] };
     expect(body.items.map((i) => i.name)).toEqual(['mine.md']);
 });
+
+test('超大数字 cursor 不 500（驱动绑定契约回归锁）', async () => {
+    const r = await call(ownerId, `?before=${'9'.repeat(30)}_x`);
+    expect(r.status).toBe(200);
+    const body = await r.json() as { items: unknown[] };
+    expect(Array.isArray(body.items)).toBe(true);
+});

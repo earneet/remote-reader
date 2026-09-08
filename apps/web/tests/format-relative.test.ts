@@ -28,3 +28,15 @@ test('日期：diff ≥ 7d 显示 YYYY-MM-DD（本地时间构造，时区无关
     const now = past + 8 * 86_400_000;
     expect(formatRelative(past, now)).toBe('2024-01-05');
 });
+
+test('未来时间戳（负 diff）→ 刚刚（时钟偏差优雅降级）', () => {
+    expect(formatRelative(NOW + 5_000, NOW)).toBe('刚刚');
+});
+
+test('恰好 7d 整 → 日期分支', () => {
+    expect(formatRelative(NOW - 7 * 86_400_000, NOW)).toBe(
+        `${new Date(NOW - 7 * 86_400_000).getFullYear()}-` +
+        `${String(new Date(NOW - 7 * 86_400_000).getMonth() + 1).padStart(2, '0')}-` +
+        `${String(new Date(NOW - 7 * 86_400_000).getDate()).padStart(2, '0')}`
+    );
+});
