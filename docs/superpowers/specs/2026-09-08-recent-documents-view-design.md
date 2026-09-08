@@ -117,7 +117,8 @@ export function recentFiles(
 |---|---|
 | 进入 recent 视图（view 变化） | `rows = data.recent` |
 | 哨兵进入视口且 hasMore 且非 loading | `GET /api/recent?before=<末行 cursor>`，结果追加 |
-| delete / rename / setTags 成功 | re-sync：`GET /api/recent?limit=max(50, rows.length)` 整体替换（不 `invalidateAll`，滚动位置与深度保留；替换后 `hasMore` 按新结果重算，整除边界由空拉取自然终止） |
+| delete 成功 | re-sync + `invalidateAll()`（刷左树计数与面包屑；rows 为本地态不被 load 重置，零代价——Task 6 审查跟进修正：原"避免列表缩回"的保守理由在 mount-once 设计下不成立） |
+| rename / setTags 成功 | re-sync：`GET /api/recent?limit=max(50, rows.length)` 整体替换（不 `invalidateAll`，滚动位置与深度保留；替换后 `hasMore` 按新结果重算，整除边界由空拉取自然终止） |
 | move 成功 | re-sync + `invalidateAll()`（刷新左树 folders/计数；rows 为本地状态，load 重跑不重置它） |
 | re-sync 网络失败 | 降级 `invalidateAll()`（列表缩回 50 条可接受） |
 
@@ -131,7 +132,7 @@ export function recentFiles(
 
 ### 6.4 行渲染与纯函数
 
-recent 文件行：📄 名称（链接 `/d/<id>`）+ 路径面包屑（`a / b / c`，灰字小号）+ 相对更新时间 + 大小 + 冷档 chip + tags + 四操作（重命名/移动/删除/标签，复用现有 form action 与交互状态机）。窄屏（≤768px）面包屑与时间折行。
+recent 文件行：📄 名称（链接 `/d/<id>`）+ 路径面包屑（`a / b / c`，灰字小号）+ 相对更新时间 + 大小 + 冷档 chip + tags + 四操作（重命名/移动/删除/标签，复用现有 form action 与交互状态机）。窄屏（≤768px）行折行：面包屑独占第二行，时间随首行排布。
 
 两个新纯函数（可独立单测）：
 

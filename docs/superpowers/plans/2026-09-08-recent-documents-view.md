@@ -1160,17 +1160,41 @@ test('load：view=recent 时 dir 参数被忽略（recent 优先级锁定）', a
 
 跑 `bun run test apps/web/tests/format-relative.test.ts apps/web/tests/folder-tree.test.ts apps/web/tests/recent-api.test.ts apps/web/tests/file-manager.test.ts` 确认全绿后提交：`git add apps/web/tests/format-relative.test.ts apps/web/tests/folder-tree.test.ts apps/web/tests/recent-api.test.ts apps/web/tests/file-manager.test.ts && git commit -m "test(web): 补边界用例——负 diff/整 7d/环截断/超大 cursor/dir 优先级（审查跟进）"`
 
-- [ ] **Step 2: 全量测试**
+- [ ] **Step 2: Task 6 审查跟进微调（2 处代码）**
+
+① `RecentList.svelte` 的 `doDelete` 删除成功后补刷左树（rows 本地态不被 load 重置，零代价；spec §6.2 已同步修正）：
+
+```ts
+    async function doDelete(item: RecentDoc): Promise<void> {
+        if (!confirm('确认删除该文件？此操作不可恢复。')) return;
+        if (await submitAction('delete', { id: item.id })) {
+            await invalidateAll(); // 刷左树计数（rows 本地态不被重置，零代价——Task 6 审查跟进）
+            await reSync();
+        }
+    }
+```
+
+② `reSync` 的 limit 行前补已知良性竞态注释：
+
+```ts
+        // 已知良性竞态：limit 在入口读取，飞行中的 loadMore 若在读取后、替换前 append，
+        // 替换会把深度缩回 limit（自愈：再滚动即恢复；排序单调性由 id 去重保证）
+        const limit = Math.max(RECENT_PAGE_SIZE, rows.length);
+```
+
+跑 `bun --filter remote-reader-web check` 确认 0 错误后提交：`git add apps/web/src/lib/components/RecentList.svelte && git commit -m "fix(web): RecentList 删除后刷左树计数 + reSync 竞态注释（审查跟进）"`
+
+- [ ] **Step 3: 全量测试**
 
 Run: `bun run test`
 Expected: 全绿（存量 + 新增 ~20 条）
 
-- [ ] **Step 3: 类型检查**
+- [ ] **Step 4: 类型检查**
 
 Run: `bun --filter remote-reader-web check`
 Expected: 0 errors
 
-- [ ] **Step 4: 冒烟（dev server + curl）**
+- [ ] **Step 5: 冒烟（dev server + curl）**
 
 ```bash
 bun --filter remote-reader-web dev & DEV_PID=$!
@@ -1182,11 +1206,11 @@ kill $DEV_PID
 
 Expected: 两行分别输出 `401`、`302`。
 
-- [ ] **Step 5: （可选，若环境有浏览器工具）浏览器走查**
+- [ ] **Step 6: （可选，若环境有浏览器工具）浏览器走查**
 
 登录后：切「最近文档」→ 看到列表与面包屑/相对时间 → 上传新文档（另一终端 `scripts/seed-token.mjs` + curl 上传）→ 刷新浮顶 → 删除一行 → 列表不缩回、滚动位置保留 → 点左树目录 → 回目录视图。
 
-- [ ] **Step 6: spec 状态翻转**
+- [ ] **Step 7: spec 状态翻转**
 
 `docs/superpowers/specs/2026-09-08-recent-documents-view-design.md` 头部状态行改为：
 
@@ -1194,7 +1218,7 @@ Expected: 两行分别输出 `401`、`302`。
 - **状态**: 已实现并 merge `master`（实现计划：`../plans/2026-09-08-recent-documents-view.md`）
 ```
 
-- [ ] **Step 7: CLAUDE.md 当前状态同步**
+- [ ] **Step 8: CLAUDE.md 当前状态同步**
 
 `CLAUDE.md` 「当前状态」段第一段末尾（`259 单测 + svelte-check 0 错 + 桥 tsc 0 错 + Docker 构建冒烟全过。` 所在长段落之后）追加一句：
 
@@ -1204,7 +1228,7 @@ Expected: 两行分别输出 `401`、`302`。
 
 （测试计数若有变化，顺带更新该段落的测试总数数字。）
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add docs/superpowers/specs/2026-09-08-recent-documents-view-design.md CLAUDE.md
