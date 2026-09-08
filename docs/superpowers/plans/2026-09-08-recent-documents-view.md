@@ -617,7 +617,7 @@ Expected: 前两条 FAIL（`data.view` undefined / `data.recent` undefined），
 
 - [ ] **Step 4: 实现 load 分支**
 
-`apps/web/src/routes/+page.server.ts` 的 load 函数整体替换为（import 区追加 `recentFiles` 到 documents 导入、新增 `import { RECENT_PAGE_SIZE } from '$lib/shared/recent';`）：
+`apps/web/src/routes/+page.server.ts` 的 load 函数整体替换为（import 区追加 `recentFiles` 到 documents 导入、新增 `import { RECENT_PAGE_SIZE } from '../lib/shared/recent';`——**相对路径，勿用 `$lib`**：本文件被 file-manager.test.ts 直调 import，vitest 无 `$lib` alias）：
 
 ```ts
 export const load: PageServerLoad = async ({ locals, url }) => {
@@ -642,7 +642,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
 };
 ```
 
-同时调整 `apps/web/src/routes/api/recent/+server.ts` 三处（`MAX_LIMIT = 2000` 行保持不变）：① 删掉 `const DEFAULT_LIMIT = 50;` 一行；② `let limit = DEFAULT_LIMIT;` 改为 `let limit = RECENT_PAGE_SIZE;`；③ import 区加 `import { RECENT_PAGE_SIZE } from '$lib/shared/recent';`。
+同时调整 `apps/web/src/routes/api/recent/+server.ts` 三处（`MAX_LIMIT = 2000` 行保持不变）：① 删掉 `const DEFAULT_LIMIT = 50;` 一行；② `let limit = DEFAULT_LIMIT;` 改为 `let limit = RECENT_PAGE_SIZE;`；③ import 区加 `import { RECENT_PAGE_SIZE } from '../../../lib/shared/recent';`。**两处 server 文件 import 一律用相对路径、勿用 `$lib`**：根 vitest.config.ts 的 alias 只有 `$server`/`$shared`/`$components`，本文件与 `+page.server.ts` 都被测试 `await import()` 直调，`$lib` 在 vitest 下解析失败（Momus 审查实测确认）。
 
 - [ ] **Step 5: 跑测试确认通过**
 
@@ -667,15 +667,15 @@ git commit -m "feat(web): load 增 view 分支——?view=recent 返回前 50 �
 
 组件测试无先例（FolderTree 亦无），验证靠 svelte-check + Task 7 冒烟；纯逻辑已在 Task 3/4/5 覆盖。
 
-- [ ] **Step 1: FolderTree currentId 类型放宽**
+- [ ] **Step 1: FolderTree currentId 移除解构默认值**
 
 `apps/web/src/lib/components/FolderTree.svelte` 第 8 行：
 
 ```ts
-        currentId = null as string | null | undefined,
+        currentId,
 ```
 
-（语义：`null` = 根目录高亮；`undefined` = 无高亮——recent 视图传入。模板 `currentId === null` 对 `undefined` 为 false 天然不高亮，祖先展开 effect 的 `if (!currentId)` 已兼容，模板零改动。）
+（**必须移除默认值，而非只放宽 cast 类型**：第 8 行 `currentId = null as string | null` 是解构默认值——JS 语义下显式传入的 `undefined` 会命中默认值变回 `null`，recent 视图将误高亮根目录，恰好违背 spec §6.3。移除后：传 `null` = 根目录高亮、传 `undefined` = 无任何高亮；prop 类型注解 `currentId?: string | null` 本就含 `undefined`，唯一调用方 `+page.svelte` 始终显式传值，行为不受影响。模板 `currentId === null` 对 `undefined` 为 false 天然不高亮，祖先展开 effect 的 `if (!currentId)` 已兼容，模板零改动。）
 
 - [ ] **Step 2: 新建 RecentList.svelte**
 
@@ -1102,11 +1102,11 @@ Expected: 0 errors
 - [ ] **Step 3: 冒烟（dev server + curl）**
 
 ```bash
-bun --filter remote-reader-web dev &
+bun --filter remote-reader-web dev & DEV_PID=$!
 sleep 5
 curl -s -o /dev/null -w '%{http_code}\n' http://localhost:5173/api/recent      # 预期 401
 curl -s -o /dev/null -w '%{http_code}\n' 'http://localhost:5173/?view=recent'  # 预期 302（未登录跳 /login）
-kill %1
+kill $DEV_PID
 ```
 
 Expected: 两行分别输出 `401`、`302`。
@@ -1150,4 +1150,4 @@ git commit -m "docs: 最近文档视图实现状态同步——spec 翻转 + CLA
 | 类型 | `bun --filter remote-reader-web check` | 0 errors |
 | migration | Task 2 Step 4 | 干净库可应用，索引含 DESC |
 | 冒烟 | Task 7 Step 3 | 401 / 302 |
-| 回归 | 目录视图代码 diff | 仅 fm-head 模板与 FolderTree 一行类型，each 块零改动 |
+| 回归 | 目录视图代码 diff | 仅 fm-head 模板与 FolderTree 移除一行默认值，each 块零改动 |

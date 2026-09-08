@@ -127,7 +127,7 @@ export function recentFiles(
 
 ### 6.3 `FolderTree.svelte` 微调
 
-`currentId` 类型放宽为 `string | null | undefined`（默认仍 `null`）：recent 视图传 `undefined` → 无任何高亮。模板 `currentId === null` 对 `undefined` 为 false（根目录不再误高亮）、`f.id === currentId` 同理；祖先展开 effect 的 `if (!currentId)` 已天然兼容——**组件模板零改动，只放宽类型**。点左树任意目录 = `selectDir` = 切回目录视图（用户的主要「回程」路径，无需额外记忆原目录）。
+`currentId` **移除解构默认值**（原 `= null`）：传 `null` = 根目录高亮、传 `undefined` = 无任何高亮（recent 视图）。关键：解构默认值会把显式传入的 `undefined` 变回 `null`（根目录误高亮），故必须移除默认而非只放宽类型；唯一调用方始终显式传值，行为不受影响。模板 `currentId === null` 对 `undefined` 为 false、`f.id === currentId` 同理；祖先展开 effect 的 `if (!currentId)` 已天然兼容——**组件模板零改动**。点左树任意目录 = `selectDir` = 切回目录视图（用户的主要「回程」路径，无需额外记忆原目录）。
 
 ### 6.4 行渲染与纯函数
 
@@ -181,6 +181,6 @@ export function folderNamesOf(byId: Map<string, TreeFolder>, parentId: string | 
 3. `routes/api/recent/+server.ts` + 测试
 4. `folder-tree.ts`：`folderNamesOf()` + 单测；`$lib/shared`：`formatRelative` + 单测
 5. `+page.server.ts`：load 分支 + 测试
-6. `FolderTree.svelte`：`currentId` 类型放宽
+6. `FolderTree.svelte`：`currentId` 移除解构默认值
 7. `RecentList.svelte`（新）+ `+page.svelte` 接线（分段控件 / 视图分支 / 操作后 re-sync）
 8. 验证：svelte-check 0 错 + 全量测试绿 + 手动冒烟（上传→recent 浮顶→滚动加载→删除后 re-sync 不缩回）
