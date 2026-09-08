@@ -120,7 +120,7 @@ export function recentFiles(
 | delete 成功 | re-sync + `invalidateAll()`（刷左树计数与面包屑；rows 为本地态不被 load 重置，零代价——Task 6 审查跟进修正：原"避免列表缩回"的保守理由在 mount-once 设计下不成立） |
 | rename / setTags 成功 | re-sync：`GET /api/recent?limit=max(50, rows.length)` 整体替换（不 `invalidateAll`，滚动位置与深度保留；替换后 `hasMore` 按新结果重算，整除边界由空拉取自然终止） |
 | move 成功 | re-sync + `invalidateAll()`（刷新左树 folders/计数；rows 为本地状态，load 重跑不重置它） |
-| re-sync 网络失败 | 降级 `invalidateAll()`（列表缩回 50 条可接受） |
+| re-sync 网络失败 | 降级 `invalidateAll()`（只刷 data/左树——rows 本地态不被重置；配合 doDelete 乐观移除，已删行不会残留，终审修正：原「列表缩回 50 条」的描述在 mount-once 设计下不成立） |
 
 - IntersectionObserver：root = 右栏滚动容器（`.fm-right`），rootMargin `600px` 预载；`loading` 标志防重入；hasMore=false 后 disconnect；视图切换/rows 重置时重建（`$effect` 客户端建，SSR 安全）
 - 追加失败：哨兵位置显示「加载失败 · 点击重试」
@@ -141,7 +141,7 @@ recent 文件行：📄 名称（链接 `/d/<id>`）+ 路径面包屑（`a / b /
 export function folderNamesOf(byId: Map<string, TreeFolder>, parentId: string | null): string[]
 ```
 
-组件内 `$derived` 建 Map 一次复用（避免每行重建 O(n) Map）。相对时间 `formatRelative(ts)` 放 `$lib/shared/`（刚刚 / N 分钟前 / N 小时前 / N 天前 / YYYY-MM-DD）。相对时间直接 SSR 渲染：分钟级粒度下 SSR→hydrate 时间差造成的文本不一致概率可忽略且无害。
+组件内 `$derived` 建 Map 一次复用（避免每行重建 O(n) Map）。相对时间 `formatRelative(ts)` 放 `$lib/shared/`（刚刚 / N 分钟前 / N 小时前 / N 天前 / YYYY-MM-DD）。相对时间直接 SSR 渲染：分钟级粒度下 SSR→hydrate 时间差造成的文本不一致概率可忽略且无害。自部署常见的服务器/浏览器跨时区场景（如容器 UTC + 用户东八区）下，首屏相对时间按服务器时区渲染、hydrate 后不重算——纯显示偏差，任何 re-sync/追加/视图切换后按客户端时间自愈，接受现状。
 
 ### 6.5 分段控件
 
