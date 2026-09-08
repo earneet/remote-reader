@@ -81,6 +81,8 @@
     export async function reSync(): Promise<void> {
         if (resyncing) return;
         resyncing = true;
+        // 已知良性竞态：limit 在入口读取，飞行中的 loadMore 若在读取后、替换前 append，
+        // 替换会把深度缩回 limit（自愈：再滚动即恢复；排序单调性由 id 去重保证）
         const limit = Math.max(RECENT_PAGE_SIZE, rows.length);
         try {
             const r = await fetch(`/api/recent?limit=${limit}`);
@@ -120,7 +122,10 @@
 
     async function doDelete(item: RecentDoc): Promise<void> {
         if (!confirm('确认删除该文件？此操作不可恢复。')) return;
-        if (await submitAction('delete', { id: item.id })) await reSync();
+        if (await submitAction('delete', { id: item.id })) {
+            await invalidateAll(); // 刷左树计数（rows 本地态不被重置，零代价——Task 6 审查跟进）
+            await reSync();
+        }
     }
 
     // 哨兵 observer：root 为右栏滚动容器，rootMargin 提前 600px 预载（spec §6.2）。
