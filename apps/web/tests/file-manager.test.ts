@@ -174,3 +174,43 @@ test('setTags：非 owner 文档 → 404', async () => {
     const r = await uploadDocument(ownerId, 'a.md', 'x', []);
     await expect(invoke(mod.actions.setTags, other, { id: r.id, tags: 'x' })).rejects.toMatchObject({ status: 404 });
 });
+
+// ===== load 视图分支（recent，spec §6.1） =====
+
+function setUpdatedAt(id: string, ts: number): void {
+    db.update(schema.documents).set({ updatedAt: ts }).where(eq(schema.documents.id, id)).run();
+}
+
+test('load：view=recent 返回全局 recent 且 children 空', async () => {
+    const ownerId = generateId();
+    insertUser(ownerId);
+    const a = await uploadDocument(ownerId, 'a.md', 'x', ['d1']);
+    const b = await uploadDocument(ownerId, 'b.md', 'y', []);
+    const T = 1_700_000_000_000;
+    setUpdatedAt(a.id, T);
+    setUpdatedAt(b.id, T + 1);
+    const data = await mod.load({ locals: { user: { id: ownerId } }, url: new URL('http://localhost/?view=recent') } as any);
+    expect((data as any).view).toBe('recent');
+    expect((data as any).children).toEqual([]);
+    expect((data as any).recent.map((r: any) => r.name)).toEqual(['b.md', 'a.md']);
+});
+
+test('load：view=recent 内嵌 tags', async () => {
+    const ownerId = generateId();
+    insertUser(ownerId);
+    const a = await uploadDocument(ownerId, 'a.md', 'x', []);
+    await invoke(mod.actions.setTags, ownerId, { id: a.id, tags: '周报' });
+    const data = await mod.load({ locals: { user: { id: ownerId } }, url: new URL('http://localhost/?view=recent') } as any);
+    const item = (data as any).recent.find((r: any) => r.id === a.id);
+    expect(item.tags.map((t: any) => t.name)).toEqual(['周报']);
+});
+
+test('load：缺省 view=dir，行为不变（children 正常、recent 空）', async () => {
+    const ownerId = generateId();
+    insertUser(ownerId);
+    await uploadDocument(ownerId, 'a.md', 'x', []);
+    const data = await mod.load({ locals: { user: { id: ownerId } }, url: new URL('http://localhost/') } as any);
+    expect((data as any).view).toBe('dir');
+    expect((data as any).children.length).toBe(1);
+    expect((data as any).recent).toEqual([]);
+});

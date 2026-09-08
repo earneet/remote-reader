@@ -3,9 +3,10 @@ import { and, eq, isNull } from 'drizzle-orm';
 import type { Actions, PageServerLoad } from './$types';
 import { generateId } from '$server/auth';
 import { db, schema } from '$server/db';
-import { deleteNode, listChildren, listFolders, folderChildCounts, moveNode, renameNode } from '$server/documents';
+import { deleteNode, listChildren, listFolders, folderChildCounts, moveNode, recentFiles, renameNode } from '$server/documents';
 import { listTags, listTagsForDocs, setDocTags, SetTagsError } from '$server/tags';
 import { parsePath } from '@remote-reader/shared/paths';
+import { RECENT_PAGE_SIZE } from '../lib/shared/recent';
 
 // M10: 文件管理器输入也经 sanitize，与 API 上传语义一致。名称必须是单段合法名。
 function sanitizeSingleName(raw: string): string {
@@ -16,13 +17,23 @@ function sanitizeSingleName(raw: string): string {
 
 export const load: PageServerLoad = async ({ locals, url }) => {
     if (!locals.user) redirect(302, '/login');
+    const view = url.searchParams.get('view') === 'recent' ? 'recent' as const : 'dir' as const;
+    // 公共数据：左树（folders/计数）+ 标签编辑（allTags）两视图都要（spec §6.1）
+    const folders = listFolders(locals.user.id);
+    const folderCounts = folderChildCounts(locals.user.id);
+    const allTags = listTags(locals.user.id);
+    if (view === 'recent') {
+        const rows = recentFiles(locals.user.id, null, RECENT_PAGE_SIZE);
+        const tagsByDoc = listTagsForDocs(rows.map((r) => r.id), locals.user.id);
+        const recent = rows.map((r) => ({ ...r, tags: tagsByDoc.get(r.id) ?? [] }));
+        return { view, children: [], folders, currentDir: null, tagsByDoc, allTags, folderCounts, recent };
+    }
     const dir = url.searchParams.get('dir');
     const parentId = dir && dir.length > 0 ? dir : null;
     const children = listChildren(locals.user.id, parentId);
-    const folders = listFolders(locals.user.id);
-    const fileIds = children.filter(c => c.type === 'file').map(c => c.id);
+    const fileIds = children.filter((c) => c.type === 'file').map((c) => c.id);
     const tagsByDoc = listTagsForDocs(fileIds, locals.user.id);
-    return { children, folders, currentDir: parentId, tagsByDoc, allTags: listTags(locals.user.id), folderCounts: folderChildCounts(locals.user.id) };
+    return { view, children, folders, currentDir: parentId, tagsByDoc, allTags, folderCounts, recent: [] };
 };
 
 export const actions: Actions = {

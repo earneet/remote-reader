@@ -2,14 +2,14 @@ import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { recentFiles } from '$server/documents';
 import { listTagsForDocs } from '$server/tags';
+import { RECENT_PAGE_SIZE } from '../../../lib/shared/recent';
 
-const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 2000; // re-sync 深度上限（spec §5.3，与 §7 性能论证对齐）
 
 export const GET: RequestHandler = async ({ locals, url }) => {
     if (!locals.user) error(401, 'unauthorized');
 
-    let limit = DEFAULT_LIMIT;
+    let limit = RECENT_PAGE_SIZE;
     const rawLimit = url.searchParams.get('limit');
     if (rawLimit !== null) {
         if (!/^\d+$/.test(rawLimit)) error(400, 'invalid limit');
