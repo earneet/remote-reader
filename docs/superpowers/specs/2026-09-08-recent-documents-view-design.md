@@ -1,7 +1,7 @@
 # 「最近文档」平铺视图（Recent Documents View）设计
 
 - **创建日期**: 2026-09-08
-- **状态**: 设计定稿，待实现（brainstorming 协作产出，关键决策均经用户确认）
+- **状态**: 已实现并 merge `master`（实现计划：`../plans/2026-09-08-recent-documents-view.md`）
 - **上游文档**: [Remote Reader 设计文档](./2026-07-18-remote-reader-design.md)（§3 架构 / §5 文件管理器）
 
 ---
