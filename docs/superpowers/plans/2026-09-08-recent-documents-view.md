@@ -1133,7 +1133,18 @@ test('恰好 7d 整 → 日期分支', () => {
     expect(folderNamesOf(cyc, 'x').length).toBeLessThanOrEqual(1001);
 ```
 
-跑 `bun run test apps/web/tests/format-relative.test.ts apps/web/tests/folder-tree.test.ts` 确认全绿后提交：`git add -A apps/web/tests/format-relative.test.ts apps/web/tests/folder-tree.test.ts && git commit -m "test(web): 补边界用例——负 diff/整 7d/环截断长度（Task 3 审查跟进）"`
+`apps/web/tests/recent-api.test.ts` 末尾追加（Task 4 审查跟进：锁定 better-sqlite3 对超范围整数绑定为 REAL 的隐式契约，防未来换驱动引入 500）：
+
+```ts
+test('超大数字 cursor 不 500（驱动绑定契约回归锁）', async () => {
+    const r = await call(ownerId, `?before=${'9'.repeat(30)}_x`);
+    expect(r.status).toBe(200);
+    const body = await r.json() as { items: unknown[] };
+    expect(Array.isArray(body.items)).toBe(true);
+});
+```
+
+跑 `bun run test apps/web/tests/format-relative.test.ts apps/web/tests/folder-tree.test.ts apps/web/tests/recent-api.test.ts` 确认全绿后提交：`git add apps/web/tests/format-relative.test.ts apps/web/tests/folder-tree.test.ts apps/web/tests/recent-api.test.ts && git commit -m "test(web): 补边界用例——负 diff/整 7d/环截断/超大 cursor（审查跟进）"`
 
 - [ ] **Step 2: 全量测试**
 
