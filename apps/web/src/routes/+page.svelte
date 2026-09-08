@@ -1,5 +1,6 @@
 <script lang="ts">
     import FolderTree from '$components/FolderTree.svelte';
+    import RecentList from '$components/RecentList.svelte';
     import type { TreeFolder } from '$lib/shared/folder-tree';
     import { enhance } from '$app/forms';
     import { goto, invalidateAll } from '$app/navigation';
@@ -11,6 +12,7 @@
     let taggingId = $state<string | null>(null);
     let tagInput = $state('');
     let rightPane = $state<HTMLElement | null>(null);
+    let recentRef = $state<{ reSync: () => Promise<void> } | null>(null);
 
     // 组装目录树入参：folder 行 + 直接子项计数合成 TreeFolder（组件不感知后端结构，spec §5.1）
     const treeFolders = $derived<TreeFolder[]>(
@@ -19,6 +21,10 @@
             return { id: fr.id, name: fr.name, parentId: fr.parentId, childFolders: c.folders, childFiles: c.files };
         })
     );
+
+    const view = $derived(data.view);
+    // 面包屑用：folder id → TreeFolder 的 Map（load 已全量加载 folders，零额外查询，spec §6.4）
+    const folderById = $derived(new Map(treeFolders.map((f) => [f.id, f] as const)));
 
     // 用 SvelteKit 标准导航：原生 history.pushState 只改地址栏、不更新 SvelteKit 内部 url，
     // invalidateAll 重跑 load 时 url.searchParams 仍读旧 dir → 切目录无反应。
@@ -30,6 +36,11 @@
         rightPane?.scrollTo(0, 0);
     }
 
+    async function switchView(url: string) {
+        await goto(url, { keepFocus: true });
+        rightPane?.scrollTo(0, 0);
+    }
+
     function startMove(id: string) { movingId = id; moveError = null; }
     async function pickTarget(targetId: string | null) {
         if (!movingId) return;
@@ -37,7 +48,12 @@
         fd.set('id', movingId);
         fd.set('target', targetId ?? 'root');
         const r = await fetch('?/move', { method: 'POST', body: fd });
-        if (r.ok) { movingId = null; moveError = null; await invalidateAll(); }
+        if (r.ok) {
+            movingId = null;
+            moveError = null;
+            await invalidateAll();
+            await recentRef?.reSync();
+        }
         else { moveError = '移动失败（目标无效或会造成环路），请重选目标或取消'; }
     }
 
@@ -55,7 +71,7 @@
     <aside class="fm-left">
         <FolderTree
             folders={treeFolders}
-            currentId={currentDir}
+            currentId={view === 'recent' ? undefined : currentDir}
             selecting={movingId !== null}
             onSelect={movingId !== null ? pickTarget : selectDir}
             storageKey="rr:tree-expanded:{data.user?.id ?? 'anon'}"
@@ -67,87 +83,109 @@
     </aside>
     <section class="fm-right" bind:this={rightPane}>
         <div class="fm-head">
-            <h1>{currentDir ? '子目录' : '根目录'}</h1>
-            <form class="create-folder" method="POST" action="?/createFolder" use:enhance={() => async ({ result }) => { if (result.type === 'success') await invalidateAll(); }}>
-                <input name="name" placeholder="新文件夹名" required>
-                <button class="btn primary" type="submit">+ 新建文件夹</button>
-            </form>
+            <div class="fm-title">
+                <h1>{view === 'recent' ? '最近文档' : currentDir ? '子目录' : '根目录'}</h1>
+                <div class="segmented" role="group" aria-label="视图切换">
+                    <button type="button" class="seg-btn" class:active={view !== 'recent'}
+                        aria-pressed={view !== 'recent'} onclick={() => switchView('/')}>目录内容</button>
+                    <button type="button" class="seg-btn" class:active={view === 'recent'}
+                        aria-pressed={view === 'recent'} onclick={() => switchView('/?view=recent')}>最近文档</button>
+                </div>
+            </div>
+            {#if view !== 'recent'}
+                <form class="create-folder" method="POST" action="?/createFolder" use:enhance={() => async ({ result }) => { if (result.type === 'success') await invalidateAll(); }}>
+                    <input name="name" placeholder="新文件夹名" required>
+                    <button class="btn primary" type="submit">+ 新建文件夹</button>
+                </form>
+            {/if}
         </div>
-        {#if data.children.length === 0}
-            <p class="muted empty">空空如也。让 Agent 通过 MCP 上传文档吧。</p>
+        {#if view === 'recent'}
+            <RecentList
+                bind:this={recentRef}
+                initialRows={data.recent}
+                folderById={folderById}
+                scrollRoot={rightPane}
+                movingId={movingId}
+                onStartMove={startMove}
+                onCancelMove={() => (movingId = null)}
+            />
         {:else}
-            <ul class="items">
-                {#each data.children as item (item.id)}
-                    <li class="item" class:editing={editingId === item.id}>
-                        {#if editingId === item.id}
-                            <form class="rename-form" method="POST" action="?/rename"
-                                use:enhance={() => async ({ result }) => {
-                                    if (result.type === 'success') { editingId = null; await invalidateAll(); }
-                                }}
-                            >
-                                <input type="hidden" name="id" value={item.id}>
-                                <input name="name" value={item.name} required use:autofocus
-                                    onkeydown={(e) => { if (e.key === 'Escape') cancelRename(); }}>
-                                <button type="submit" class="btn sm primary">保存</button>
-                                <button type="button" class="btn sm" onclick={cancelRename}>取消</button>
-                            </form>
-                        {:else}
-                            <span class="name">
-                                {#if item.type === 'folder'}
-                                    <a href="/?dir={item.id}">📁 {item.name}</a>
-                                {:else}
-                                    <a href="/d/{item.id}">📄 {item.name}</a>
-                                    {#if item.storageTier === 'cold'}<span class="chip-static cold-chip">☁️ 已归档</span>{/if}
-                                {/if}
-                                {#if item.type !== 'folder' && item.sizeBytes != null}
-                                    <span class="size">{item.sizeBytes} B</span>
-                                {/if}
-                            </span>
-                            {#if item.type === 'file'}
-                                <span class="doc-tags">
-                                    {#each (data.tagsByDoc.get(item.id) ?? []) as tg (tg.id)}
-                                        <span class="chip-static">{tg.name}</span>
-                                    {/each}
-                                    {#if taggingId === item.id}
-                                        <form class="tag-form" method="POST" action="?/setTags"
-                                            use:enhance={() => async ({ result }) => { if (result.type === 'success') { taggingId = null; tagInput = ''; await invalidateAll(); } }}>
-                                            <input type="hidden" name="id" value={item.id}>
-                                            <input name="tags" value={tagInput || (data.tagsByDoc.get(item.id) ?? []).map(t => t.name).join(', ')}
-                                                placeholder="逗号分隔，如 周报, api" use:autofocus
-                                                onkeydown={(e) => { if (e.key === 'Escape') { taggingId = null; } }}>
-                                            <button type="submit" class="btn sm primary">保存</button>
-                                            <button type="button" class="btn sm" onclick={() => (taggingId = null)}>取消</button>
-                                        </form>
-                                    {:else}
-                                        <button class="icon-btn" title="编辑标签" onclick={() => { taggingId = item.id; tagInput = ''; }}>🏷</button>
-                                    {/if}
-                                </span>
-                            {/if}
-                            <span class="actions">
-                                <button class="icon-btn" title="重命名" onclick={() => startRename(item.id)}>✏</button>
-                                {#if movingId === item.id}
-                                    <span class="hint">← 左树选目标</span>
-                                    <button class="btn sm" onclick={() => (movingId = null)}>取消</button>
-                                {:else}
-                                    <button class="icon-btn" title="移动到…" onclick={() => startMove(item.id)}>📂</button>
-                                {/if}
-                                <form class="inline" method="POST" action="?/delete"
-                                    use:enhance={({ cancel }) => {
-                                        const msg = item.type === 'folder'
-                                            ? '确认删除该文件夹？将级联删除其全部内容，且不可恢复。'
-                                            : '确认删除该文件？此操作不可恢复。';
-                                        if (!confirm(msg)) { cancel(); return; }
-                                        return async ({ result }) => { if (result.type === 'success') await invalidateAll(); };
+            {#if data.children.length === 0}
+                <p class="muted empty">空空如也。让 Agent 通过 MCP 上传文档吧。</p>
+            {:else}
+                <ul class="items">
+                    {#each data.children as item (item.id)}
+                        <li class="item" class:editing={editingId === item.id}>
+                            {#if editingId === item.id}
+                                <form class="rename-form" method="POST" action="?/rename"
+                                    use:enhance={() => async ({ result }) => {
+                                        if (result.type === 'success') { editingId = null; await invalidateAll(); }
                                     }}
                                 >
                                     <input type="hidden" name="id" value={item.id}>
-                                    <button class="icon-btn danger" title="删除">🗑</button>
+                                    <input name="name" value={item.name} required use:autofocus
+                                        onkeydown={(e) => { if (e.key === 'Escape') cancelRename(); }}>
+                                    <button type="submit" class="btn sm primary">保存</button>
+                                    <button type="button" class="btn sm" onclick={cancelRename}>取消</button>
                                 </form>
-                            </span>
-                        {/if}
-                    </li>
-                {/each}
-            </ul>
+                            {:else}
+                                <span class="name">
+                                    {#if item.type === 'folder'}
+                                        <a href="/?dir={item.id}">📁 {item.name}</a>
+                                    {:else}
+                                        <a href="/d/{item.id}">📄 {item.name}</a>
+                                        {#if item.storageTier === 'cold'}<span class="chip-static cold-chip">☁️ 已归档</span>{/if}
+                                    {/if}
+                                    {#if item.type !== 'folder' && item.sizeBytes != null}
+                                        <span class="size">{item.sizeBytes} B</span>
+                                    {/if}
+                                </span>
+                                {#if item.type === 'file'}
+                                    <span class="doc-tags">
+                                        {#each (data.tagsByDoc.get(item.id) ?? []) as tg (tg.id)}
+                                            <span class="chip-static">{tg.name}</span>
+                                        {/each}
+                                        {#if taggingId === item.id}
+                                            <form class="tag-form" method="POST" action="?/setTags"
+                                                use:enhance={() => async ({ result }) => { if (result.type === 'success') { taggingId = null; tagInput = ''; await invalidateAll(); } }}>
+                                                <input type="hidden" name="id" value={item.id}>
+                                                <input name="tags" value={tagInput || (data.tagsByDoc.get(item.id) ?? []).map(t => t.name).join(', ')}
+                                                    placeholder="逗号分隔，如 周报, api" use:autofocus
+                                                    onkeydown={(e) => { if (e.key === 'Escape') { taggingId = null; } }}>
+                                                <button type="submit" class="btn sm primary">保存</button>
+                                                <button type="button" class="btn sm" onclick={() => (taggingId = null)}>取消</button>
+                                            </form>
+                                        {:else}
+                                            <button class="icon-btn" title="编辑标签" onclick={() => { taggingId = item.id; tagInput = ''; }}>🏷</button>
+                                        {/if}
+                                    </span>
+                                {/if}
+                                <span class="actions">
+                                    <button class="icon-btn" title="重命名" onclick={() => startRename(item.id)}>✏</button>
+                                    {#if movingId === item.id}
+                                        <span class="hint">← 左树选目标</span>
+                                        <button class="btn sm" onclick={() => (movingId = null)}>取消</button>
+                                    {:else}
+                                        <button class="icon-btn" title="移动到…" onclick={() => startMove(item.id)}>📂</button>
+                                    {/if}
+                                    <form class="inline" method="POST" action="?/delete"
+                                        use:enhance={({ cancel }) => {
+                                            const msg = item.type === 'folder'
+                                                ? '确认删除该文件夹？将级联删除其全部内容，且不可恢复。'
+                                                : '确认删除该文件？此操作不可恢复。';
+                                            if (!confirm(msg)) { cancel(); return; }
+                                            return async ({ result }) => { if (result.type === 'success') await invalidateAll(); };
+                                        }}
+                                    >
+                                        <input type="hidden" name="id" value={item.id}>
+                                        <button class="icon-btn danger" title="删除">🗑</button>
+                                    </form>
+                                </span>
+                            {/if}
+                        </li>
+                    {/each}
+                </ul>
+            {/if}
         {/if}
     </section>
 </div>
@@ -184,6 +222,15 @@
     }
     .fm-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
     .fm-head h1 { margin: 0; font-size: 1.15rem; }
+    .fm-title { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+    .segmented { display: inline-flex; border: 1px solid #d0d7de; border-radius: 6px; overflow: hidden; }
+    .seg-btn {
+        border: none; background: #f6f8fa; color: #1f2328; cursor: pointer;
+        padding: 0.3rem 0.75rem; font-size: 0.85rem; line-height: 1.4;
+    }
+    .seg-btn + .seg-btn { border-left: 1px solid #d0d7de; }
+    .seg-btn.active { background: #ddf4ff; color: #0969da; font-weight: 600; }
+    .seg-btn:focus-visible { outline: 2px solid #0969da; outline-offset: -2px; }
     .create-folder { display: flex; gap: 0.5rem; }
     .create-folder input {
         padding: 0.35rem 0.6rem; border: 1px solid #d0d7de; border-radius: 5px; font-size: 0.9rem; min-width: 10rem;

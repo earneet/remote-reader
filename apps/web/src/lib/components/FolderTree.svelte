@@ -5,7 +5,7 @@
 
     let {
         folders,
-        currentId = null as string | null,
+        currentId,
         selecting = false,
         onSelect,
         storageKey
