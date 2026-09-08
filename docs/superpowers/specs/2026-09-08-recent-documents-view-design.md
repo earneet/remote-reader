@@ -84,7 +84,7 @@ export function recentFiles(
 ```
 
 - `WHERE owner_id = ? AND type = 'file'`（含 cold 归档行——列表只读元数据，不触内容）
-- cursor 非空时追加 `（updated_at < cu）OR（updated_at = cu AND id < ci）`
+- cursor 非空时追加 row-value 比较 `（updated_at, id) < (cu, ci)`——与 OR 展开形式 `（updated_at < cu）OR（updated_at = cu AND id < ci）` 语义等价，但只有 row-value 形式能走索引范围 seek（OR 形式深分页退化为从索引头逐行过滤，实测 10 万行深度 15-20ms vs 0.18ms）；SQLite 3.15+ 支持，捆绑版满足
 - `ORDER BY updated_at DESC, id DESC LIMIT ?`
 - **`id` 决胜仅为 keyset 全序确定性服务**：id 非单调（randomUUID + 时间戳后缀），同毫秒内顺序无时间语义，但不影响分页正确性（全序 + 严格比较即无漏无重）
 

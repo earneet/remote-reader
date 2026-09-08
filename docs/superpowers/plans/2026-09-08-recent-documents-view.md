@@ -159,6 +159,8 @@ git commit -m "feat(web): documents 增 recentFiles——全局 updated_at DESC 
 - Modify: `apps/web/src/lib/server/db/schema.ts`（documents 表 index 配置 + 顶部 import）
 - Modify: `apps/web/src/lib/server/db/index.ts`（`SCHEMA_SQL` 内追加一行）
 - Generate: `apps/web/src/lib/server/db/migrations/0004_*.sql`（`db:generate` 产出）
+- Modify: `apps/web/src/lib/server/documents.ts`（recentFiles cursor 谓词改 row-value，质量审查跟进）
+- Modify: `apps/web/tests/documents.test.ts`（「仅文件」测试加非空断言防假绿）
 
 - [ ] **Step 1: schema.ts 声明索引**
 
@@ -192,22 +194,40 @@ Then: `ls apps/web/src/lib/server/db/migrations/` 找到新生成的 `0004_*.sql
 
 Expected: 包含 `CREATE INDEX \`documents_owner_type_updated_idx\`` 且 `updated_at`/`id` 列带 `DESC`。若生成器丢掉了 DESC（退化为全 ASC），手动改该 SQL 文件补上 DESC——SQLite 对等值前缀后的纯 DESC 排序反正可反向扫描，DESC 仅为语义显式化，手改无兼容风险。
 
-- [ ] **Step 4: 干净库上验证 migration 可应用（不动开发库）**
+- [ ] **Step 4: keyset 谓词改 row-value 形式（Task 1 质量审查跟进）**
+
+质量审查实测：OR 形式谓词无法走索引范围 seek，深分页退化为从索引头逐行过滤（10 万行、cursor 深度 ~99990 时 15-20ms vs row-value 0.18ms，EXPLAIN 证实）；两种形式在 375 个含 tie 的 cursor 位置结果零差异（语义等价）。`documents.ts` 中 `recentFiles` 的 cursor 条件改为：
+
+```ts
+    if (cursor) {
+        conds.push(sql`(${schema.documents.updatedAt}, ${schema.documents.id}) < (${cursor.updatedAt}, ${cursor.id})`);
+    }
+```
+
+（SQLite row-value 需 3.15+，better-sqlite3 捆绑版 3.53 满足。）同时 `documents.test.ts` 的「recentFiles：仅文件，不含文件夹」测试追加一行非空断言：
+
+```ts
+    expect(rows.length).toBeGreaterThan(0);
+```
+
+跑 `bun run test apps/web/tests/documents.test.ts` 确认 42 条全绿（谓词语义等价，测试无需改期望）。
+
+- [ ] **Step 5: 干净库上验证 migration 可应用（不动开发库）**
 
 Run: `DATABASE_PATH=./data/tmp-mig-check.db bun --filter remote-reader-web db:migrate && node -e "const db=require('./apps/web/node_modules/better-sqlite3')('./apps/web/data/tmp-mig-check.db');console.log(db.prepare(\"SELECT sql FROM sqlite_master WHERE name='documents_owner_type_updated_idx'\").get())" && rm -f apps/web/data/tmp-mig-check.db*`
 
 Expected: 打印出含 `updated_at DESC, id DESC` 的 CREATE INDEX 语句，随后清理临时库。
 
-- [ ] **Step 5: 全量测试（确保 SCHEMA_SQL 变更无回归）**
+- [ ] **Step 6: 全量测试（确保 SCHEMA_SQL 与谓词变更无回归）**
 
 Run: `bun run test`
 Expected: 全绿（测试导入 db 模块时 `ensureSchema()` 会执行新 `CREATE INDEX IF NOT EXISTS`）
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add apps/web/src/lib/server/db/schema.ts apps/web/src/lib/server/db/index.ts apps/web/src/lib/server/db/migrations/
-git commit -m "feat(web): documents 增 owner_type_updated 索引——schema/SCHEMA_SQL/migration 三处同步"
+git add apps/web/src/lib/server/db/schema.ts apps/web/src/lib/server/db/index.ts apps/web/src/lib/server/db/migrations/ apps/web/src/lib/server/documents.ts apps/web/tests/documents.test.ts
+git commit -m "feat(web): documents 增 owner_type_updated 索引 + keyset 谓词 row-value 化——三处同步，索引范围 seek"
 ```
 
 ---
