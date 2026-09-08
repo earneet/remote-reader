@@ -43,3 +43,19 @@ export function visibleNodes(folders: TreeFolder[], expanded: ReadonlySet<string
     walk(null, 0);
     return out;
 }
+
+// 面包屑：parentId 的祖先 folder 名链（自顶向下，含 parentId 指向的文件夹自身）；
+// 父缺失即止（脏数据安全），环走 MAX_TREE_DEPTH 上限安全截断。组件应预建 Map 复用（避免每行 O(n) 重建）。
+export function folderNamesOf(byId: Map<string, TreeFolder>, parentId: string | null): string[] {
+    const out: string[] = [];
+    let cursor = parentId;
+    let depth = 0;
+    while (cursor) {
+        const node = byId.get(cursor);
+        if (!node) break;
+        if (depth++ > MAX_TREE_DEPTH) break;
+        out.unshift(node.name);
+        cursor = node.parentId;
+    }
+    return out;
+}

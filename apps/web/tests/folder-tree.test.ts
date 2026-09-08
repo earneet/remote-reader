@@ -1,5 +1,5 @@
 import { test, expect } from 'vitest';
-import { ancestorsOf, visibleNodes, type TreeFolder } from '../src/lib/shared/folder-tree';
+import { ancestorsOf, visibleNodes, folderNamesOf, type TreeFolder } from '../src/lib/shared/folder-tree';
 
 function f(id: string, parentId: string | null, childFolders = 0, childFiles = 0): TreeFolder {
     return { id, name: id, parentId, childFolders, childFiles };
@@ -80,4 +80,27 @@ test('visibleNodes 同父兄弟保持输入顺序（非名字序）', () => {
     ];
     const out = visibleNodes(fam, new Set(['a']));
     expect(out.map(n => n.id)).toEqual(['a', 'z', 'y']); // z 先于 y：输入序，非字母序
+});
+
+// ===== folderNamesOf（「最近文档」面包屑，spec §6.4） =====
+
+test('folderNamesOf 返回自顶向下路径名链（含 parentId 指向的文件夹）', () => {
+    const byId = new Map(fixture().map((x) => [x.id, x]));
+    expect(folderNamesOf(byId, 'c')).toEqual(['a', 'b', 'c']); // d 的面包屑
+    expect(folderNamesOf(byId, 'a')).toEqual(['a']);           // b 的面包屑
+});
+
+test('folderNamesOf null 父 → 空链（根目录文档）', () => {
+    expect(folderNamesOf(new Map(), null)).toEqual([]);
+});
+
+test('folderNamesOf 父缺失即止（脏数据安全）', () => {
+    const byId = new Map([f('orphan', 'missing')].map((x) => [x.id, x]));
+    expect(folderNamesOf(byId, 'orphan')).toEqual(['orphan']);
+    expect(folderNamesOf(byId, 'missing')).toEqual([]);
+});
+
+test('folderNamesOf parentId 环不死循环', () => {
+    const cyc = new Map([f('x', 'y'), f('y', 'x')].map((x) => [x.id, x]));
+    expect(() => folderNamesOf(cyc, 'x')).not.toThrow();
 });
