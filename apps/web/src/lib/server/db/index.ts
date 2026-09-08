@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS documents (
 );
 CREATE INDEX IF NOT EXISTS documents_owner_parent_idx ON documents (owner_id, parent_id);
 CREATE INDEX IF NOT EXISTS documents_owner_parent_name_type_idx ON documents (owner_id, parent_id, name, type);
+CREATE INDEX IF NOT EXISTS documents_owner_type_updated_idx ON documents (owner_id, type, updated_at DESC, id DESC);
 CREATE TABLE IF NOT EXISTS share_links (
     id text PRIMARY KEY NOT NULL,
     document_id text NOT NULL,

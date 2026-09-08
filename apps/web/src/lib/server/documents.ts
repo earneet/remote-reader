@@ -196,7 +196,7 @@ export function recentFiles(
         eq(schema.documents.type, 'file')
     ];
     if (cursor) {
-        conds.push(sql`(${schema.documents.updatedAt} < ${cursor.updatedAt} OR (${schema.documents.updatedAt} = ${cursor.updatedAt} AND ${schema.documents.id} < ${cursor.id}))`);
+        conds.push(sql`(${schema.documents.updatedAt}, ${schema.documents.id}) < (${cursor.updatedAt}, ${cursor.id})`);
     }
     return db.select().from(schema.documents)
         .where(and(...conds))

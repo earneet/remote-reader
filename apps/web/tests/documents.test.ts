@@ -447,6 +447,7 @@ test('recentFiles：按 updated_at DESC 全局排序（跨目录）', async () =
 test('recentFiles：仅文件，不含文件夹', async () => {
     await uploadDocument(ownerId, 'f.md', 'x', ['fold']); // 会顺带建 folder 'fold'
     const rows = recentFiles(ownerId, null, 50);
+    expect(rows.length).toBeGreaterThan(0);
     expect(rows.every((r) => r.type === 'file')).toBe(true);
 });
 

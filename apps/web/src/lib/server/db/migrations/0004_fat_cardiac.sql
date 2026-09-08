@@ -1,0 +1,1 @@
+CREATE INDEX `documents_owner_type_updated_idx` ON `documents` (`owner_id`,`type`,"updated_at" DESC,"id" DESC);

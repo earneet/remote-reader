@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import { sqliteTable, text, integer, index, unique, primaryKey } from 'drizzle-orm/sqlite-core';
 
 export const users = sqliteTable('users', {
@@ -36,7 +37,9 @@ export const documents = sqliteTable('documents', {
     archivedAt: integer('archived_at')
 }, (t) => ({
     ownerParentIdx: index('documents_owner_parent_idx').on(t.ownerId, t.parentId),
-    ownerParentNameTypeIdx: index('documents_owner_parent_name_type_idx').on(t.ownerId, t.parentId, t.name, t.type)
+    ownerParentNameTypeIdx: index('documents_owner_parent_name_type_idx').on(t.ownerId, t.parentId, t.name, t.type),
+    ownerTypeUpdatedIdx: index('documents_owner_type_updated_idx')
+        .on(t.ownerId, t.type, sql`${t.updatedAt} DESC`, sql`${t.id} DESC`)
 }));
 
 export const shareLinks = sqliteTable('share_links', {
