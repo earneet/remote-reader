@@ -7,6 +7,7 @@ import {
     listChildren,
     listFolders,
     folderChildCounts,
+    recentFiles,
     getOwnedDocument,
     renameNode,
     moveNode,
@@ -423,4 +424,68 @@ test('folderChildCounts owner 隔离：不数别人的子项；无文档 owner �
     }).run();
     const counts = folderChildCounts(ownerId);
     expect(counts.size).toBe(1); // 只有 shared-name，user-x 的子项不串
+});
+
+// ===== recentFiles（「最近文档」视图，spec §5.1） =====
+
+function setUpdatedAt(id: string, ts: number): void {
+    db.update(schema.documents).set({ updatedAt: ts }).where(eq(schema.documents.id, id)).run();
+}
+
+test('recentFiles：按 updated_at DESC 全局排序（跨目录）', async () => {
+    const a = await uploadDocument(ownerId, 'a.md', 'x', ['r1']);
+    const b = await uploadDocument(ownerId, 'b.md', 'y', ['r2']);
+    const c = await uploadDocument(ownerId, 'c.md', 'z', []);
+    const T = 1_700_000_000_000;
+    setUpdatedAt(a.id, T);
+    setUpdatedAt(b.id, T + 10);
+    setUpdatedAt(c.id, T + 5);
+    const rows = recentFiles(ownerId, null, 50);
+    expect(rows.map((r) => r.name)).toEqual(['b.md', 'c.md', 'a.md']);
+});
+
+test('recentFiles：仅文件，不含文件夹', async () => {
+    await uploadDocument(ownerId, 'f.md', 'x', ['fold']); // 会顺带建 folder 'fold'
+    const rows = recentFiles(ownerId, null, 50);
+    expect(rows.every((r) => r.type === 'file')).toBe(true);
+});
+
+test('recentFiles：cursor 排除自身与更新行（keyset）', async () => {
+    const a = await uploadDocument(ownerId, 'a.md', 'x', []);
+    const b = await uploadDocument(ownerId, 'b.md', 'y', []);
+    const T = 1_700_000_000_000;
+    setUpdatedAt(a.id, T);
+    setUpdatedAt(b.id, T - 10);
+    const page1 = recentFiles(ownerId, null, 1);
+    expect(page1.map((r) => r.name)).toEqual(['a.md']);
+    const page2 = recentFiles(ownerId, { updatedAt: page1[0].updatedAt, id: page1[0].id }, 50);
+    expect(page2.map((r) => r.name)).toEqual(['b.md']);
+});
+
+test('recentFiles：同 updated_at 按 id DESC 决胜（keyset 全序）', async () => {
+    const a = await uploadDocument(ownerId, 'a.md', 'x', []);
+    const b = await uploadDocument(ownerId, 'b.md', 'y', []);
+    const T = 1_700_000_000_000;
+    setUpdatedAt(a.id, T);
+    setUpdatedAt(b.id, T);
+    const rows = recentFiles(ownerId, null, 50);
+    const idDesc = [a.id, b.id].sort().reverse().join(',');
+    expect(rows.map((r) => r.id).join(',')).toBe(idDesc);
+});
+
+test('recentFiles：owner 隔离', async () => {
+    const other = generateId();
+    db.insert(schema.users).values({
+        id: other, email: `t2-${Date.now()}@x.com`, passwordHash: 'x', role: 'member', createdAt: Date.now()
+    }).run();
+    await uploadDocument(ownerId, 'mine.md', 'x', []);
+    await uploadDocument(other, 'theirs.md', 'y', []);
+    const rows = recentFiles(ownerId, null, 50);
+    expect(rows.map((r) => r.name)).toEqual(['mine.md']);
+});
+
+test('recentFiles：limit 生效', async () => {
+    await uploadDocument(ownerId, 'a.md', 'x', []);
+    await uploadDocument(ownerId, 'b.md', 'y', []);
+    expect(recentFiles(ownerId, null, 1).length).toBe(1);
 });

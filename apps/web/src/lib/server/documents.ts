@@ -183,6 +183,28 @@ export function listFolders(ownerId: string): DocumentRow[] {
         .all();
 }
 
+// 「最近文档」视图：全局按 updated_at DESC 平铺该用户的文件（含 cold 归档行，只读元数据），
+// keyset 分页：cursor 为上一页末行的 (updatedAt, id)，严格小于比较保证无漏无重（spec §5.1）。
+// id 决胜仅为全序确定性：id 非单调，同毫秒内顺序无时间语义，不影响分页正确性。
+export function recentFiles(
+    ownerId: string,
+    cursor: { updatedAt: number; id: string } | null,
+    limit: number
+): DocumentRow[] {
+    const conds = [
+        eq(schema.documents.ownerId, ownerId),
+        eq(schema.documents.type, 'file')
+    ];
+    if (cursor) {
+        conds.push(sql`(${schema.documents.updatedAt} < ${cursor.updatedAt} OR (${schema.documents.updatedAt} = ${cursor.updatedAt} AND ${schema.documents.id} < ${cursor.id}))`);
+    }
+    return db.select().from(schema.documents)
+        .where(and(...conds))
+        .orderBy(sql`${schema.documents.updatedAt} DESC`, sql`${schema.documents.id} DESC`)
+        .limit(limit)
+        .all();
+}
+
 // 目录树子项计数：每个 folder 的直接子 folder / 子 file 数（parent_id 即 folder id）
 export function folderChildCounts(ownerId: string): Map<string, { folders: number; files: number }> {
     const rows = db.select({
