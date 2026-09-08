@@ -23,7 +23,9 @@
 
     // 本地列表状态：进入 recent 视图时组件挂载、从此初始化；invalidateAll 不重建组件，
     // 故 rows 不被 load 重置——列表不缩回、滚动位置保留的关键（spec §6.2）。
+    // svelte-ignore state_referenced_locally
     let rows = $state<RecentDoc[]>([...initialRows]);
+    // svelte-ignore state_referenced_locally
     let hasMore = $state(initialRows.length >= RECENT_PAGE_SIZE);
     let loadingMore = $state(false);
     let loadError = $state(false);
@@ -123,6 +125,7 @@
     async function doDelete(item: RecentDoc): Promise<void> {
         if (!confirm('确认删除该文件？此操作不可恢复。')) return;
         if (await submitAction('delete', { id: item.id })) {
+            rows = rows.filter((x) => x.id !== item.id); // 乐观移除：reSync 失败也不残留已删行（终审跟进）
             await invalidateAll(); // 刷左树计数（rows 本地态不被重置，零代价——Task 6 审查跟进）
             await reSync();
         }
