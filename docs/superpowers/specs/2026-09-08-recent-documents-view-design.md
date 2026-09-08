@@ -90,7 +90,7 @@ export function recentFiles(
 
 ### 5.2 索引（migration）
 
-新增 `documents_owner_type_updated_idx ON documents(owner_id, type, updated_at DESC, id DESC)`，精确覆盖 §5.1 查询。实现方式（已对照安装版 drizzle 0.36.4 类型定义验证）：sqlite-core 索引列无 `.asc()/.desc()` 方法，但 `on()` 的参数类型 `IndexColumn = SQLiteColumn | SQL` 接受 SQL 片段——`sql`${t.updatedAt} DESC`` 写在 schema 里，`db:generate` 即可产出 DESC；即使生成器退化为全 ASC 列，SQLite 对等值前缀后的纯 DESC 排序可反向扫描同一索引，正确性不受影响。
+新增 `documents_owner_type_updated_idx ON documents(owner_id, type, updated_at DESC, id DESC)`，精确覆盖 §5.1 查询。按仓库三处同步规则（`db/index.ts` 注释：schema.ts 声明 + `SCHEMA_SQL` 运行时建表 + drizzle migration）：① `schema.ts` 里 `sql`${t.updatedAt} DESC`` 写法（已对照安装版 drizzle 0.36.4 类型定义验证：sqlite-core 索引列无 `.asc()/.desc()` 方法，但 `on()` 的参数类型 `IndexColumn = SQLiteColumn | SQL` 接受 SQL 片段）；② `SCHEMA_SQL` 加 `CREATE INDEX IF NOT EXISTS` 同名同列；③ `db:generate` 产出 migration。即使生成器退化为全 ASC 列，SQLite 对等值前缀后的纯 DESC 排序可反向扫描同一索引，正确性不受影响。
 
 ### 5.3 端点 `GET /api/recent`
 
@@ -106,7 +106,7 @@ export function recentFiles(
 ### 6.1 load 分支（`+page.server.ts`）
 
 - 公共（两视图都要）：`folders`、`folderCounts`、`allTags`（左树 / 面包屑 / 标签编辑）
-- `?view=recent`：`recent = recentFiles(owner, null, 50)` 内嵌 tags、`children = []`、`tagsByDoc` 为空 map
+- `?view=recent`：`recent = recentFiles(owner, null, 50)` 内嵌 tags、`children = []`；`tagsByDoc` 返回 recent 行的 map（仅为返回形状统一，页面在 recent 视图不读它，标签走内嵌）
 - 默认：现状不变
 
 ### 6.2 `RecentList.svelte`（新组件）
