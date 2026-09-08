@@ -1144,7 +1144,21 @@ test('超大数字 cursor 不 500（驱动绑定契约回归锁）', async () =>
 });
 ```
 
-跑 `bun run test apps/web/tests/format-relative.test.ts apps/web/tests/folder-tree.test.ts apps/web/tests/recent-api.test.ts` 确认全绿后提交：`git add apps/web/tests/format-relative.test.ts apps/web/tests/folder-tree.test.ts apps/web/tests/recent-api.test.ts && git commit -m "test(web): 补边界用例——负 diff/整 7d/环截断/超大 cursor（审查跟进）"`
+`apps/web/tests/file-manager.test.ts` 末尾追加（Task 5 审查跟进：锁定 recent 优先、dir 被忽略的分支优先级契约）：
+
+```ts
+test('load：view=recent 时 dir 参数被忽略（recent 优先级锁定）', async () => {
+    const ownerId = generateId();
+    insertUser(ownerId);
+    const a = await uploadDocument(ownerId, 'a.md', 'x', ['d1']);
+    const data = await mod.load({ locals: { user: { id: ownerId } }, url: new URL(`http://localhost/?view=recent&dir=${a.id}`) } as any);
+    expect((data as any).view).toBe('recent');
+    expect((data as any).currentDir).toBe(null);
+    expect((data as any).recent.length).toBe(1);
+});
+```
+
+跑 `bun run test apps/web/tests/format-relative.test.ts apps/web/tests/folder-tree.test.ts apps/web/tests/recent-api.test.ts apps/web/tests/file-manager.test.ts` 确认全绿后提交：`git add apps/web/tests/format-relative.test.ts apps/web/tests/folder-tree.test.ts apps/web/tests/recent-api.test.ts apps/web/tests/file-manager.test.ts && git commit -m "test(web): 补边界用例——负 diff/整 7d/环截断/超大 cursor/dir 优先级（审查跟进）"`
 
 - [ ] **Step 2: 全量测试**
 
