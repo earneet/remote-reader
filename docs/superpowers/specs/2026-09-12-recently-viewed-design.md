@@ -1,7 +1,7 @@
 # 「最近浏览」视图（owner 阅读顺序）设计
 
 - **创建日期**: 2026-09-12
-- **状态**: 设计定稿（subagent 审查 2 项修正已并入），待写实现计划
+- **状态**: 已实现并 merge `master`（实现计划：`../plans/2026-09-12-recently-viewed.md`）
 - **上游文档**: [Remote Reader 设计文档](./2026-07-18-remote-reader-design.md)（§3 架构 / §5 文件管理器）、[「最近文档」平铺视图设计](./2026-09-08-recent-documents-view-design.md)（本视图复用其全部机制）
 
 ---
