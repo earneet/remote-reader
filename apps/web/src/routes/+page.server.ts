@@ -23,7 +23,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
     const folderCounts = folderChildCounts(locals.user.id);
     const allTags = listTags(locals.user.id);
     if (view === 'recent') {
-        const rows = recentFiles(locals.user.id, null, RECENT_PAGE_SIZE);
+        const rows = recentFiles(locals.user.id, 'updated', null, RECENT_PAGE_SIZE);
         const tagsByDoc = listTagsForDocs(rows.map((r) => r.id), locals.user.id);
         const recent = rows.map((r) => ({ ...r, tags: tagsByDoc.get(r.id) ?? [] }));
         return { view, children: [], folders, currentDir: null, tagsByDoc, allTags, folderCounts, recent };

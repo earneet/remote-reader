@@ -8,6 +8,7 @@ import {
     listFolders,
     folderChildCounts,
     recentFiles,
+    markOwnerViewed,
     getOwnedDocument,
     renameNode,
     moveNode,
@@ -440,13 +441,13 @@ test('recentFiles：按 updated_at DESC 全局排序（跨目录）', async () =
     setUpdatedAt(a.id, T);
     setUpdatedAt(b.id, T + 10);
     setUpdatedAt(c.id, T + 5);
-    const rows = recentFiles(ownerId, null, 50);
+    const rows = recentFiles(ownerId, 'updated', null, 50);
     expect(rows.map((r) => r.name)).toEqual(['b.md', 'c.md', 'a.md']);
 });
 
 test('recentFiles：仅文件，不含文件夹', async () => {
     await uploadDocument(ownerId, 'f.md', 'x', ['fold']); // 会顺带建 folder 'fold'
-    const rows = recentFiles(ownerId, null, 50);
+    const rows = recentFiles(ownerId, 'updated', null, 50);
     expect(rows.length).toBeGreaterThan(0);
     expect(rows.every((r) => r.type === 'file')).toBe(true);
 });
@@ -457,9 +458,9 @@ test('recentFiles：cursor 排除自身与更新行（keyset）', async () => {
     const T = 1_700_000_000_000;
     setUpdatedAt(a.id, T);
     setUpdatedAt(b.id, T - 10);
-    const page1 = recentFiles(ownerId, null, 1);
+    const page1 = recentFiles(ownerId, 'updated', null, 1);
     expect(page1.map((r) => r.name)).toEqual(['a.md']);
-    const page2 = recentFiles(ownerId, { updatedAt: page1[0].updatedAt, id: page1[0].id }, 50);
+    const page2 = recentFiles(ownerId, 'updated', { ts: page1[0].updatedAt, id: page1[0].id }, 50);
     expect(page2.map((r) => r.name)).toEqual(['b.md']);
 });
 
@@ -469,7 +470,7 @@ test('recentFiles：同 updated_at 按 id DESC 决胜（keyset 全序）', async
     const T = 1_700_000_000_000;
     setUpdatedAt(a.id, T);
     setUpdatedAt(b.id, T);
-    const rows = recentFiles(ownerId, null, 50);
+    const rows = recentFiles(ownerId, 'updated', null, 50);
     const idDesc = [a.id, b.id].sort().reverse().join(',');
     expect(rows.map((r) => r.id).join(',')).toBe(idDesc);
 });
@@ -481,12 +482,76 @@ test('recentFiles：owner 隔离', async () => {
     }).run();
     await uploadDocument(ownerId, 'mine.md', 'x', []);
     await uploadDocument(other, 'theirs.md', 'y', []);
-    const rows = recentFiles(ownerId, null, 50);
+    const rows = recentFiles(ownerId, 'updated', null, 50);
     expect(rows.map((r) => r.name)).toEqual(['mine.md']);
 });
 
 test('recentFiles：limit 生效', async () => {
     await uploadDocument(ownerId, 'a.md', 'x', []);
     await uploadDocument(ownerId, 'b.md', 'y', []);
-    expect(recentFiles(ownerId, null, 1).length).toBe(1);
+    expect(recentFiles(ownerId, 'updated', null, 1).length).toBe(1);
+});
+
+// ===== markOwnerViewed + recentFiles sort=viewed（「最近浏览」spec §5.3/§5.4） =====
+
+function setOwnerViewedAt(id: string, ts: number | null): void {
+    db.update(schema.documents).set({ ownerViewedAt: ts }).where(eq(schema.documents.id, id)).run();
+}
+
+test('markOwnerViewed：命中且只写 owner_viewed_at（updated_at/last_viewed_at 不动）', async () => {
+    const a = await uploadDocument(ownerId, 'a.md', 'x', []);
+    setUpdatedAt(a.id, 1_700_000_000_000);
+    const before = Date.now();
+    expect(markOwnerViewed(ownerId, a.id)).toBe(true);
+    const row = db.select().from(schema.documents).where(eq(schema.documents.id, a.id)).get()!;
+    expect(row.ownerViewedAt).toBeGreaterThanOrEqual(before);
+    expect(row.updatedAt).toBe(1_700_000_000_000);
+    expect(row.lastViewedAt).toBeNull();
+});
+
+test('markOwnerViewed：非本人 / folder / 不存在 → false', async () => {
+    const a = await uploadDocument(ownerId, 'a.md', 'x', ['fold']); // 顺带建 folder 'fold'
+    const other = generateId();
+    db.insert(schema.users).values({
+        id: other, email: `mv-${Date.now()}@x.com`, passwordHash: 'x', role: 'member', createdAt: Date.now()
+    }).run();
+    expect(markOwnerViewed(other, a.id)).toBe(false);
+    const folder = db.select().from(schema.documents)
+        .where(and(eq(schema.documents.ownerId, ownerId), eq(schema.documents.type, 'folder'))).get()!;
+    expect(markOwnerViewed(ownerId, folder.id)).toBe(false);
+    expect(markOwnerViewed(ownerId, 'nonexistent')).toBe(false);
+});
+
+test('recentFiles sort=viewed：按 owner_viewed_at DESC，未浏览不出现', async () => {
+    const a = await uploadDocument(ownerId, 'a.md', 'x', []);
+    const b = await uploadDocument(ownerId, 'b.md', 'y', []);
+    await uploadDocument(ownerId, 'c.md', 'z', []); // 从未浏览
+    const T = 1_700_000_000_000;
+    setOwnerViewedAt(a.id, T);
+    setOwnerViewedAt(b.id, T + 10);
+    const rows = recentFiles(ownerId, 'viewed', null, 50);
+    expect(rows.map((r) => r.name)).toEqual(['b.md', 'a.md']);
+});
+
+test('recentFiles sort=viewed：cursor keyset 排除自身与更旧行', async () => {
+    const a = await uploadDocument(ownerId, 'a.md', 'x', []);
+    const b = await uploadDocument(ownerId, 'b.md', 'y', []);
+    const T = 1_700_000_000_000;
+    setOwnerViewedAt(a.id, T);
+    setOwnerViewedAt(b.id, T - 10);
+    const page1 = recentFiles(ownerId, 'viewed', null, 1);
+    expect(page1.map((r) => r.name)).toEqual(['a.md']);
+    const page2 = recentFiles(ownerId, 'viewed', { ts: page1[0].ownerViewedAt!, id: page1[0].id }, 50);
+    expect(page2.map((r) => r.name)).toEqual(['b.md']);
+});
+
+test('recentFiles sort=viewed：owner 隔离', async () => {
+    const other = generateId();
+    db.insert(schema.users).values({
+        id: other, email: `vv-${Date.now()}@x.com`, passwordHash: 'x', role: 'member', createdAt: Date.now()
+    }).run();
+    await uploadDocument(ownerId, 'mine.md', 'x', []);
+    const theirs = await uploadDocument(other, 'theirs.md', 'y', []);
+    setOwnerViewedAt(theirs.id, 1_700_000_000_000);
+    expect(recentFiles(ownerId, 'viewed', null, 50)).toEqual([]);
 });

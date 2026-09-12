@@ -10,6 +10,7 @@ import { getObjectStore, objectKeyFor, ObjectNotFoundError, ArchiveUnavailableEr
 import { createShareLink } from './shares';
 import { getBaseUrl } from './env';
 import { indexDoc } from './fts';
+import type { RecentSort } from '../shared/recent';
 
 type DocumentRow = typeof schema.documents.$inferSelect;
 
@@ -183,24 +184,30 @@ export function listFolders(ownerId: string): DocumentRow[] {
         .all();
 }
 
-// 「最近文档」视图：全局按 updated_at DESC 平铺该用户的文件（含 cold 归档行，只读元数据），
-// keyset 分页：cursor 为上一页末行的 (updatedAt, id)，严格小于比较保证无漏无重（spec §5.1）。
+// 「最近文档/浏览」视图：全局平铺该用户的文件（含 cold 归档行，只读元数据），
+// sort 决定排序键与过滤（spec §5.4）：updated → updated_at DESC（现状）；viewed → owner_viewed_at DESC 且排除未浏览。
+// keyset 分页：cursor 为上一页末行的 (ts, id)，严格小于比较保证无漏无重（spec §5.1）。
 // id 决胜仅为全序确定性：id 非单调，同毫秒内顺序无时间语义，不影响分页正确性。
 export function recentFiles(
     ownerId: string,
-    cursor: { updatedAt: number; id: string } | null,
+    sort: RecentSort,
+    cursor: { ts: number; id: string } | null,
     limit: number
 ): DocumentRow[] {
     const conds = [
         eq(schema.documents.ownerId, ownerId),
         eq(schema.documents.type, 'file')
     ];
+    if (sort === 'viewed') {
+        conds.push(isNotNull(schema.documents.ownerViewedAt));
+    }
+    const orderCol = sort === 'viewed' ? schema.documents.ownerViewedAt : schema.documents.updatedAt;
     if (cursor) {
-        conds.push(sql`(${schema.documents.updatedAt}, ${schema.documents.id}) < (${cursor.updatedAt}, ${cursor.id})`);
+        conds.push(sql`(${orderCol}, ${schema.documents.id}) < (${cursor.ts}, ${cursor.id})`);
     }
     return db.select().from(schema.documents)
         .where(and(...conds))
-        .orderBy(sql`${schema.documents.updatedAt} DESC`, sql`${schema.documents.id} DESC`)
+        .orderBy(sql`${orderCol} DESC`, sql`${schema.documents.id} DESC`)
         .limit(limit)
         .all();
 }
@@ -404,6 +411,19 @@ export function deleteNode(ownerId: string, id: string): void {
 function touchDocument(docId: string): void {
     db.update(schema.documents).set({ lastViewedAt: Date.now() })
         .where(eq(schema.documents.id, docId)).run();
+}
+
+// 「最近浏览」信号（spec §5.3）：beacon 端点调用，仅 owner 真实浏览时触发；
+// 只动 owner_viewed_at——不碰 updated_at（排序语义）/ last_viewed_at（分层语义）/ storage_tier
+export function markOwnerViewed(ownerId: string, docId: string): boolean {
+    const r = db.update(schema.documents).set({ ownerViewedAt: Date.now() })
+        .where(and(
+            eq(schema.documents.id, docId),
+            eq(schema.documents.ownerId, ownerId),
+            eq(schema.documents.type, 'file')
+        ))
+        .run();
+    return r.changes > 0;
 }
 
 // 内容读取单点：hot → 本地（现状路径）；cold → 远端拉取 + fire-and-forget 回热

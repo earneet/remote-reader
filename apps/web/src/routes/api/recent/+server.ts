@@ -17,17 +17,17 @@ export const GET: RequestHandler = async ({ locals, url }) => {
     }
 
     // cursor 格式 <updatedAt>_<id>：id 是 UUID+base36（不含 _），分隔符安全（spec §5.3）
-    let cursor: { updatedAt: number; id: string } | null = null;
+    let cursor: { ts: number; id: string } | null = null;
     const rawBefore = url.searchParams.get('before');
     if (rawBefore !== null) {
         const sep = rawBefore.indexOf('_');
         const tsStr = sep > 0 ? rawBefore.slice(0, sep) : '';
         const id = sep > 0 ? rawBefore.slice(sep + 1) : '';
         if (!/^\d+$/.test(tsStr) || !id) error(400, 'invalid before');
-        cursor = { updatedAt: Number.parseInt(tsStr, 10), id };
+        cursor = { ts: Number.parseInt(tsStr, 10), id };
     }
 
-    const rows = recentFiles(locals.user.id, cursor, limit);
+    const rows = recentFiles(locals.user.id, 'updated', cursor, limit);
     const tagsByDoc = listTagsForDocs(rows.map((r) => r.id), locals.user.id);
     return json({ items: rows.map((r) => ({ ...r, tags: tagsByDoc.get(r.id) ?? [] })) });
 };
