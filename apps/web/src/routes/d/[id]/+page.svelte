@@ -2,12 +2,18 @@
     import MarkdownViewer from '$components/MarkdownViewer.svelte';
     import { enhance } from '$app/forms';
     import { invalidateAll } from '$app/navigation';
-    import { onMount } from 'svelte';
     import { reportView } from '$lib/shared/view-beacon';
     let { data } = $props();
-    // 「最近浏览」上报（spec §7.1）：onMount 仅真实导航挂载时执行——
-    // hover 预取只跑 load 不挂载组件，机制性排除；invalidateAll 不重挂载 → 不误记
-    onMount(() => { reportView(data.id); });
+    // 「最近浏览」上报（spec §7.1）：$effect 仅客户端执行——hover 预取只跑 load 不挂载组件，机制性排除；
+    // lastReported 守卫：invalidateAll（setTags 后 data 重建、id 不变）不误记；
+    // 同路由参数切换（/d/a→/d/b，如文档内 markdown 链接）id 变 → 补记（「打开即算一次」口径）
+    let lastReported = '';
+    $effect(() => {
+        if (data.id !== lastReported) {
+            lastReported = data.id;
+            reportView(data.id);
+        }
+    });
     let editing = $state(false);
     let input = $derived(
         editing ? (data.tags.map(t => t.name).join(', ')) : ''

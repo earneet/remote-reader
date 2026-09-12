@@ -1,11 +1,17 @@
 <script lang="ts">
     import MarkdownViewer from '$components/MarkdownViewer.svelte';
     import ThemeToggle from '$components/ThemeToggle.svelte';
-    import { onMount } from 'svelte';
     import { reportView } from '$lib/shared/view-beacon';
     let { data } = $props();
-    // 仅 owner 登录态上报（匿名访客不算浏览，spec §3 浏览口径）；服务端仍会校验 owner
-    onMount(() => { if (data.ownerView) reportView(data.id); });
+    // 仅 owner 登录态上报（匿名访客不算浏览，spec §3 浏览口径）；服务端仍会校验 owner。
+    // lastReported 守卫同 /d/ 页：invalidateAll 不误记、同路由参数切换（换 token）补记
+    let lastReported = '';
+    $effect(() => {
+        if (data.ownerView && data.id !== lastReported) {
+            lastReported = data.id;
+            reportView(data.id);
+        }
+    });
 </script>
 
 <svelte:head>

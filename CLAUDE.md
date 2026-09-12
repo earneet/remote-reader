@@ -22,7 +22,7 @@ Remote Reader 让远程工作的 Agent 通过 MCP 上传 Markdown 文档，用�
 
 **最近文档视图（2026-09-08）**：文件管理器右栏分段切换「目录内容 ⇄ 最近文档」（URL `?view=recent`，左树常驻）；全局 `updated_at DESC` 平铺（keyset row-value 分页 + `documents_owner_type_updated_idx` 索引三处同步 + `GET /api/recent` session 端点 + 无限滚动哨兵）；行内操作后 re-sync 保持列表深度不缩回（delete/move 额外 invalidateAll 刷左树）；面包屑 `folderNamesOf` + 相对时间 `formatRelative` 纯函数。spec：`docs/superpowers/specs/2026-09-08-recent-documents-view-design.md`。
 
-**最近浏览视图（2026-09-12）**：文件管理器第三分段「最近浏览」（URL `?view=viewed`）按 owner 本人浏览时间倒序；新列 `owner_viewed_at`（与 `last_viewed_at` 分层信号语义分工）；查看页 onMount 发 beacon `POST /api/view/[id]`（session+owner 校验，hover 预取机制性排除）；`recentFiles`/`/api/recent`/`RecentList` 参数化 `sort=updated|viewed`（keyset 游标按 sort 解释）。索引 `documents_owner_type_viewed_idx` 收敛在 `ensureOwnerViewedColumn` 列兜底后创建（存量库升级安全）。spec：`docs/superpowers/specs/2026-09-12-recently-viewed-design.md`。
+**最近浏览视图（2026-09-12）**：文件管理器第三分段「最近浏览」（URL `?view=viewed`）按 owner 本人浏览时间倒序；新列 `owner_viewed_at`（与 `last_viewed_at` 分层信号语义分工）；查看页 `$effect`+`lastReported` 守卫发 beacon `POST /api/view/[id]`（session+owner 校验，hover 预取机制性排除，同路由参数切换也入序）；`recentFiles`/`/api/recent`/`RecentList` 参数化 `sort=updated|viewed`（keyset 游标按 sort 解释）。索引 `documents_owner_type_viewed_idx` 收敛在 `ensureOwnerViewedColumn` 列兜底后创建（存量库升级安全）。spec：`docs/superpowers/specs/2026-09-12-recently-viewed-design.md`。
 
 **下一步（低优先）**：spec §12 Phase 3 扩展（远程 MCP server / 多文档批量上传等），详见 spec §15.3 待做；CSP 由 report-only 转 enforcing（需线上观察 mermaid/katex 违规）；session 服务端撤销表 / 审计日志（设计级，未做）。
 

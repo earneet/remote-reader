@@ -127,7 +127,7 @@ export function markOwnerViewed(ownerId: string, docId: string): boolean
 - `/d/[id]/+page.server.ts`：load 增返 `id`（现仅 title/html/tags/updatedAt/sizeBytes）
 - `/s/[token]/+page.server.ts`：load 增返 `id` + `ownerView: locals.user?.id === doc.ownerId`。hooks 全局解析 session，`/s/` 免登录特性不变（无 session 时 `ownerView=false`）；匿名页面多暴露的 doc id 是不透明随机串，无权限放大（`/d/` 与 API 均需认证）
 - `$lib/shared/view-beacon.ts`（新）：`reportView(id)` = `fetch('/api/view/' + id, { method: 'POST', keepalive: true })`，失败静默——阅读顺序是便利功能，丢一次上报可接受；`keepalive` 提高关页前送达率
-- 两个 `+page.svelte` 各在 `onMount` 调一次（`/s/` 仅 `ownerView` 时）。正确性边界：SSR 不执行 onMount；`invalidateAll`（如 setTags 后）不重挂载组件 → 不误记；前进/后退/刷新重挂载 → 重新记一次，语义正确（确实重现了阅读）
+- 两个 `+page.svelte` 各用带 `lastReported` 守卫的 `$effect` 上报（`/s/` 仅 `ownerView` 时；`$effect` 仅客户端执行）。正确性边界：hover 预取只跑 load 不挂载组件 → 机制性排除；`invalidateAll`（如 setTags 后）重建 data 对象但 id 不变 → 不误记；同路由参数切换（`/d/a`→`/d/b`，如文档内 markdown 链接）id 变化 → 补记（「打开即算一次」口径）；跨路由/前进/后退/刷新 → 重新挂载即记（确实重现了阅读）
 
 ### 7.2 文件管理器
 
