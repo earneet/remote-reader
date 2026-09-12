@@ -108,3 +108,47 @@ test('超大数字 cursor 不 500（驱动绑定契约回归锁）', async () =>
     const body = await r.json() as { items: unknown[] };
     expect(Array.isArray(body.items)).toBe(true);
 });
+
+// ===== sort=viewed（「最近浏览」spec §6.2） =====
+
+function setOwnerViewedAt(id: string, ts: number | null): void {
+    db.update(schema.documents).set({ ownerViewedAt: ts }).where(eq(schema.documents.id, id)).run();
+}
+
+test('sort=viewed：按 owner_viewed_at DESC，未浏览不出现（updated 再新也不入序）', async () => {
+    const a = await uploadDocument(ownerId, 'a.md', 'x', []);
+    const b = await uploadDocument(ownerId, 'b.md', 'y', []); // 未浏览
+    const T = 1_700_000_000_000;
+    setUpdatedAt(b.id, T + 100);
+    setOwnerViewedAt(a.id, T);
+    const r = await call(ownerId, '?sort=viewed');
+    const body = await r.json() as { items: { name: string }[] };
+    expect(body.items.map((i) => i.name)).toEqual(['a.md']);
+});
+
+test('sort=viewed：before cursor 按 owner_viewed_at 解释', async () => {
+    const a = await uploadDocument(ownerId, 'a.md', 'x', []);
+    const b = await uploadDocument(ownerId, 'b.md', 'y', []);
+    const T = 1_700_000_000_000;
+    setOwnerViewedAt(a.id, T);
+    setOwnerViewedAt(b.id, T - 10);
+    const r = await call(ownerId, `?sort=viewed&before=${T}_${a.id}`);
+    const body = await r.json() as { items: { name: string }[] };
+    expect(body.items.map((i) => i.name)).toEqual(['b.md']);
+});
+
+test('非法 sort → 400', async () => {
+    await expect(call(ownerId, '?sort=bogus')).rejects.toMatchObject({ status: 400 });
+});
+
+test('缺省 sort 默认 updated（回归锁）', async () => {
+    const a = await uploadDocument(ownerId, 'a.md', 'x', []);
+    const b = await uploadDocument(ownerId, 'b.md', 'y', []);
+    setOwnerViewedAt(b.id, null);
+    const T = 1_700_000_000_000;
+    setUpdatedAt(a.id, T);
+    setUpdatedAt(b.id, T + 5);
+    const r = await call(ownerId);
+    const body = await r.json() as { items: { name: string }[] };
+    expect(body.items.map((i) => i.name)).toEqual(['b.md', 'a.md']);
+});
