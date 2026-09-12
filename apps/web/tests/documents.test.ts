@@ -555,3 +555,14 @@ test('recentFiles sort=viewed：owner 隔离', async () => {
     setOwnerViewedAt(theirs.id, 1_700_000_000_000);
     expect(recentFiles(ownerId, 'viewed', null, 50)).toEqual([]);
 });
+
+test('recentFiles sort=viewed：仅文件，排除手工置了 owner_viewed_at 的 folder（纵深防御）', async () => {
+    const a = await uploadDocument(ownerId, 'a.md', 'x', ['fold']); // 顺带建 folder 'fold'
+    const folder = db.select().from(schema.documents)
+        .where(and(eq(schema.documents.ownerId, ownerId), eq(schema.documents.type, 'folder'))).get()!;
+    const T = 1_700_000_000_000;
+    setOwnerViewedAt(a.id, T);
+    setOwnerViewedAt(folder.id, T + 1); // 生产路径 folder 不可能拿到该值；手工置上仍不应入序
+    const rows = recentFiles(ownerId, 'viewed', null, 50);
+    expect(rows.map((r) => r.name)).toEqual(['a.md']);
+});
