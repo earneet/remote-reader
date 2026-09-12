@@ -1,7 +1,7 @@
 # 「最近浏览」视图（owner 阅读顺序）设计
 
 - **创建日期**: 2026-09-12
-- **状态**: 设计定稿，待写实现计划
+- **状态**: 设计定稿（subagent 审查 2 项修正已并入），待写实现计划
 - **上游文档**: [Remote Reader 设计文档](./2026-07-18-remote-reader-design.md)（§3 架构 / §5 文件管理器）、[「最近文档」平铺视图设计](./2026-09-08-recent-documents-view-design.md)（本视图复用其全部机制）
 
 ---
@@ -64,7 +64,7 @@ flowchart LR
     end
     SEG -->|"goto ?view=viewed"| L["+page.server.ts load<br/>recentFiles(sort=viewed)"]
     L --> RL
-    RL -->|"GET /api/recent?sort=viewed<br/>&amp;before=&lt;viewedAt&gt;_&lt;id&gt;"| API["/api/recent（+sort 参数）"]
+    RL -->|"GET /api/recent?sort=viewed<br/>&amp;before=&lt;ownerViewedAt&gt;_&lt;id&gt;"| API["/api/recent（+sort 参数）"]
     API --> RF["recentFiles(owner, sort, cursor, limit)<br/>索引 (owner_id, type, owner_viewed_at DESC, id DESC)"]
 ```
 
@@ -82,9 +82,9 @@ flowchart LR
 ### 5.2 列与索引（migration，按仓库三处同步规则）
 
 - `schema.ts`：`ownerViewedAt: integer('owner_viewed_at')`；新索引 `documents_owner_type_viewed_idx` on `(owner_id, type, owner_viewed_at DESC, id DESC)`（`sql\`${t.ownerViewedAt} DESC\`` 写法，同 updated 索引先例）
-- `SCHEMA_SQL`：CREATE TABLE 列定义 + `CREATE INDEX IF NOT EXISTS` 同名同列
+- `SCHEMA_SQL`：**仅** CREATE TABLE 列定义（新库建表即含列）。索引语句**不进 SCHEMA_SQL**——`ensureSchema()` 先 `exec(SCHEMA_SQL)` 再跑列兜底（`db/index.ts` 执行序），存量库上 CREATE TABLE 是 no-op，若索引先于 ALTER 执行，`CREATE INDEX ... ON (owner_viewed_at ...)` 会在 prepare 阶段因列不存在抛错，模块顶层的 `ensureSchema()` 直接炸掉启动。既有 SCHEMA_SQL 索引无此问题：它们只引用一切存量库都有的原始列
 - drizzle migration（`db:generate` 产出）
-- 运行时兜底：`db/index.ts` 新增 `ensureOwnerViewedColumn(target)`，紧随 `ensureTierColumns` 调用（同款 `PRAGMA table_info` + `ALTER TABLE`）——存量库平滑升级；独立命名而非并入 `ensureTierColumns`，保持函数名与内容语义一致
+- 运行时兜底：`db/index.ts` 新增 `ensureOwnerViewedColumn(target)`，紧随 `ensureTierColumns` 调用：同款 `PRAGMA table_info` + 缺列则 `ALTER TABLE`，随后**无条件** `CREATE INDEX IF NOT EXISTS documents_owner_type_viewed_idx`——索引创建统一收敛在列补齐之后，新库/存量库两路径皆安全；独立命名而非并入 `ensureTierColumns`，保持函数名与内容语义一致
 
 ### 5.3 `markOwnerViewed()`
 
@@ -118,7 +118,7 @@ export function markOwnerViewed(ownerId: string, docId: string): boolean
 ### 6.2 `GET /api/recent`（扩展）
 
 - 新参数 `sort`：`'updated'`（默认，向后兼容）| `'viewed'`，其他值 → 400（沿用 limit/before 的严格校验风格）
-- `before` 按 sort 解释：`<updatedAt>_<id>` 或 `<viewedAt>_<id>`（格式校验同现状）
+- `before` 按 sort 解释：`<updatedAt>_<id>` 或 `<ownerViewedAt>_<id>`（格式校验同现状）
 
 ## 7. 页面与组件
 
@@ -132,8 +132,8 @@ export function markOwnerViewed(ownerId: string, docId: string): boolean
 ### 7.2 文件管理器
 
 - `+page.server.ts` load：`view` 扩为 `'dir' | 'recent' | 'viewed'`（非法值回落 `'dir'`，同现状模式）；`view=viewed` 时返回 `viewed = recentFiles(owner, 'viewed', null, RECENT_PAGE_SIZE)`（内嵌 tags），其余分支 `viewed: []`（与 `recent` 字段平行）
-- `RecentDoc` 类型加 `viewedAt: number | null`
-- `RecentList.svelte` 加 `sort: 'updated' | 'viewed'` prop：`loadMore` / `reSync` 的请求带 `sort`、cursor 取对应字段（`updatedAt` / `viewedAt`）、相对时间列显示排序键对应时间（viewed 时「看过 · X 前」）；哨兵 / 行内操作 / re-sync 状态机零改动
+- `RecentDoc` 类型加 `ownerViewedAt: number | null`（直接沿用 drizzle 行键：两条 wire 路径 `...r` 零映射展开，避免另起 `viewedAt` 名导致映射漏写——`/api/recent` 路径的 `as` 断言会绕过类型检查把 bug 漏到运行时）
+- `RecentList.svelte` 加 `sort: 'updated' | 'viewed'` prop：`loadMore` / `reSync` 的请求带 `sort`、cursor 取对应字段（`updatedAt` / `ownerViewedAt`）、相对时间列显示排序键对应时间（viewed 时「看过 · X 前」）；哨兵 / 行内操作 / re-sync 状态机零改动
 - 分段控件三段：目录内容 | 最近文档 | 最近浏览；`view=viewed` 时 FolderTree `currentId=undefined`（同 recent 现状）、h1 =「最近浏览」、空状态「还没有浏览记录，打开过的文档会出现在这里。」、新建文件夹表单仅目录视图显示（现状不变）
 
 ## 8. 性能
@@ -157,16 +157,17 @@ export function markOwnerViewed(ownerId: string, docId: string): boolean
 | `documents.test.ts` | `recentFiles sort=viewed`：排序 / 排除未浏览 / cursor 排除自身 / owner 隔离 / 仅 file；`markOwnerViewed`：命中 / 非本人 false / folder false / 只动 `owner_viewed_at`（`updated_at`、`last_viewed_at` 不变） |
 | `recent-api.test.ts` | `sort=viewed` 返回与分页 / 非法 sort 400 / 默认 updated 回归 |
 | 新 `view-api.test.ts` | 无 session 401 / 不存在 404 / 他人文档 404 / folder 404 / 成功 204 且库内 `owner_viewed_at` 更新 |
+| 新（模式照抄 `tiering-schema.test.ts` 存量库用例） | 存量库升级回归：旧形状 documents（无 `owner_viewed_at` 列）→ `ensureSchema()` 无抛错 + 列与 `documents_owner_type_viewed_idx` 索引齐备 + 幂等重跑 |
 | load 测试 | `/` `view=viewed` 返回 viewed 且 children 空；`/d/` 返回 id；`/s/` ownerView 有/无 session 两态 + id |
 | 存量 | 现有 342 测试零回归（默认 `sort=updated` 行为不变是关键回归面） |
 
 ## 11. 实现清单（文件级）
 
-1. `schema.ts` + `SCHEMA_SQL` + migration + `ensureOwnerViewedColumn`：列 + `documents_owner_type_viewed_idx`
+1. `schema.ts` + `SCHEMA_SQL`（仅列）+ migration + `ensureOwnerViewedColumn`（ALTER 后建 `documents_owner_type_viewed_idx`）
 2. `documents.ts`：`markOwnerViewed()` + `recentFiles()` sort 参数 + 单测
 3. `routes/api/view/[id]/+server.ts`（新）+ 测试
 4. `routes/api/recent/+server.ts`：sort / before 扩展 + 测试
-5. `$lib/shared/view-beacon.ts`（新）；`$lib/shared/recent.ts`：`RecentDoc.viewedAt`
+5. `$lib/shared/view-beacon.ts`（新）；`$lib/shared/recent.ts`：`RecentDoc.ownerViewedAt`
 6. `routes/d/[id]`、`routes/s/[token]`：load 增返字段 + onMount 上报 + load 测试
 7. `routes/+page.server.ts`：`view=viewed` 分支 + 测试；`RecentList.svelte` sort prop；`+page.svelte` 三段控件接线
-8. 验证：svelte-check 0 错 + 全量测试绿 + 手动冒烟（登录开 `/d/` → 换浏览器登录 → 「最近浏览」浮顶；匿名开 `/s/` 不入序；列表页 hover 链接不入序）
+8. 验证：svelte-check 0 错 + 全量测试绿 + 手动冒烟（登录开 `/d/` → 换浏览器登录 → 「最近浏览」浮顶；匿名开 `/s/` 不入序；列表页 hover 链接不入序；「最近浏览」视图滚动翻页走通——loadMore cursor 用 `ownerViewedAt`）
