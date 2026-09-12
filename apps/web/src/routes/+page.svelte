@@ -71,7 +71,7 @@
     <aside class="fm-left">
         <FolderTree
             folders={treeFolders}
-            currentId={view === 'recent' ? undefined : currentDir}
+            currentId={view === 'dir' ? currentDir : undefined}
             selecting={movingId !== null}
             onSelect={movingId !== null ? pickTarget : selectDir}
             storageKey="rr:tree-expanded:{data.user?.id ?? 'anon'}"
@@ -84,15 +84,17 @@
     <section class="fm-right" bind:this={rightPane}>
         <div class="fm-head">
             <div class="fm-title">
-                <h1>{view === 'recent' ? '最近文档' : currentDir ? '子目录' : '根目录'}</h1>
+                <h1>{view === 'recent' ? '最近文档' : view === 'viewed' ? '最近浏览' : currentDir ? '子目录' : '根目录'}</h1>
                 <div class="segmented" role="group" aria-label="视图切换">
-                    <button type="button" class="seg-btn" class:active={view !== 'recent'}
-                        aria-pressed={view !== 'recent'} onclick={() => switchView('/')}>目录内容</button>
+                    <button type="button" class="seg-btn" class:active={view === 'dir'}
+                        aria-pressed={view === 'dir'} onclick={() => switchView('/')}>目录内容</button>
                     <button type="button" class="seg-btn" class:active={view === 'recent'}
                         aria-pressed={view === 'recent'} onclick={() => switchView('/?view=recent')}>最近文档</button>
+                    <button type="button" class="seg-btn" class:active={view === 'viewed'}
+                        aria-pressed={view === 'viewed'} onclick={() => switchView('/?view=viewed')}>最近浏览</button>
                 </div>
             </div>
-            {#if view !== 'recent'}
+            {#if view === 'dir'}
                 <form class="create-folder" method="POST" action="?/createFolder" use:enhance={() => async ({ result }) => { if (result.type === 'success') await invalidateAll(); }}>
                     <input name="name" placeholder="新文件夹名" required>
                     <button class="btn primary" type="submit">+ 新建文件夹</button>
@@ -103,6 +105,18 @@
             <RecentList
                 bind:this={recentRef}
                 initialRows={data.recent}
+                sort="updated"
+                folderById={folderById}
+                scrollRoot={rightPane}
+                movingId={movingId}
+                onStartMove={startMove}
+                onCancelMove={() => (movingId = null)}
+            />
+        {:else if view === 'viewed'}
+            <RecentList
+                bind:this={recentRef}
+                initialRows={data.viewed}
+                sort="viewed"
                 folderById={folderById}
                 scrollRoot={rightPane}
                 movingId={movingId}

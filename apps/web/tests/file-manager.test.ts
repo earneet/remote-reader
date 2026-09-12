@@ -224,3 +224,41 @@ test('load：view=recent 时 dir 参数被忽略（recent 优先级锁定）', a
     expect((data as any).currentDir).toBe(null);
     expect((data as any).recent.length).toBe(1);
 });
+
+// ===== load 视图分支（viewed，「最近浏览」spec §7.2） =====
+
+function setOwnerViewedAt(id: string, ts: number | null): void {
+    db.update(schema.documents).set({ ownerViewedAt: ts }).where(eq(schema.documents.id, id)).run();
+}
+
+test('load：view=viewed 返回按浏览序的 viewed 且 children/recent 空', async () => {
+    const ownerId = generateId();
+    insertUser(ownerId);
+    const a = await uploadDocument(ownerId, 'a.md', 'x', []);
+    const b = await uploadDocument(ownerId, 'b.md', 'y', []);
+    const T = 1_700_000_000_000;
+    setOwnerViewedAt(a.id, T);
+    setOwnerViewedAt(b.id, T + 1);
+    const data = await mod.load({ locals: { user: { id: ownerId } }, url: new URL('http://localhost/?view=viewed') } as any);
+    expect((data as any).view).toBe('viewed');
+    expect((data as any).children).toEqual([]);
+    expect((data as any).viewed.map((r: any) => r.name)).toEqual(['b.md', 'a.md']);
+    expect((data as any).recent).toEqual([]);
+});
+
+test('load：view=viewed 未浏览不出现；dir/recent 分支 viewed 为空', async () => {
+    const ownerId = generateId();
+    insertUser(ownerId);
+    await uploadDocument(ownerId, 'a.md', 'x', []);
+    const viewedData = await mod.load({ locals: { user: { id: ownerId } }, url: new URL('http://localhost/?view=viewed') } as any);
+    expect((viewedData as any).viewed).toEqual([]);
+    const dirData = await mod.load({ locals: { user: { id: ownerId } }, url: new URL('http://localhost/') } as any);
+    expect((dirData as any).viewed).toEqual([]);
+});
+
+test('load：view 非法值回落 dir（既有模式扩展）', async () => {
+    const ownerId = generateId();
+    insertUser(ownerId);
+    const data = await mod.load({ locals: { user: { id: ownerId } }, url: new URL('http://localhost/?view=bogus') } as any);
+    expect((data as any).view).toBe('dir');
+});

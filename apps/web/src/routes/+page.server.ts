@@ -17,23 +17,30 @@ function sanitizeSingleName(raw: string): string {
 
 export const load: PageServerLoad = async ({ locals, url }) => {
     if (!locals.user) redirect(302, '/login');
-    const view = url.searchParams.get('view') === 'recent' ? 'recent' as const : 'dir' as const;
-    // 公共数据：左树（folders/计数）+ 标签编辑（allTags）两视图都要（spec §6.1）
+    const rawView = url.searchParams.get('view');
+    const view = rawView === 'recent' ? 'recent' as const
+        : rawView === 'viewed' ? 'viewed' as const
+        : 'dir' as const;
+    // 公共数据：左树（folders/计数）+ 标签编辑（allTags）所有视图都要（spec §6.1）
     const folders = listFolders(locals.user.id);
     const folderCounts = folderChildCounts(locals.user.id);
     const allTags = listTags(locals.user.id);
-    if (view === 'recent') {
-        const rows = recentFiles(locals.user.id, 'updated', null, RECENT_PAGE_SIZE);
+    if (view === 'recent' || view === 'viewed') {
+        const rows = recentFiles(locals.user.id, view === 'viewed' ? 'viewed' : 'updated', null, RECENT_PAGE_SIZE);
         const tagsByDoc = listTagsForDocs(rows.map((r) => r.id), locals.user.id);
-        const recent = rows.map((r) => ({ ...r, tags: tagsByDoc.get(r.id) ?? [] }));
-        return { view, children: [], folders, currentDir: null, tagsByDoc, allTags, folderCounts, recent };
+        const list = rows.map((r) => ({ ...r, tags: tagsByDoc.get(r.id) ?? [] }));
+        return {
+            view, children: [], folders, currentDir: null, tagsByDoc, allTags, folderCounts,
+            recent: view === 'recent' ? list : [],
+            viewed: view === 'viewed' ? list : []
+        };
     }
     const dir = url.searchParams.get('dir');
     const parentId = dir && dir.length > 0 ? dir : null;
     const children = listChildren(locals.user.id, parentId);
     const fileIds = children.filter((c) => c.type === 'file').map((c) => c.id);
     const tagsByDoc = listTagsForDocs(fileIds, locals.user.id);
-    return { view, children, folders, currentDir: parentId, tagsByDoc, allTags, folderCounts, recent: [] };
+    return { view, children, folders, currentDir: parentId, tagsByDoc, allTags, folderCounts, recent: [], viewed: [] };
 };
 
 export const actions: Actions = {

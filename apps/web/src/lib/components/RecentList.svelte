@@ -1,12 +1,12 @@
 <script lang="ts">
     import { invalidateAll } from '$app/navigation';
-    import type { RecentDoc } from '$lib/shared/recent';
-    import { RECENT_PAGE_SIZE } from '$lib/shared/recent';
+    import { RECENT_PAGE_SIZE, type RecentDoc, type RecentSort } from '$lib/shared/recent';
     import { folderNamesOf, type TreeFolder } from '$lib/shared/folder-tree';
     import { formatRelative } from '$lib/shared/time';
 
     let {
         initialRows,
+        sort,
         folderById,
         scrollRoot,
         movingId,
@@ -14,6 +14,7 @@
         onCancelMove
     }: {
         initialRows: RecentDoc[];
+        sort: RecentSort;
         folderById: Map<string, TreeFolder>;
         scrollRoot: HTMLElement | null;
         movingId: string | null;
@@ -54,7 +55,9 @@
 
     function cursorOfLast(): string | null {
         const last = rows[rows.length - 1];
-        return last ? `${last.updatedAt}_${last.id}` : null;
+        if (!last) return null;
+        const ts = sort === 'viewed' ? last.ownerViewedAt : last.updatedAt;
+        return `${ts}_${last.id}`;
     }
 
     // 无限滚动追加（spec §6.2）；keyset 语义下按 id 去重防边界重复
@@ -65,7 +68,7 @@
         loadingMore = true;
         loadError = false;
         try {
-            const r = await fetch(`/api/recent?before=${encodeURIComponent(before)}`);
+            const r = await fetch(`/api/recent?sort=${sort}&before=${encodeURIComponent(before)}`);
             if (!r.ok) throw new Error(String(r.status));
             const data = await r.json() as { items: RecentDoc[] };
             const seen = new Set(rows.map((x) => x.id));
@@ -87,7 +90,7 @@
         // 替换会把深度缩回 limit（自愈：再滚动即恢复；排序单调性由 id 去重保证）
         const limit = Math.max(RECENT_PAGE_SIZE, rows.length);
         try {
-            const r = await fetch(`/api/recent?limit=${limit}`);
+            const r = await fetch(`/api/recent?sort=${sort}&limit=${limit}`);
             if (!r.ok) throw new Error(String(r.status));
             const data = await r.json() as { items: RecentDoc[] };
             rows = data.items;
@@ -146,7 +149,7 @@
 </script>
 
 {#if rows.length === 0}
-    <p class="muted empty">还没有文档，让 Agent 通过 MCP 上传吧。</p>
+    <p class="muted empty">{sort === 'viewed' ? '还没有浏览记录，打开过的文档会出现在这里。' : '还没有文档，让 Agent 通过 MCP 上传吧。'}</p>
 {:else}
     <ul class="items">
         {#each rows as item (item.id)}
@@ -168,7 +171,11 @@
                     {#if pathOf(item)}
                         <span class="path" title={pathOf(item)}>{pathOf(item)}</span>
                     {/if}
-                    <span class="time" title={new Date(item.updatedAt).toLocaleString()}>{formatRelative(item.updatedAt)}</span>
+                    {#if sort === 'viewed'}
+                        <span class="time" title={new Date(item.ownerViewedAt ?? item.updatedAt).toLocaleString()}>看过 · {formatRelative(item.ownerViewedAt ?? item.updatedAt)}</span>
+                    {:else}
+                        <span class="time" title={new Date(item.updatedAt).toLocaleString()}>{formatRelative(item.updatedAt)}</span>
+                    {/if}
                     <span class="doc-tags">
                         {#each item.tags as tg (tg.id)}
                             <span class="chip-static">{tg.name}</span>
