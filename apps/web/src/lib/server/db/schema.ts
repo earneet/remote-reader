@@ -34,12 +34,17 @@ export const documents = sqliteTable('documents', {
     updatedAt: integer('updated_at').notNull(),
     storageTier: text('storage_tier', { enum: ['hot', 'cold'] }).notNull().default('hot'),
     lastViewedAt: integer('last_viewed_at'),
-    archivedAt: integer('archived_at')
+    archivedAt: integer('archived_at'),
+    // 「最近浏览」信号（spec §5.1）：仅 owner 真实浏览（beacon 写入）；
+    // 与 last_viewed_at（分层信号：任何人任何访问）语义分工，互不替代
+    ownerViewedAt: integer('owner_viewed_at')
 }, (t) => ({
     ownerParentIdx: index('documents_owner_parent_idx').on(t.ownerId, t.parentId),
     ownerParentNameTypeIdx: index('documents_owner_parent_name_type_idx').on(t.ownerId, t.parentId, t.name, t.type),
     ownerTypeUpdatedIdx: index('documents_owner_type_updated_idx')
-        .on(t.ownerId, t.type, sql`${t.updatedAt} DESC`, sql`${t.id} DESC`)
+        .on(t.ownerId, t.type, sql`${t.updatedAt} DESC`, sql`${t.id} DESC`),
+    ownerTypeViewedIdx: index('documents_owner_type_viewed_idx')
+        .on(t.ownerId, t.type, sql`${t.ownerViewedAt} DESC`, sql`${t.id} DESC`)
 }));
 
 export const shareLinks = sqliteTable('share_links', {

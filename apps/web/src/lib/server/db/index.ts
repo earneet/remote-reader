@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS documents (
     storage_tier text NOT NULL DEFAULT 'hot',
     last_viewed_at integer,
     archived_at integer,
+    owner_viewed_at integer,
     FOREIGN KEY (owner_id) REFERENCES users(id) ON UPDATE no action ON DELETE no action
 );
 CREATE INDEX IF NOT EXISTS documents_owner_parent_idx ON documents (owner_id, parent_id);
@@ -104,9 +105,21 @@ export function ensureTierColumns(target: SqliteDb): void {
     }
 }
 
+// 「最近浏览」列（spec §5.2）：索引创建收敛在列补齐之后——若索引进 SCHEMA_SQL，
+// 存量库（表已存在、CREATE TABLE 为 no-op）会在 prepare 阶段因列不存在抛错，启动即崩
+export function ensureOwnerViewedColumn(target: SqliteDb): void {
+    const cols = target.prepare('PRAGMA table_info(documents)').all() as { name: string }[];
+    const names = new Set(cols.map((c) => c.name));
+    if (!names.has('owner_viewed_at')) {
+        target.exec('ALTER TABLE documents ADD COLUMN owner_viewed_at integer');
+    }
+    target.exec('CREATE INDEX IF NOT EXISTS documents_owner_type_viewed_idx ON documents (owner_id, type, owner_viewed_at DESC, id DESC)');
+}
+
 export function ensureSchema(): void {
     sqlite.exec(SCHEMA_SQL);
     ensureTierColumns(sqlite);
+    ensureOwnerViewedColumn(sqlite);
 }
 ensureSchema();
 void import('../fts').then((m) => m.backfillFts()).catch((e) => console.warn('[backfillFts] failed', e));

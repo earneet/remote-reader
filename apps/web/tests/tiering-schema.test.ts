@@ -1,6 +1,6 @@
 import { test, expect } from 'vitest';
 import Database from 'better-sqlite3';
-import { ensureTierColumns, sqlite } from '../src/lib/server/db';
+import { ensureOwnerViewedColumn, ensureTierColumns, sqlite } from '../src/lib/server/db';
 
 const OLD_DOCUMENTS_SQL = `CREATE TABLE documents (
     id text PRIMARY KEY NOT NULL,
@@ -37,4 +37,28 @@ test('旧库经 ensureTierColumns 升级出三列且幂等，存量行默认 hot
               VALUES ('d1', 'u1', 'a.md', 'file', 1, 1)`);
     const row = raw.prepare('SELECT storage_tier FROM documents WHERE id = ?').get('d1') as { storage_tier: string };
     expect(row.storage_tier).toBe('hot');
+});
+
+// ===== owner_viewed_at（「最近浏览」spec §5.2/§10） =====
+
+test('主库 documents 表含 owner_viewed_at 列与 documents_owner_type_viewed_idx 索引', () => {
+    const cols = sqlite.prepare('PRAGMA table_info(documents)').all() as { name: string }[];
+    expect(cols.map((c) => c.name)).toContain('owner_viewed_at');
+    const idx = sqlite.prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'documents_owner_type_viewed_idx'"
+    ).get();
+    expect(idx).toBeTruthy();
+});
+
+test('旧库（无 owner_viewed_at）经 ensureOwnerViewedColumn 升级出列与索引且幂等', () => {
+    const raw = new Database(':memory:');
+    raw.exec(OLD_DOCUMENTS_SQL);
+    ensureOwnerViewedColumn(raw);
+    ensureOwnerViewedColumn(raw); // 幂等重跑
+    const cols = raw.prepare('PRAGMA table_info(documents)').all() as { name: string }[];
+    expect(cols.map((c) => c.name)).toContain('owner_viewed_at');
+    const idx = raw.prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'documents_owner_type_viewed_idx'"
+    ).get();
+    expect(idx).toBeTruthy();
 });
