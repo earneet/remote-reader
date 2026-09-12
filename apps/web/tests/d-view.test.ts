@@ -93,3 +93,13 @@ test('load 返回文档标签字段（数组）', async () => {
     expect(Array.isArray(result.tags)).toBe(true);
     expect(result.tags.length).toBe(0);
 });
+
+test('load 返回 id（「最近浏览」beacon 用，spec §7.1）', async () => {
+    const ownerId = generateId();
+    insertUser(ownerId);
+    const diskPath = join(TMP, ownerId, 'v.md');
+    await writeFile(diskPath, '# v');
+    const docId = insertDoc(ownerId, 'v.md', diskPath);
+    const result = (await load(mkEvent(ownerId, docId))) as { id: string };
+    expect(result.id).toBe(docId);
+});

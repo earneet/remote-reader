@@ -8,7 +8,7 @@ import { FileNotFoundError } from '$server/storage';
 import { ArchiveUnavailableError, ObjectNotFoundError } from '$server/object-store';
 import { renderMarkdown } from '$server/markdown';
 
-export const load: PageServerLoad = async ({ params, setHeaders }) => {
+export const load: PageServerLoad = async ({ locals, params, setHeaders }) => {
     const documentId = getDocumentIdByShareToken(params.token);
     if (!documentId) error(404, '链接已失效或不存在');
 
@@ -27,5 +27,7 @@ export const load: PageServerLoad = async ({ params, setHeaders }) => {
     const html = await renderMarkdown(content);
     // M1: 免登录查看页禁缓存——撤销 share token 后浏览器/CDN/bfcache 不再展示已撤销内容
     setHeaders({ 'cache-control': 'no-store' });
-    return { title: doc.name, html };
+    // 「最近浏览」写入侧（spec §7.1）：owner 登录态打开分享链接也算一次浏览——
+    // hooks 全局解析 session，/s/ 免登录特性不变（无 session → ownerView=false，客户端不上报）
+    return { id: doc.id, ownerView: locals.user?.id === doc.ownerId, title: doc.name, html };
 };

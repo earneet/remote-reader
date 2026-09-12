@@ -20,7 +20,7 @@ function getDocRow() {
 }
 
 function callShareLoad(token: string) {
-    return shareLoad({ params: { token }, setHeaders: () => {} } as unknown as Parameters<typeof shareLoad>[0]);
+    return shareLoad({ locals: { user: null }, params: { token }, setHeaders: () => {} } as unknown as Parameters<typeof shareLoad>[0]);
 }
 
 beforeEach(async () => {

@@ -23,7 +23,7 @@ export const load: PageServerLoad = async ({ locals, params, setHeaders }) => {
     const html = await renderMarkdown(content);
     const tags = listTagsForDoc(doc.id, locals.user.id);
     setHeaders({ 'cache-control': 'no-store' });
-    return { title: doc.name, html, tags, updatedAt: doc.updatedAt, sizeBytes: doc.sizeBytes };
+    return { id: doc.id, title: doc.name, html, tags, updatedAt: doc.updatedAt, sizeBytes: doc.sizeBytes };
 };
 
 export const actions: Actions = {

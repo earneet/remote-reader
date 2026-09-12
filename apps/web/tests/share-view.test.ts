@@ -35,7 +35,7 @@ test('有效 token 返回渲染 html（#32）', async () => {
         createdAt: Date.now(), updatedAt: Date.now()
     }).run();
     const { token } = await createShareLink(docId);
-    const result = (await load({ params: { token }, setHeaders: () => {} } as unknown as Parameters<typeof load>[0])) as { title: string; html: string };
+    const result = (await load({ locals: { user: null }, params: { token }, setHeaders: () => {} } as unknown as Parameters<typeof load>[0])) as { title: string; html: string };
     expect(result.title).toBe('a.md');
     expect(result.html).toContain('<h1>Title</h1>');
 });
@@ -59,4 +59,29 @@ test('磁盘文件缺失 → 404（M11）', async () => {
     await expect(
         load({ params: { token }, setHeaders: () => {} } as unknown as Parameters<typeof load>[0])
     ).rejects.toMatchObject({ status: 404 });
+});
+
+// ===== 「最近浏览」写入侧（spec §7.1） =====
+
+test('load 返回 id 与 ownerView：owner session → true，无 session → false', async () => {
+    const ownerId = generateId();
+    insertUser(ownerId);
+    const diskPath = join(process.env.DATA_DIR ?? './data/documents', ownerId, 'a.md');
+    await writeFile(diskPath, '# T');
+    const docId = generateId();
+    db.insert(schema.documents).values({
+        id: docId, ownerId, parentId: null, name: 'a.md', type: 'file',
+        storagePath: diskPath, contentHash: null, sizeBytes: null,
+        createdAt: Date.now(), updatedAt: Date.now()
+    }).run();
+    const { token } = await createShareLink(docId);
+    const hit = (await load({
+        locals: { user: { id: ownerId } }, params: { token }, setHeaders: () => {}
+    } as unknown as Parameters<typeof load>[0])) as { id: string; ownerView: boolean };
+    expect(hit.id).toBe(docId);
+    expect(hit.ownerView).toBe(true);
+    const anon = (await load({
+        locals: { user: null }, params: { token }, setHeaders: () => {}
+    } as unknown as Parameters<typeof load>[0])) as { ownerView: boolean };
+    expect(anon.ownerView).toBe(false);
 });
