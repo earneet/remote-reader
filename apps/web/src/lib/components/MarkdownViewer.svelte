@@ -73,6 +73,7 @@
     }
     .markdown-body :global(pre) {
         padding: 1rem;
+        background: var(--rr-code-bg);
         border-radius: 8px;
         overflow-x: auto;
         max-width: 100%;

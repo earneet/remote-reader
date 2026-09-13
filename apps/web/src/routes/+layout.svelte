@@ -1,4 +1,5 @@
 <script lang="ts">
+    import '../styles/theme.css';
     import { page } from '$app/state';
     let { data, children } = $props();
     const showNav = $derived(

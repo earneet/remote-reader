@@ -1,0 +1,100 @@
+/* 全站主题变量单源（spec: docs/superpowers/specs/2026-09-13-reader-theme-system-design.md）
+   :root = 浅色默认；[data-theme="dark"] = 深色覆盖。
+   消费方一律 var(--rr-*)，页面组件禁止再写死主题色值。 */
+
+:root {
+    color-scheme: light;
+    /* 基础（原 /s/[token] 定义，值保真；--rr-code-bg 精修为浅色） */
+    --rr-bg: #f6f8fa;
+    --rr-card-bg: #ffffff;
+    --rr-card-border: transparent;
+    --rr-text: #1f2328;
+    --rr-text-muted: #57606a;
+    --rr-link: #0969da;
+    --rr-border: #d0d7de;
+    --rr-border-soft: #eaecef;
+    --rr-inline-code-bg: #eff2f5;
+    --rr-inline-code-text: #bc4b00;
+    --rr-code-bg: #f6f8fa;
+    --rr-code-text: #1f2328;
+    --rr-shadow: 0 1px 3px rgba(0, 0, 0, 0.05), 0 10px 28px rgba(0, 0, 0, 0.06);
+    --rr-toggle-bg: #eaeef1;
+    /* 管理页面语义色 */
+    --rr-hover-bg: #f3f4f6;
+    --rr-btn-bg: #ffffff;
+    --rr-btn-border: #d0d7de;
+    --rr-btn-text: #1f2328;
+    --rr-btn-primary-bg: #1f883d;
+    --rr-btn-primary-hover: #1a7f37;
+    --rr-btn-primary-text: #ffffff;
+    --rr-accent: #0969da;
+    --rr-accent-hover: #0860ca;
+    --rr-accent-soft: #ddf4ff;
+    --rr-input-bg: #ffffff;
+    --rr-input-border: #d0d7de;
+    --rr-focus-ring: rgba(9, 105, 218, 0.2);
+    --rr-danger: #cf222e;
+    --rr-danger-soft: #ffebe9;
+    --rr-danger-border: #ff8182;
+    --rr-success: #2da44e;
+    --rr-warning-soft: #fff8c5;
+    --rr-warning-border: #d4a72c;
+}
+
+[data-theme="dark"] {
+    color-scheme: dark;
+    --rr-bg: #0d1117;
+    --rr-card-bg: #161b22;
+    --rr-card-border: #21262d;
+    --rr-text: #c9d1d9;
+    --rr-text-muted: #8b949e;
+    --rr-link: #58a6ff;
+    --rr-border: #21262d;
+    --rr-border-soft: #21262d;
+    --rr-inline-code-bg: rgba(110, 118, 129, 0.28);
+    --rr-inline-code-text: #e3b341;
+    --rr-code-bg: #0d1117;
+    --rr-code-text: #e1e4e8;
+    --rr-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+    --rr-toggle-bg: #21262d;
+
+    --rr-hover-bg: #21262d;
+    --rr-btn-bg: #21262d;
+    --rr-btn-border: #30363d;
+    --rr-btn-text: #c9d1d9;
+    --rr-btn-primary-bg: #238636;
+    --rr-btn-primary-hover: #2ea043;
+    --rr-btn-primary-text: #ffffff;
+    --rr-accent: #1f6feb;
+    --rr-accent-hover: #388bfd;
+    --rr-accent-soft: rgba(56, 139, 253, 0.16);
+    --rr-input-bg: #0d1117;
+    --rr-input-border: #30363d;
+    --rr-focus-ring: rgba(88, 166, 255, 0.35);
+    --rr-danger: #f85149;
+    --rr-danger-soft: rgba(248, 81, 73, 0.12);
+    --rr-danger-border: rgba(248, 81, 73, 0.4);
+    --rr-success: #3fb950;
+    --rr-warning-soft: rgba(187, 128, 9, 0.15);
+    --rr-warning-border: #bb8009;
+}
+
+/* body 全局承接：/d/、login 等无页面级底色的路由在暗色下不再白底刺眼（G2） */
+body {
+    background: var(--rr-bg);
+    color: var(--rr-text);
+}
+
+/* Shiki 双主题取色：dual themes(defaultColor:false) 输出仅含变量，
+   这里按 data-theme 取值；pre 背景走 --rr-code-bg（shiki 不再输出内联背景）。 */
+pre.shiki,
+pre.shiki span {
+    color: var(--shiki-light);
+}
+pre.shiki {
+    background: var(--rr-code-bg);
+}
+[data-theme="dark"] pre.shiki,
+[data-theme="dark"] pre.shiki span {
+    color: var(--shiki-dark);
+}
