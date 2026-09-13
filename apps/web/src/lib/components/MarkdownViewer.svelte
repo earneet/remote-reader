@@ -11,7 +11,12 @@
     async function enhanceKatex(root: HTMLElement): Promise<void> {
         const nodes = Array.from(root.querySelectorAll<HTMLElement>('.math.inline, .math.block'));
         if (nodes.length === 0) return;
-        const katex = (await import('katex')).default;
+        // katex.min.css 必须与 JS 同步懒加载：.katex-mathml 无障碍块靠它视觉隐藏，
+        // 缺失时公式下方会暴露线性源文本（视觉验收 F2 存量缺陷修复）
+        const [katex] = await Promise.all([
+            import('katex').then((m) => m.default),
+            import('katex/dist/katex.min.css')
+        ]);
         for (const el of nodes) {
             try {
                 el.innerHTML = katex.renderToString(el.textContent ?? '', {
