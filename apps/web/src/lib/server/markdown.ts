@@ -3,7 +3,8 @@ import { createHighlighter } from 'shiki';
 import type { Highlighter } from 'shiki';
 import { createHash } from 'node:crypto';
 
-const THEME = 'github-dark';
+// 双主题：一份 HTML 携带两套取色变量，data-theme 切换纯 CSS，RENDER_CACHE 不受影响
+const THEMES = { light: 'github-light', dark: 'github-dark' } as const;
 const LANGS = [
     'typescript',
     'javascript',
@@ -50,7 +51,7 @@ let highlighterPromise: Promise<Highlighter> | null = null;
 
 function getHighlighter(): Promise<Highlighter> {
     if (!highlighterPromise) {
-        highlighterPromise = createHighlighter({ langs: LANGS, themes: [THEME] }).catch(
+        highlighterPromise = createHighlighter({ langs: LANGS, themes: [THEMES.light, THEMES.dark] }).catch(
             (e) => {
                 highlighterPromise = null;
                 throw e;
@@ -75,16 +76,22 @@ async function getMarkdown(): Promise<MarkdownIt> {
             const isAscii = !lang || lang === 'text';
             const kind = isAscii ? 'ascii' : 'prose';
             const stamp = (html: string) => html.replace(/<pre\b/, `<pre data-rr-code="${kind}"`);
+            // dual themes + defaultColor:false：token 输出 --shiki-light/--shiki-dark 变量（无内联默认色/背景），
+            // 取色与背景由 styles/theme.css 按 data-theme 控制（Task 5 接线）
+            const dual = {
+                themes: { light: THEMES.light, dark: THEMES.dark },
+                defaultColor: false
+            } as const;
             try {
-                return stamp(hl.codeToHtml(code, { lang: lang || 'text', theme: THEME }));
+                return stamp(hl.codeToHtml(code, { lang: lang || 'text', ...dual }));
             } catch (e) {
                 console.error('[markdown] shiki highlight failed for lang', lang, e);
-                // 未预载语言：用 text 重渲染，保证与正常代码块一致的深色外观，而非透明裸块
+                // 未预载语言：用 text 重渲染，保证与正常代码块一致的双主题外观
                 try {
-                    return stamp(hl.codeToHtml(code, { lang: 'text', theme: THEME }));
+                    return stamp(hl.codeToHtml(code, { lang: 'text', ...dual }));
                 } catch {
                     const esc = code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-                    return `<pre data-rr-code="${kind}" class="shiki ${THEME}" style="background-color:#24292e;color:#e1e4e8"><code>${esc}</code></pre>`;
+                    return `<pre data-rr-code="${kind}" class="shiki" style="color:var(--shiki-light);--shiki-dark:#e1e4e8"><code>${esc}</code></pre>`;
                 }
             }
         }

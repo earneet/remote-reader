@@ -26,19 +26,21 @@ test('代码块带 shiki 高亮', async () => {
     expect(html).toContain('shiki');
 });
 
-test('常用语言有 shiki 语法着色（tsx/cpp 等不再降级为无色裸块）', async () => {
+test('常用语言有 shiki 双主题着色（--shiki-light/--shiki-dark 变量输出）', async () => {
     const tsx = await renderMarkdown('```tsx\nconst App = () => <div/>;\n```');
     expect(tsx).toContain('shiki');
-    expect(tsx).toMatch(/color:#/i);
+    expect(tsx).toContain('--shiki-light');
+    expect(tsx).toContain('--shiki-dark');
     const cpp = await renderMarkdown('```cpp\nint main(){return 0;}\n```');
     expect(cpp).toContain('shiki');
-    expect(cpp).toMatch(/color:#/i);
+    expect(cpp).toContain('--shiki-light');
+    expect(cpp).toContain('--shiki-dark');
 });
 
-test('未预载语言安全降级为统一深色代码块（不抛错、内容不丢失、带 shiki 外观）', async () => {
+test('未预载语言安全降级为双主题代码块（不抛错、内容不丢失、带 shiki 外观）', async () => {
     const html = await renderMarkdown('```brainfuck\n++++++++[>++++++++<-]>\n```');
     expect(html).toContain('shiki');
-    expect(html).toMatch(/background-color:/i);
+    expect(html).toContain('--shiki-dark');
     expect(html).toContain('++++++++');
 });
 
