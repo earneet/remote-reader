@@ -1,7 +1,6 @@
 import { test, expect } from 'vitest';
 import {
     resolveTheme,
-    toggleTheme,
     parseThemePref,
     cycleTheme,
     THEME_STORAGE_KEY
@@ -38,11 +37,6 @@ test('cycleTheme: auto → light → dark → auto 循环', () => {
         seq.push(pref);
     }
     expect(seq).toEqual(['light', 'dark', 'auto']);
-});
-
-test('toggleTheme: 双向切换（过渡期保留，Task 3 移除）', () => {
-    expect(toggleTheme('dark')).toBe('light');
-    expect(toggleTheme('light')).toBe('dark');
 });
 
 test('THEME_STORAGE_KEY 为约定键名', () => {

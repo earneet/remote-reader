@@ -1,46 +1,82 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
-    import { toggleTheme, type Theme, THEME_STORAGE_KEY } from '$lib/shared/theme';
+    import { parseThemePref, resolveTheme, cycleTheme, type ThemePref, THEME_STORAGE_KEY } from '$lib/shared/theme';
 
-    let current = $state<Theme>('light');
+    let pref = $state<ThemePref>('auto');
+    let effective = $state<'light' | 'dark'>('light');
     let observer: MutationObserver | null = null;
+    let mq: MediaQueryList | null = null;
+    let onSystemChange: (() => void) | null = null;
 
-    function readCurrent(): Theme {
-        return document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
+    function prefersDark(): boolean {
+        return typeof window.matchMedia === 'function'
+            && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    }
+
+    function apply(): void {
+        effective = resolveTheme(pref, prefersDark());
+        document.documentElement.dataset.theme = effective;
     }
 
     function onClick(): void {
-        const next = toggleTheme(current);
-        document.documentElement.dataset.theme = next;
+        pref = cycleTheme(pref);
         try {
-            localStorage.setItem(THEME_STORAGE_KEY, next);
+            localStorage.setItem(THEME_STORAGE_KEY, pref);
         } catch (e) {
             // 隐私模式等写入失败，忽略：DOM 已更新，本次会话仍生效
         }
-        current = next;
+        apply();
     }
 
     onMount(() => {
-        current = readCurrent();
+        try {
+            pref = parseThemePref(localStorage.getItem(THEME_STORAGE_KEY));
+        } catch (e) {
+            pref = 'auto';
+        }
+        apply();
+        // 多实例/外部改动同步（如 dev 时 HMR）
         observer = new MutationObserver(() => {
-            current = readCurrent();
+            effective = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
         });
         observer.observe(document.documentElement, {
             attributes: true,
             attributeFilter: ['data-theme']
         });
+        // auto 档：系统切换实时跟随
+        if (typeof window.matchMedia === 'function') {
+            mq = window.matchMedia('(prefers-color-scheme: dark)');
+            onSystemChange = () => {
+                if (pref === 'auto') apply();
+            };
+            mq.addEventListener('change', onSystemChange);
+        }
     });
-    onDestroy(() => observer?.disconnect());
+    onDestroy(() => {
+        observer?.disconnect();
+        if (mq && onSystemChange) mq.removeEventListener('change', onSystemChange);
+    });
+
+    const LABELS: Record<ThemePref, string> = {
+        auto: '主题：自动（跟随系统）',
+        light: '主题：浅色',
+        dark: '主题：深色'
+    };
 </script>
 
 <button
     type="button"
     class="rr-theme-toggle"
     onclick={onClick}
-    aria-label="切换深浅色主题"
-    title={current === 'dark' ? '切换到浅色' : '切换到深色'}
+    aria-label="{LABELS[pref]}，点击切换"
+    title="{LABELS[pref]}，点击切换"
 >
-    {#if current === 'dark'}
+    {#if pref === 'auto'}
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 3a9 9 0 0 1 0 18Z" fill="currentColor" stroke="none" />
+        </svg>
+    {:else if pref === 'dark'}
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="4.2" />
             <path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8" />

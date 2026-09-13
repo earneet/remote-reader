@@ -18,8 +18,3 @@ export function resolveTheme(pref: ThemePref, prefersDark: boolean): Theme {
 export function cycleTheme(pref: ThemePref): ThemePref {
     return pref === 'auto' ? 'light' : pref === 'light' ? 'dark' : 'auto';
 }
-
-// 过渡期保留：Task 3 的 ThemeToggle 切换到 cycleTheme 后随同删除
-export function toggleTheme(current: Theme): Theme {
-    return current === 'dark' ? 'light' : 'dark';
-}
