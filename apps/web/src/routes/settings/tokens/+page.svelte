@@ -64,10 +64,10 @@
 <style>
     /* 页面自身留边距（勿用 :global(body)——会连 topnav 一起缩进，且各页互相污染） */
     .settings-page { font-family: system-ui, sans-serif; padding: 1.5rem; }
-    .reveal { background: #fff8c5; border: 1px solid #d4a72c; padding: 1rem; border-radius: 6px; margin: 1rem 0; }
-    .reveal code { display: block; word-break: break-all; padding: 0.5rem; background: #fff; border-radius: 4px; margin: 0.5rem 0; }
+    .reveal { background: var(--rr-warning-soft); border: 1px solid var(--rr-warning-border); padding: 1rem; border-radius: 6px; margin: 1rem 0; }
+    .reveal code { display: block; word-break: break-all; padding: 0.5rem; background: var(--rr-card-bg); border-radius: 4px; margin: 0.5rem 0; }
     .reveal-actions { display: flex; gap: 0.5rem; align-items: center; }
     form { margin: 1rem 0; }
     table { border-collapse: collapse; margin-top: 1rem; }
-    th, td { border: 1px solid #d0d7de; padding: 0.4rem 0.8rem; text-align: left; }
+    th, td { border: 1px solid var(--rr-border); padding: 0.4rem 0.8rem; text-align: left; }
 </style>

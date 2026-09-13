@@ -41,7 +41,7 @@
 <style>
     /* 页面自身留边距（勿用 :global(body)——会连 topnav 一起缩进，且各页互相污染） */
     .settings-page { font-family: system-ui, sans-serif; padding: 1.5rem; }
-    .muted { color: #57606a; }
+    .muted { color: var(--rr-text-muted); }
     table { border-collapse: collapse; }
-    th, td { border: 1px solid #d0d7de; padding: 0.4rem 0.8rem; text-align: left; }
+    th, td { border: 1px solid var(--rr-border); padding: 0.4rem 0.8rem; text-align: left; }
 </style>

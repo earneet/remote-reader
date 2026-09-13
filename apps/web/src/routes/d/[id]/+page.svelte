@@ -43,11 +43,11 @@
 <MarkdownViewer html={data.html} />
 
 <style>
-    .back { display: inline-block; max-width: 760px; margin: 0 auto; padding: 1rem 2rem 0; color: #0969da; }
+    .back { display: inline-block; max-width: 760px; margin: 0 auto; padding: 1rem 2rem 0; color: var(--rr-link); }
     .tag-bar { max-width: 760px; margin: 0 auto; padding: 0.5rem 2rem; display: flex; flex-wrap: wrap; gap: 0.3rem; align-items: center; }
-    .chip-static { display: inline-block; padding: 0 0.5rem; background: #ddf4ff; color: #0969da; border-radius: 999px; font-size: 0.78rem; }
-    .btn { border: 1px solid #d0d7de; background: #fff; color: #1f2328; cursor: pointer; padding: 0.3rem 0.7rem; border-radius: 5px; font-size: 0.8rem; }
+    .chip-static { display: inline-block; padding: 0 0.5rem; background: var(--rr-accent-soft); color: var(--rr-link); border-radius: 999px; font-size: 0.78rem; }
+    .btn { border: 1px solid var(--rr-btn-border); background: var(--rr-btn-bg); color: var(--rr-btn-text); cursor: pointer; padding: 0.3rem 0.7rem; border-radius: 5px; font-size: 0.8rem; }
     .btn.sm { padding: 0.25rem 0.6rem; }
-    .btn.primary { background: #1f883d; color: #fff; border-color: #1f883d; }
-    .tag-bar input { padding: 0.25rem 0.5rem; border: 1px solid #0969da; border-radius: 5px; font-size: 0.82rem; min-width: 14rem; }
+    .btn.primary { background: var(--rr-btn-primary-bg); color: var(--rr-btn-primary-text); border-color: var(--rr-btn-primary-bg); }
+    .tag-bar input { padding: 0.25rem 0.5rem; border: 1px solid var(--rr-accent); border-radius: 5px; font-size: 0.82rem; min-width: 14rem; background: var(--rr-input-bg); color: var(--rr-text); }
 </style>

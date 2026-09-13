@@ -73,15 +73,15 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        background: #f6f8fa;
+        background: var(--rr-bg);
         font-family: system-ui, -apple-system, sans-serif;
         padding: 1rem;
     }
 
     .card {
         width: min(380px, calc(100vw - 2rem));
-        background: #fff;
-        border: 1px solid #d0d7de;
+        background: var(--rr-card-bg);
+        border: 1px solid var(--rr-card-border);
         border-radius: 12px;
         box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
         padding: 2.5rem;
@@ -99,7 +99,7 @@
     .brand-name {
         font-size: 1.25rem;
         font-weight: 600;
-        color: #1f2328;
+        color: var(--rr-text);
     }
 
     .title {
@@ -107,16 +107,16 @@
         text-align: center;
         font-size: 1.5rem;
         font-weight: 600;
-        color: #1f2328;
+        color: var(--rr-text);
     }
 
     .alert {
         margin: 0;
-        background: #ffebe9;
-        border: 1px solid #ff8182;
+        background: var(--rr-danger-soft);
+        border: 1px solid var(--rr-danger-border);
         border-radius: 6px;
         padding: 0.6rem 0.75rem;
-        color: #cf222e;
+        color: var(--rr-danger);
         font-size: 0.9rem;
     }
 
@@ -136,34 +136,34 @@
         display: block;
         font-size: 0.875rem;
         font-weight: 500;
-        color: #1f2328;
+        color: var(--rr-text);
         margin-bottom: 0.375rem;
     }
 
     input {
         width: 100%;
         padding: 0.6rem 0.75rem;
-        border: 1px solid #d0d7de;
+        border: 1px solid var(--rr-input-border);
         border-radius: 6px;
         font-size: 0.95rem;
         box-sizing: border-box;
-        background: #fff;
-        color: #1f2328;
+        background: var(--rr-input-bg);
+        color: var(--rr-text);
         font-family: inherit;
     }
 
     input:focus {
         outline: none;
-        border-color: #0969da;
-        box-shadow: 0 0 0 3px rgba(9, 105, 218, 0.15);
+        border-color: var(--rr-accent);
+        box-shadow: 0 0 0 3px var(--rr-focus-ring);
     }
 
     .submit {
         width: 100%;
         margin-top: 1.25rem;
         padding: 0.65rem 1rem;
-        background: #0969da;
-        color: #fff;
+        background: var(--rr-accent);
+        color: #ffffff;
         border: none;
         border-radius: 6px;
         font-size: 0.95rem;
@@ -173,7 +173,7 @@
     }
 
     .submit:hover {
-        background: #0860ca;
+        background: var(--rr-accent-hover);
     }
 
     .submit:disabled {
@@ -185,11 +185,11 @@
         margin-top: 1.25rem;
         text-align: center;
         font-size: 0.875rem;
-        color: #57606a;
+        color: var(--rr-text-muted);
     }
 
     .footer a {
-        color: #0969da;
+        color: var(--rr-link);
         text-decoration: none;
     }
 

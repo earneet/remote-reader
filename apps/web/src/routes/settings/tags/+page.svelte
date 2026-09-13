@@ -47,6 +47,6 @@
     /* 页面自身留边距（勿用 :global(body)——会连 topnav 一起缩进，且各页互相污染） */
     .settings-page { font-family: system-ui, sans-serif; padding: 1.5rem; }
     table { border-collapse: collapse; margin-top: 1rem; }
-    th, td { border: 1px solid #d0d7de; padding: 0.4rem 0.8rem; text-align: left; }
+    th, td { border: 1px solid var(--rr-border); padding: 0.4rem 0.8rem; text-align: left; }
     form { display: inline-flex; gap: 0.3rem; }
 </style>
