@@ -10,7 +10,7 @@
 
 1. **代码高亮单主题**：Shiki 服务端硬编码 `github-dark`（`apps/web/src/lib/server/markdown.ts` 的 `THEME` 常量），SSR 输出内联深色样式——浅色模式下代码块仍是突兀的深色块，与页面调性不协调。
 2. **主题变量分散**：`--rr-*` CSS 变量定义只存在于 `/s/[token]/+page.svelte`（26 处）和 `MarkdownViewer.svelte`（2 处），没有单源。
-3. **管理页面未接入主题**：全站 8 个路由文件共 75 处硬编码颜色（文件管理器 20、login/register 各 15、search 14、`/d/[id]` 4、`+layout.svelte` 4、settings/tokens 2、settings/shares 1），深色系统下这些页面依旧白底刺眼。
+3. **管理页面未接入主题**：全站 9 个路由文件的页面样式散布大量硬编码颜色（含 border 色值的宽口径 grep 匹配 97 行；文件管理器、login/register、search、`/d/[id]`、`+layout.svelte`、settings 三页），深色系统下这些页面依旧白底刺眼。
 4. **切换交互两态**：只有浅⇄深循环，首次访问跟随系统但手动切换后永久固定，没有显式「自动」档。
 
 ## §2 目标 / 非目标
@@ -78,7 +78,7 @@ sequenceDiagram
 - 变量清单两层：
   - **保留现有 13 个原名**（消费方零改动）：`--rr-bg`、`--rr-card-bg`、`--rr-card-border`、`--rr-text`、`--rr-text-muted`、`--rr-link`、`--rr-border`、`--rr-border-soft`、`--rr-inline-code-bg`、`--rr-inline-code-text`、`--rr-code-bg`、`--rr-shadow`、`--rr-toggle-bg`
   - **新增管理页面所需**：按钮（`--rr-btn-bg`/`--rr-btn-border`/`--rr-btn-text`/`--rr-btn-primary-bg`/`--rr-btn-primary-text`）、输入框（`--rr-input-bg`/`--rr-input-border`）、语义色（`--rr-danger`/`--rr-success`）、hover 态（`--rr-hover-bg`）。**实现时按 75 处硬编码色的实际归拢结果收敛最终清单**，不预设用不上的变量。
-- `/s/[token]/+page.svelte` 中 26 处变量定义块**整体删除**（消费方用法不变）；`MarkdownViewer.svelte` 内 2 处定义同样上移。
+- `/s/[token]/+page.svelte` 中变量定义块**整体删除**（消费方用法不变）。`MarkdownViewer.svelte` 内的 2 处定义（`--rr-mono` / `--rr-mono-west`）是等宽字体栈变量，与主题色无关，**保留原位**不上移。
 
 ### §5.2 Shiki 双主题：`apps/web/src/lib/server/markdown.ts`
 
@@ -130,18 +130,21 @@ sequenceDiagram
 
 ### §5.5 全站硬编码色迁移清单
 
-| 文件 | 硬编码色处数 | 动作 |
+| 文件 | 硬编码色处数（宽口径匹配行） | 动作 |
 |---|---|---|
-| `routes/+page.svelte`（文件管理器） | 20 | → `--rr-*`，首次接入暗色 |
-| `routes/login/+page.svelte` | 15 | 同上 |
-| `routes/register/+page.svelte` | 15 | 同上 |
-| `routes/search/+page.svelte` | 14 | 同上 |
-| `routes/d/[id]/+page.svelte` | 4 | 同上 |
-| `routes/+layout.svelte` | 4 | 同上 |
-| `routes/settings/tokens/+page.svelte` | 2 | 同上 |
-| `routes/settings/shares/+page.svelte` | 1 | 同上 |
-| `routes/s/[token]/+page.svelte` | 26（定义） | 定义删除、消费保留 |
-| `MermaidViewer` lightbox / `TableFullscreen` overlay | 实现时盘点 | overlay 背景等换 `--rr-*` 变量 |
+| `routes/+page.svelte`（文件管理器） | 26 | → `--rr-*`，首次接入暗色 |
+| `routes/login/+page.svelte` | 18 | 同上 |
+| `routes/register/+page.svelte` | 18 | 同上 |
+| `routes/search/+page.svelte` | 17 | 同上 |
+| `routes/d/[id]/+page.svelte` | 5 | 同上 |
+| `routes/+layout.svelte` | 7 | 同上 |
+| `routes/settings/tokens/+page.svelte` | 3 | 同上 |
+| `routes/settings/shares/+page.svelte` | 2 | 同上 |
+| `routes/settings/tags/+page.svelte` | 1 | 同上 |
+| `routes/s/[token]/+page.svelte` | 变量定义块 | 定义删除、消费保留 |
+| `MermaidViewer` / `TableFullscreen` | 各 1（遮罩 rgba）+ fallback 字色 | 遮罩暗色保留（双主题惯例）；fallback 字色换 `--rr-code-text` |
+
+（行数按「含 border 色值的宽口径 grep」统计，一行可能含多处；实现时以逐文件替换清单为准。）
 
 迁移原则：只做「色值 → 变量」替换与必要的变量补齐；不改这些页面的布局、间距、结构。
 
