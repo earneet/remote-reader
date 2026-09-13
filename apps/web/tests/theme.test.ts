@@ -1,22 +1,46 @@
 import { test, expect } from 'vitest';
-import { resolveTheme, toggleTheme, THEME_STORAGE_KEY } from '../src/lib/shared/theme';
+import {
+    resolveTheme,
+    toggleTheme,
+    parseThemePref,
+    cycleTheme,
+    THEME_STORAGE_KEY
+} from '../src/lib/shared/theme';
+import type { ThemePref } from '../src/lib/shared/theme';
 
-test('resolveTheme: stored 合法值优先', () => {
-    expect(resolveTheme('dark', false)).toBe('dark');
+test('parseThemePref: 合法值直通', () => {
+    expect(parseThemePref('light')).toBe('light');
+    expect(parseThemePref('dark')).toBe('dark');
+    expect(parseThemePref('auto')).toBe('auto');
+});
+
+test('parseThemePref: 非法/缺失回退 auto（兼容旧两值存储）', () => {
+    expect(parseThemePref(null)).toBe('auto');
+    expect(parseThemePref('garbage')).toBe('auto');
+    expect(parseThemePref('')).toBe('auto');
+});
+
+test('resolveTheme: 显式偏好直通', () => {
     expect(resolveTheme('light', true)).toBe('light');
+    expect(resolveTheme('dark', false)).toBe('dark');
 });
 
-test('resolveTheme: 无 stored 时跟随系统', () => {
-    expect(resolveTheme(null, true)).toBe('dark');
-    expect(resolveTheme(null, false)).toBe('light');
+test('resolveTheme: auto 跟随系统', () => {
+    expect(resolveTheme('auto', true)).toBe('dark');
+    expect(resolveTheme('auto', false)).toBe('light');
 });
 
-test('resolveTheme: stored 非法值回退到系统', () => {
-    expect(resolveTheme('garbage', true)).toBe('dark');
-    expect(resolveTheme('', false)).toBe('light');
+test('cycleTheme: auto → light → dark → auto 循环', () => {
+    let pref: ThemePref = 'auto';
+    const seq: ThemePref[] = [];
+    for (let i = 0; i < 3; i++) {
+        pref = cycleTheme(pref);
+        seq.push(pref);
+    }
+    expect(seq).toEqual(['light', 'dark', 'auto']);
 });
 
-test('toggleTheme: 双向切换', () => {
+test('toggleTheme: 双向切换（过渡期保留，Task 3 移除）', () => {
     expect(toggleTheme('dark')).toBe('light');
     expect(toggleTheme('light')).toBe('dark');
 });
