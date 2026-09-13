@@ -277,8 +277,8 @@
     :global(.rr-mermaid-fallback) {
         padding: 1rem;
         overflow-x: auto;
-        background: var(--rr-code-bg, #1e2228);
-        color: #e1e4e8;
+        background: var(--rr-code-bg);
+        color: var(--rr-code-text);
         border-radius: 8px;
         margin: 1rem 0;
         font-family: ui-monospace, Menlo, monospace;
