@@ -193,7 +193,47 @@ sequenceDiagram
 
 ## §9 实现现状
 
-（未实现。实现完成后在此追加：改动文件清单、测试计数、验收截图结论。）
+**已实现并合并本 worktree 分支**（2026-09-13，commit 链 10 个）：
+
+| Commit | 内容 |
+|---|---|
+| `4404146` | theme.ts 三档纯函数（parseThemePref/resolveTheme/cycleTheme，兼容旧两值存储） |
+| `29015d9` | app.html 防闪脚本 auto 档（旧值直通、无 matchMedia 兜底 light） |
+| `570a705` | ThemeToggle 三档 UI（循环 + matchMedia 实时跟随 + MutationObserver，删 toggleTheme） |
+| `a0da695` | Shiki 双主题化（github-light/dark dual themes，defaultColor:false 输出 CSS 变量） |
+| `85ff5fe` | theme.css 变量单源（13 个既有变量保名上移 + 管理页语义色 + body 承接 + Shiki 取色） |
+| `22da4fe` | 全站 9 路由硬编码色迁移（~126 处 + 9 处补充声明） |
+| `0c5833b` | mermaid 降级块字色随主题（--rr-code-text） |
+| `5c9ad0e` | 审查收尾（auto 档标签消费 effective、brainfuck 断言判别力 shiki-themes、pre.shiki 从属注释） |
+| `89a9d2f` | 补迁移 FolderTree/RecentList（spec §5.5 清单遗漏的两个组件，视觉验收 P1）+ 新增 --rr-success-soft |
+| `5ca827c` | 补引入 katex.min.css（与 JS 同步懒加载；存量缺陷，视觉验收 F2——修复 .katex-mathml 源文本暴露） |
+
+**执行中的关键裁定与偏差**：
+- §5.5 迁移清单按 routes/ 枚举，遗漏了 components/ 下的 FolderTree（12 处）与 RecentList（31 处）——视觉验收双 oracle 审查发现（深色下树选中态冰蓝块、非选中节点文字 ≈1.1:1 不可见、最近列表 hover 近白条），已在 `89a9d2f` 补迁移并新增 `--rr-success-soft`（pick 态）
+- KaTeX CSS 未引入系 master 存量缺陷（非本分支引入），因显性破坏阅读页（主入口）观感且修复仅一处懒加载 import，随视觉验收一并修复（`5ca827c`），保持「纯文本零下载」设计
+- 按钮上下文的 `#1f2328` 统一映射为 `--rr-btn-text`（与已迁移路由同名 class 完全一致）；`.rename-form`/`.tag-form` input 的 `#0969da` 边框映射为 `--rr-accent`
+- 组件内 `var(--rr-x, #浅色fallback)` 防御式回退值保留（theme.css 全局引入后永不触发，不驱动实际取色）
+
+**测试**：365/365 全绿（theme 7 用例 + markdown 13 用例含 `--shiki-light/--shiki-dark`/`shiki-themes` 双主题断言）；svelte-check 0 errors（3 个既有 autofocus a11y warnings 为存量）。
+
+**视觉验收**：Playwright 1280×800（share 全页 1835）双档 × 8 页 + hover 态 + FOUC 探针（dark 下 bodyBg=rgb(13,17,23) 无白闪）+ 三档切换循环实测（auto→light→dark→auto，localStorage 持久化、aria-label 动态携带当前生效主题）。双 oracle 并行审查（设计系统/功能 + 视觉保真/CJK）→ 修复 3 项 blocking（FolderTree/RecentList、KaTeX CSS、截图环境 CJK/emoji 字体）→ 新鲜证据终轮裁决。终轮结论：PASS（REVISE 项全部闭环，见下）。
+
+**遗留备案（存量/低优先，不阻塞）**：
+- topnav 登出按钮、tokens/shares/tags 页部分按钮为原生 UA 按钮（`color-scheme` 兜底可读，未套用站点 `.btn` 样式）——建议后续统一
+- login/register 模板 SVG logo `stroke="#0969da"` 硬编码（深色下 3.3:1 可辨，装饰性）
+- 深色下 login 错误横幅文本 ≈4.34:1（略低于 4.5 AA，有 danger-border 补偿）
+- search `.tag-filter` 与页面同底色无区块感（迁移前原行为保真）
+- login/register `.card` 深色阴影 rgba(0,0,0,0.08) 失效（层次靠底色差+边框承担，GitHub dark 同模式）
+- 场景覆盖缺口：tokens 米黄 reveal 块、search chip/mark 高亮、多级目录树未入镜（代码侧变量消费已核验正确）
+
+**终审备案（review-work 6 线 + 视觉终轮全 PASS 后的小项记录，均非阻塞）**：
+- 管理页（/、/d/、/search、/settings、login/register）无 ThemeToggle 入口——master 现状亦如此（切换钮仅在 /s/），暗色系统用户经 auto 自动获得正确档位、偏好经 localStorage 跨页生效；建议后续 topnav 补一个（约 5 行）
+- `markdown.ts` 最终转义裸块兜底的 style 串 `color:var(--shiki-light);--shiki-dark:#e1e4e8` 中 `--shiki-light` 未定义（继承正文色）且 `--shiki-dark` 实际不可达（极罕见路径，两档渲染行为正确；与 §5.2 示意写法有简化偏差）——后续调整时建议改为 `--shiki-light:#1f2328;--shiki-dark:#e1e4e8` 双定义形式
+- `✏` 重命名按钮为裸 U+270F（无 FE0F 变体选择符）→ 文本呈现单色铅笔（master 存量，与主题无关；加 `️` 即可彩色化，+page.svelte 与 RecentList.svelte 各一处）
+- TableFullscreen 在无 `window.matchMedia` 的极端环境会 pageerror（spec §8 未承诺该组件兜底，真实浏览器 IE10+ 均具备）——建议补一行 typeof 守卫
+- SSR 首屏 ThemeToggle aria-label 短暂为默认值「自动（当前浅色）」，hydration 后修正（SSR 无法预知客户端偏好，固有窗口；`data-theme` 与页面配色由防闪脚本保证正确）
+- 全仓 CSP 头从未在代码中设置（CLAUDE.md「H6 CSP report-only」仅落地了 /api/csp-report 接收端点）——pre-existing 文档-代码漂移，与本分支无关，N4 前提不受影响
+- 代码质量 NITPICK×4：防御式 fallback 三种策略并存（MermaidViewer 裸用 / ThemeToggle、MarkdownViewer 带 fallback）、ThemeToggle 内联重复 `Theme` 联合类型、enhanceKatex 为 floating promise（存量模式）、本 spec §9 若干笔误
 
 ## §10 待做清单（实现计划输入）
 

@@ -24,6 +24,8 @@ Remote Reader 让远程工作的 Agent 通过 MCP 上传 Markdown 文档，用�
 
 **最近浏览视图（2026-09-12）**：文件管理器第三分段「最近浏览」（URL `?view=viewed`）按 owner 本人浏览时间倒序；新列 `owner_viewed_at`（与 `last_viewed_at` 分层信号语义分工）；查看页 `$effect`+`lastReported` 守卫发 beacon `POST /api/view/[id]`（session+owner 校验，hover 预取机制性排除，同路由参数切换也入序）；`recentFiles`/`/api/recent`/`RecentList` 参数化 `sort=updated|viewed`（keyset 游标按 sort 解释）。索引 `documents_owner_type_viewed_idx` 收敛在 `ensureOwnerViewedColumn` 列兜底后创建（存量库升级安全）。spec：`docs/superpowers/specs/2026-09-12-recently-viewed-design.md`。
 
+**全站主题系统精修（2026-09-13）**：浅色/深色两档精修 + 三档切换（auto/light/dark，auto 跟随系统实时响应，localStorage `rr-theme` 纯客户端按浏览器隔离）；Shiki 双主题化（`github-light`+`github-dark` dual themes、`defaultColor:false` 输出 `--shiki-light/--shiki-dark` CSS 变量——浅色下代码块浅底，切换纯 CSS 零重渲染、RENDER_CACHE 兼容）；主题变量全站单源 `apps/web/src/styles/theme.css`（:root 浅色 + `[data-theme=dark]` 深色 + body 承接 + Shiki 取色规则；**页面组件禁止再写死主题色值，新语义色先加变量**）；全站 11 个路由/组件硬编码色迁移（含视觉验收补迁移的 FolderTree/RecentList，新增 `--rr-success-soft`）；补引入 katex.min.css（与 JS 同步懒加载，存量缺陷修复）。视觉验收：Playwright 双档 17 屏 + FOUC/切换循环实测 + 双 oracle 审查终轮通过。spec：`docs/superpowers/specs/2026-09-13-reader-theme-system-design.md`（§9 实现现状含遗留备案）。
+
 **下一步（低优先）**：spec §12 Phase 3 扩展（远程 MCP server / 多文档批量上传等），详见 spec §15.3 待做；CSP 由 report-only 转 enforcing（需线上观察 mermaid/katex 违规）；session 服务端撤销表 / 审计日志（设计级，未做）。
 
 **桥运行时**：无原生依赖（纯 fetch + MCP SDK）→ `bun apps/mcp-bridge/src/index.ts` 直跑；`tsc --noEmit` 类型检查（`bun --filter remote-reader-mcp-bridge check`）。配置 = `~/.config/remote-reader/config.json`（XDG）默认 + `REMOTE_READER_URL`/`REMOTE_READER_TOKEN` env 覆盖。**注册进 MCP 客户端时入口必须用绝对路径**——客户端拉起 stdio 进程的 cwd 无保证（如 ZCode 设置页探针），相对路径会间歇性 Module not found（README/INSTALL/USER_GUIDE 的注册命令均已改为 `$(pwd)` 展开写法）。
