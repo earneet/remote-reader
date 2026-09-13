@@ -1,6 +1,7 @@
 <script lang="ts">
     import '../styles/theme.css';
     import { page } from '$app/state';
+    import ThemeToggle from '$components/ThemeToggle.svelte';
     let { data, children } = $props();
     const showNav = $derived(
         !!data.user &&
@@ -33,6 +34,7 @@
         </div>
     </details>
     <span class="email">{data.user?.email}</span>
+    <ThemeToggle />
     <form method="POST" action="/logout">
         <button type="submit">登出</button>
     </form>
