@@ -134,29 +134,29 @@
     .chevron {
         width: 1.35rem; height: 1.75rem; flex-shrink: 0;
         display: inline-flex; align-items: center; justify-content: center;
-        border: none; background: none; cursor: pointer; color: #57606a;
+        border: none; background: none; cursor: pointer; color: var(--rr-text-muted);
         border-radius: 4px; padding: 0;
     }
     .chevron svg { transition: transform 120ms ease; }
     .chevron.open svg { transform: rotate(90deg); }
     .chevron.placeholder { pointer-events: none; }
-    .chevron:hover { background: #f6f8fa; color: #1f2328; }
+    .chevron:hover { background: var(--rr-hover-bg); color: var(--rr-text); }
 
     .label {
         flex: 1; min-width: 0;
         display: flex; align-items: center; gap: 0.35rem;
         border: none; background: none; cursor: pointer;
         padding: 0.3rem 0.4rem; border-radius: 4px;
-        text-align: left; width: auto; color: #1f2328;
+        text-align: left; width: auto; color: var(--rr-text);
     }
-    .label:hover { background: #f6f8fa; }
-    .label.active { background: #ddf4ff; font-weight: 600; }
-    .label.pick { background: #dafbe1; outline: 2px solid #2da44e; }
-    .label:focus-visible, .chevron:focus-visible { outline: 2px solid #0969da; outline-offset: -1px; }
+    .label:hover { background: var(--rr-hover-bg); }
+    .label.active { background: var(--rr-accent-soft); font-weight: 600; }
+    .label.pick { background: var(--rr-success-soft); outline: 2px solid var(--rr-success); }
+    .label:focus-visible, .chevron:focus-visible { outline: 2px solid var(--rr-accent); outline-offset: -1px; }
 
-    .folder-icon { flex-shrink: 0; color: #54aeff; }
-    .label.root .folder-icon { color: #57606a; }
+    .folder-icon { flex-shrink: 0; color: var(--rr-link); }
+    .label.root .folder-icon { color: var(--rr-text-muted); }
 
     .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .count { margin-left: auto; flex-shrink: 0; color: #57606a; font-size: 0.72rem; font-variant-numeric: tabular-nums; }
+    .count { margin-left: auto; flex-shrink: 0; color: var(--rr-text-muted); font-size: 0.72rem; font-variant-numeric: tabular-nums; }
 </style>

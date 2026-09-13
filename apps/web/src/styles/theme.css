@@ -37,6 +37,7 @@
     --rr-danger-soft: #ffebe9;
     --rr-danger-border: #ff8182;
     --rr-success: #2da44e;
+    --rr-success-soft: #dafbe1;
     --rr-warning-soft: #fff8c5;
     --rr-warning-border: #d4a72c;
 }
@@ -75,6 +76,7 @@
     --rr-danger-soft: rgba(248, 81, 73, 0.12);
     --rr-danger-border: rgba(248, 81, 73, 0.4);
     --rr-success: #3fb950;
+    --rr-success-soft: rgba(46, 160, 67, 0.15);
     --rr-warning-soft: rgba(187, 128, 9, 0.15);
     --rr-warning-border: #bb8009;
 }
