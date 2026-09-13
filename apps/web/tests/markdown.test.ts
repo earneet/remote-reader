@@ -41,6 +41,7 @@ test('未预载语言安全降级为双主题代码块（不抛错、内容不�
     const html = await renderMarkdown('```brainfuck\n++++++++[>++++++++<-]>\n```');
     expect(html).toContain('shiki');
     expect(html).toContain('--shiki-dark');
+    expect(html).toContain('shiki-themes');
     expect(html).toContain('++++++++');
 });
 

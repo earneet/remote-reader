@@ -57,19 +57,25 @@
         if (mq && onSystemChange) mq.removeEventListener('change', onSystemChange);
     });
 
-    const LABELS: Record<ThemePref, string> = {
-        auto: '主题：自动（跟随系统）',
+    const LABELS = {
         light: '主题：浅色',
         dark: '主题：深色'
     };
+
+    // auto 档标签携带当前生效主题（effective 由 MutationObserver 同步，外部改动也响应）
+    const label = $derived(
+        pref === 'auto'
+            ? `主题：自动（当前${effective === 'dark' ? '深色' : '浅色'}）`
+            : LABELS[pref]
+    );
 </script>
 
 <button
     type="button"
     class="rr-theme-toggle"
     onclick={onClick}
-    aria-label="{LABELS[pref]}，点击切换"
-    title="{LABELS[pref]}，点击切换"
+    aria-label="{label}，点击切换"
+    title="{label}，点击切换"
 >
     {#if pref === 'auto'}
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">

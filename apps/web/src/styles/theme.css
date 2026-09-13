@@ -91,6 +91,8 @@ pre.shiki,
 pre.shiki span {
     color: var(--shiki-light);
 }
+/* 注意：组件内 .markdown-body :global(pre)（0,2,1）优先于此规则（0,1,1），
+   此处兜 MarkdownViewer 之外的 shiki 块场景；两处当前同值。 */
 pre.shiki {
     background: var(--rr-code-bg);
 }
