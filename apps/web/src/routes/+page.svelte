@@ -4,7 +4,8 @@
     import ActionSheet from '$components/ActionSheet.svelte';
     import { ancestorChainOf, type TreeFolder } from '$lib/shared/folder-tree';
     import { enhance } from '$app/forms';
-    import { goto, invalidateAll } from '$app/navigation';
+    import { goto, invalidateAll, pushState } from '$app/navigation';
+    import { page } from '$app/state';
     let { data } = $props();
     let currentDir = $derived(data.currentDir);
     let movingId = $state<string | null>(null);
@@ -20,6 +21,9 @@
     let drawerOpen = $state(false);
     let drawerRef = $state<HTMLDialogElement | null>(null);
     let menuBtn = $state<HTMLButtonElement | null>(null);
+    // 抽屉是否推过 history 条目（用内存标志而非 history.state——SvelteKit pushState 的
+    // state 存于内部命名空间，直接读结构无保证；刷新丢失=no-op，可接受）
+    let drawerPushed = false;
 
     // 组装目录树入参：folder 行 + 直接子项计数合成 TreeFolder（组件不感知后端结构，spec §5.1）
     const treeFolders = $derived<TreeFolder[]>(
@@ -51,7 +55,10 @@
 
     function openDrawer(): void {
         drawerOpen = true;
-        history.pushState({ rrDrawer: true }, '');
+        // SvelteKit pushState（同 URL 浅路由条目）：返回键可关抽屉且不与 SvelteKit 路由的
+        // 内部 history 跟踪冲突（原生 history.pushState 会触发 dev warning 并丢内部 state）
+        pushState(page.url, { rrDrawer: true });
+        drawerPushed = true;
         drawerRef?.showModal();
         document.body.style.overflow = 'hidden';
     }
@@ -72,7 +79,7 @@
         drawerRef?.close();
         document.body.style.overflow = '';
         menuBtn?.focus();
-        if (!viaPopstate && history.state?.rrDrawer) await popOnce();
+        if (!viaPopstate && drawerPushed) { drawerPushed = false; await popOnce(); }
     }
 
     // dialog 原生 Esc 关闭不经 closeDrawer，onclose 兜底同步状态
@@ -287,7 +294,7 @@
                                                 <button type="button" class="btn sm" onclick={() => (taggingId = null)}>取消</button>
                                             </form>
                                         {:else}
-                                            <button class="icon-btn" title="编辑标签" onclick={() => { taggingId = item.id; tagInput = ''; }}>🏷</button>
+                                            <button class="icon-btn desktop-only" title="编辑标签" onclick={() => { taggingId = item.id; tagInput = ''; }}>🏷</button>
                                         {/if}
                                     </span>
                                 {/if}
@@ -378,7 +385,7 @@
         .fm-left { display: none; }
         .fm-right { overflow-y: visible; }
         .fm-head { gap: 0.6rem; }
-        .create-folder.mobile-only { width: 100%; }
+        .create-folder.mobile-only { display: flex !important; width: 100%; }
         .create-folder.mobile-only input { flex: 1; min-width: 0; }
         .item { padding: 0.5rem 0.25rem; }
         .item:active { background: var(--rr-hover-bg); }
