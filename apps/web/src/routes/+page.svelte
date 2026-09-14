@@ -1,6 +1,7 @@
 <script lang="ts">
     import FolderTree from '$components/FolderTree.svelte';
     import RecentList from '$components/RecentList.svelte';
+    import ActionSheet from '$components/ActionSheet.svelte';
     import { ancestorChainOf, type TreeFolder } from '$lib/shared/folder-tree';
     import { enhance } from '$app/forms';
     import { goto, invalidateAll } from '$app/navigation';
@@ -14,6 +15,8 @@
     let rightPane = $state<HTMLElement | null>(null);
     let recentRef = $state<{ reSync: () => Promise<void> } | null>(null);
     let showCreate = $state(false);
+    let sheet = $state<ActionSheet | null>(null);
+    let sheetItem = $state<{ id: string; type: string } | null>(null);
 
     // 组装目录树入参：folder 行 + 直接子项计数合成 TreeFolder（组件不感知后端结构，spec §5.1）
     const treeFolders = $derived<TreeFolder[]>(
@@ -63,6 +66,33 @@
 
     function startRename(id: string) { editingId = id; }
     function cancelRename() { editingId = null; }
+
+    function openSheet(id: string, type: string): void {
+        sheetItem = { id, type };
+        sheet?.show();
+    }
+
+    function onSheetAction(key: string): void {
+        const it = sheetItem;
+        if (!it) return;
+        sheetItem = null;
+        if (key === 'rename') startRename(it.id);
+        else if (key === 'tags') { taggingId = it.id; tagInput = ''; }
+        else if (key === 'move') startMove(it.id);
+        else if (key === 'delete') void doDelete(it.id, it.type);
+    }
+
+    // 移动端 ⋯ 菜单的删除入口：fetch 直调 form action（RecentList submitAction 同款先例）
+    async function doDelete(id: string, type: string): Promise<void> {
+        const msg = type === 'folder'
+            ? '确认删除该文件夹？将级联删除其全部内容，且不可恢复。'
+            : '确认删除该文件？此操作不可恢复。';
+        if (!confirm(msg)) return;
+        const fd = new FormData();
+        fd.set('id', id);
+        const r = await fetch('?/delete', { method: 'POST', body: fd });
+        if (r.ok) { await invalidateAll(); await recentRef?.reSync(); }
+    }
 
     // use: action 仅客户端挂载时执行（SSR 无真实 DOM），安全聚焦+全选
     function autofocus(node: HTMLInputElement) {
@@ -212,25 +242,31 @@
                                     </span>
                                 {/if}
                                 <span class="actions">
-                                    <button class="icon-btn" title="重命名" onclick={() => startRename(item.id)}>✏</button>
-                                    {#if movingId === item.id}
-                                        <span class="hint">← 左树选目标</span>
-                                        <button class="btn sm" onclick={() => (movingId = null)}>取消</button>
-                                    {:else}
-                                        <button class="icon-btn" title="移动到…" onclick={() => startMove(item.id)}>📂</button>
-                                    {/if}
-                                    <form class="inline" method="POST" action="?/delete"
-                                        use:enhance={({ cancel }) => {
-                                            const msg = item.type === 'folder'
-                                                ? '确认删除该文件夹？将级联删除其全部内容，且不可恢复。'
-                                                : '确认删除该文件？此操作不可恢复。';
-                                            if (!confirm(msg)) { cancel(); return; }
-                                            return async ({ result }) => { if (result.type === 'success') await invalidateAll(); };
-                                        }}
-                                    >
-                                        <input type="hidden" name="id" value={item.id}>
-                                        <button class="icon-btn danger" title="删除">🗑</button>
-                                    </form>
+                                    <button type="button" class="icon-btn more-btn mobile-only" aria-label="更多操作"
+                                        onclick={() => openSheet(item.id, item.type)}>
+                                        <svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M8 9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3ZM1.5 9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Zm13 0a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z"></path></svg>
+                                    </button>
+                                    <span class="desktop-only inline-actions">
+                                        <button class="icon-btn" title="重命名" onclick={() => startRename(item.id)}>✏</button>
+                                        {#if movingId === item.id}
+                                            <span class="hint">← 左树选目标</span>
+                                            <button class="btn sm" onclick={() => (movingId = null)}>取消</button>
+                                        {:else}
+                                            <button class="icon-btn" title="移动到…" onclick={() => startMove(item.id)}>📂</button>
+                                        {/if}
+                                        <form class="inline" method="POST" action="?/delete"
+                                            use:enhance={({ cancel }) => {
+                                                const msg = item.type === 'folder'
+                                                    ? '确认删除该文件夹？将级联删除其全部内容，且不可恢复。'
+                                                    : '确认删除该文件？此操作不可恢复。';
+                                                if (!confirm(msg)) { cancel(); return; }
+                                                return async ({ result }) => { if (result.type === 'success') await invalidateAll(); };
+                                            }}
+                                        >
+                                            <input type="hidden" name="id" value={item.id}>
+                                            <button class="icon-btn danger" title="删除">🗑</button>
+                                        </form>
+                                    </span>
                                 </span>
                             {/if}
                         </li>
@@ -240,6 +276,18 @@
         {/if}
     </section>
 </div>
+
+<ActionSheet
+    bind:this={sheet}
+    label="文档操作"
+    actions={[
+        { key: 'rename', label: '重命名' },
+        ...(sheetItem?.type === 'file' ? [{ key: 'tags', label: '编辑标签' }] : []),
+        { key: 'move', label: '移动到…' },
+        { key: 'delete', label: '删除', danger: true }
+    ]}
+    onSelect={onSheetAction}
+/>
 
 <style>
     /* app-shell：顶栏 + 内容区恰好铺满视口（--nav-h 由 +layout 实测注入，-1rem 是 body
@@ -314,6 +362,8 @@
     .size { color: var(--rr-text-muted); font-size: 0.8em; flex-shrink: 0; }
 
     .actions { display: inline-flex; align-items: center; gap: 0.2rem; flex-shrink: 0; }
+    .more-btn { padding: 0.45rem 0.5rem; }
+    .inline-actions { display: inline-flex; align-items: center; gap: 0.2rem; }
 
     .rename-form { display: flex; align-items: center; gap: 0.5rem; flex: 1; min-width: 0; }
     .rename-form input {
