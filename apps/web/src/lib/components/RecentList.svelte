@@ -3,6 +3,7 @@
     import { RECENT_PAGE_SIZE, type RecentDoc, type RecentSort } from '$lib/shared/recent';
     import { folderNamesOf, type TreeFolder } from '$lib/shared/folder-tree';
     import { formatRelative } from '$lib/shared/time';
+    import ActionSheet from '$components/ActionSheet.svelte';
 
     let {
         initialRows,
@@ -36,6 +37,8 @@
     let taggingId = $state<string | null>(null);
     let tagInput = $state('');
     let sentinel = $state<HTMLElement | null>(null);
+    let sheet = $state<ActionSheet | null>(null);
+    let sheetId = $state<string | null>(null);
 
     const pathOf = (item: RecentDoc): string => folderNamesOf(folderById, item.parentId).join(' / ');
 
@@ -105,6 +108,22 @@
     function startRename(item: RecentDoc): void {
         editingId = item.id;
         renameValue = item.name;
+    }
+
+    function openSheet(id: string): void {
+        sheetId = id;
+        sheet?.show();
+    }
+
+    function onSheetAction(key: string): void {
+        const id = sheetId;
+        const item = rows.find((x) => x.id === id);
+        sheetId = null;
+        if (!item) return;
+        if (key === 'rename') startRename(item);
+        else if (key === 'tags') { taggingId = item.id; tagInput = item.tags.map((t) => t.name).join(', '); }
+        else if (key === 'move') onStartMove(item.id);
+        else if (key === 'delete') void doDelete(item);
     }
 
     async function doRename(id: string): Promise<void> {
@@ -189,19 +208,25 @@
                                 <button type="button" class="btn sm" onclick={() => (taggingId = null)}>取消</button>
                             </form>
                         {:else}
-                            <button class="icon-btn" title="编辑标签"
+                            <button class="icon-btn desktop-only" title="编辑标签"
                                 onclick={() => { taggingId = item.id; tagInput = item.tags.map((t) => t.name).join(', '); }}>🏷</button>
                         {/if}
                     </span>
                     <span class="actions">
-                        <button class="icon-btn" title="重命名" onclick={() => startRename(item)}>✏</button>
-                        {#if movingId === item.id}
-                            <span class="hint">← 左树选目标</span>
-                            <button class="btn sm" onclick={onCancelMove}>取消</button>
-                        {:else}
-                            <button class="icon-btn" title="移动到…" onclick={() => onStartMove(item.id)}>📂</button>
-                        {/if}
-                        <button class="icon-btn danger" title="删除" onclick={() => void doDelete(item)}>🗑</button>
+                        <button type="button" class="icon-btn more-btn mobile-only" aria-label="更多操作"
+                            onclick={() => openSheet(item.id)}>
+                            <svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M8 9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3ZM1.5 9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Zm13 0a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z"></path></svg>
+                        </button>
+                        <span class="desktop-only inline-actions">
+                            <button class="icon-btn" title="重命名" onclick={() => startRename(item)}>✏</button>
+                            {#if movingId === item.id}
+                                <span class="hint">← 左树选目标</span>
+                                <button class="btn sm" onclick={onCancelMove}>取消</button>
+                            {:else}
+                                <button class="icon-btn" title="移动到…" onclick={() => onStartMove(item.id)}>📂</button>
+                            {/if}
+                            <button class="icon-btn danger" title="删除" onclick={() => void doDelete(item)}>🗑</button>
+                        </span>
                     </span>
                 {/if}
             </li>
@@ -215,6 +240,18 @@
         <p class="error">加载失败 <button class="link" onclick={() => void loadMore()}>点击重试</button></p>
     {/if}
 {/if}
+
+<ActionSheet
+    bind:this={sheet}
+    label="文档操作"
+    actions={[
+        { key: 'rename', label: '重命名' },
+        { key: 'tags', label: '编辑标签' },
+        { key: 'move', label: '移动到…' },
+        { key: 'delete', label: '删除', danger: true }
+    ]}
+    onSelect={onSheetAction}
+/>
 
 <style>
     /* 与目录视图行样式同源（Svelte 样式作用域隔离，组件各持一份） */
@@ -241,6 +278,8 @@
     .time { color: var(--rr-text-muted); font-size: 0.8em; flex-shrink: 0; font-variant-numeric: tabular-nums; }
 
     .actions { display: inline-flex; align-items: center; gap: 0.2rem; flex-shrink: 0; }
+    .more-btn { padding: 0.45rem 0.5rem; }
+    .inline-actions { display: inline-flex; align-items: center; gap: 0.2rem; }
 
     .rename-form { display: flex; align-items: center; gap: 0.5rem; flex: 1; min-width: 0; }
     .rename-form input {
