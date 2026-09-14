@@ -1,6 +1,7 @@
 import { test, expect, beforeEach } from 'vitest';
 import { db, schema, sqlite } from '../src/lib/server/db';
 import { eq } from 'drizzle-orm';
+import { createInviteCode, revokeInvite } from '../src/lib/server/invites';
 
 // 放宽限流、设测试 invite，须在 import 路由模块前
 process.env.REGISTER_RATE_LIMIT_MAX = '10000';
@@ -16,6 +17,7 @@ beforeEach(() => {
     db.delete(schema.shareLinks).run();
     db.delete(schema.apiTokens).run();
     db.delete(schema.documents).run();
+    db.delete(schema.inviteCodes).run();
     db.delete(schema.users).run();
 });
 
@@ -105,6 +107,31 @@ test('register 重复邮箱 → 409', async () => {
     await register({ email: 'dup@b.com', password: 'password1', invite_code: 'testinvite' });
     const r = await register({ email: 'dup@b.com', password: 'password1', invite_code: 'testinvite' });
     expect(r.status).toBe(409);
+});
+
+test('register 用 DB 邀请码 → 302 且核销计数', async () => {
+    await register({ email: 'first@b.com', password: 'password1', invite_code: 'testinvite' });
+    const admin = db.select().from(schema.users).all()[0];
+    const { plaintext } = await createInviteCode(admin.id, 'x', 7);
+    const r = await register({ email: 'second@b.com', password: 'password1', invite_code: plaintext });
+    expect(r.status).toBe(302);
+    expect(db.select().from(schema.inviteCodes).all()[0].usedCount).toBe(1);
+});
+
+test('register 用过期 DB 邀请码 → 403', async () => {
+    await register({ email: 'f@b.com', password: 'password1', invite_code: 'testinvite' });
+    const admin = db.select().from(schema.users).all()[0];
+    const { plaintext } = await createInviteCode(admin.id, 'x', 1);
+    db.update(schema.inviteCodes).set({ expiresAt: Date.now() - 1 }).run();
+    expect((await register({ email: 's@b.com', password: 'password1', invite_code: plaintext })).status).toBe(403);
+});
+
+test('register 用已撤销 DB 邀请码 → 403', async () => {
+    await register({ email: 'f@b.com', password: 'password1', invite_code: 'testinvite' });
+    const admin = db.select().from(schema.users).all()[0];
+    const { id, plaintext } = await createInviteCode(admin.id, 'x', 7);
+    revokeInvite(id);
+    expect((await register({ email: 's@b.com', password: 'password1', invite_code: plaintext })).status).toBe(403);
 });
 
 test('login 错密码 → 401', async () => {

@@ -5,6 +5,7 @@ import { hashPassword, generateId } from '$server/auth';
 import { setSessionCookie } from '$server/session';
 import { checkRateLimit } from '$server/ratelimit';
 import { envInt } from '$server/env';
+import { redeemInviteCode } from '$server/invites';
 import { eq } from 'drizzle-orm';
 
 const REGISTER_RATE_LIMIT = {
@@ -36,7 +37,11 @@ export const actions: Actions = {
         if (!EMAIL_RE.test(email)) return fail(400, { error: '邮箱格式不正确' });
         if (password.length < MIN_PASSWORD) return fail(400, { error: `密码至少 ${MIN_PASSWORD} 位` });
 
-        if (inviteCode !== process.env.INITIAL_INVITE_CODE) return fail(403, { error: '邀请码无效' });
+        // 邀请码：INITIAL_INVITE_CODE 引导码（存量部署 bootstrap）或 DB 邀请码
+        // （哈希匹配 + 未过期未撤销，事务内核销）；403 先于 409 的既有顺序保持不变
+        const bootstrap = process.env.INITIAL_INVITE_CODE;
+        const inviteOk = (!!bootstrap && inviteCode === bootstrap) || redeemInviteCode(inviteCode);
+        if (!inviteOk) return fail(403, { error: '邀请码无效' });
 
         const existing = db.select().from(schema.users).where(eq(schema.users.email, email)).get();
         if (existing) return fail(409, { error: '该邮箱已注册' });
