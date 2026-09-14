@@ -27,3 +27,9 @@ export async function generateApiToken(): Promise<{ plaintext: string; hash: str
     const plaintext = 'rr_' + randomBytes(32).toString('base64url');
     return { plaintext, hash: hashToken(plaintext) };
 }
+
+// 邀请码明文用 ri_ 前缀（与 API token 的 rr_ 区分），仅存 sha256 哈希
+export async function generateInviteCode(): Promise<{ plaintext: string; hash: string }> {
+    const plaintext = 'ri_' + randomBytes(32).toString('base64url');
+    return { plaintext, hash: hashToken(plaintext) };
+}
