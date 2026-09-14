@@ -24,6 +24,19 @@ CREATE TABLE IF NOT EXISTS api_tokens (
 );
 CREATE INDEX IF NOT EXISTS api_tokens_user_id_idx ON api_tokens (user_id);
 CREATE INDEX IF NOT EXISTS api_tokens_token_hash_idx ON api_tokens (token_hash);
+CREATE TABLE IF NOT EXISTS invite_codes (
+    id text PRIMARY KEY NOT NULL,
+    code_hash text NOT NULL,
+    created_by text NOT NULL,
+    note text NOT NULL,
+    expires_at integer NOT NULL,
+    revoked_at integer,
+    used_count integer NOT NULL,
+    last_used_at integer,
+    created_at integer NOT NULL,
+    FOREIGN KEY (created_by) REFERENCES users(id) ON UPDATE no action ON DELETE no action
+);
+CREATE INDEX IF NOT EXISTS invite_codes_code_hash_idx ON invite_codes (code_hash);
 CREATE TABLE IF NOT EXISTS documents (
     id text PRIMARY KEY NOT NULL,
     owner_id text NOT NULL,

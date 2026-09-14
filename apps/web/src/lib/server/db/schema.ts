@@ -21,6 +21,20 @@ export const apiTokens = sqliteTable('api_tokens', {
     tokenHashIdx: index('api_tokens_token_hash_idx').on(t.tokenHash)
 }));
 
+export const inviteCodes = sqliteTable('invite_codes', {
+    id: text('id').primaryKey(),
+    codeHash: text('code_hash').notNull(),
+    createdBy: text('created_by').notNull().references(() => users.id),
+    note: text('note').notNull(),
+    expiresAt: integer('expires_at').notNull(),
+    revokedAt: integer('revoked_at'),
+    usedCount: integer('used_count').notNull(),
+    lastUsedAt: integer('last_used_at'),
+    createdAt: integer('created_at').notNull()
+}, (t) => ({
+    codeHashIdx: index('invite_codes_code_hash_idx').on(t.codeHash)
+}));
+
 export const documents = sqliteTable('documents', {
     id: text('id').primaryKey(),
     ownerId: text('owner_id').notNull().references(() => users.id),

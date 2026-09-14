@@ -1,11 +1,11 @@
 import { test, expect } from 'vitest';
 import { sqlite, ensureSchema } from '../src/lib/server/db';
 
-test('ensureSchema 建表：四张表均存在', () => {
+test('ensureSchema 建表：五张表均存在', () => {
     const rows = sqlite.prepare(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('users','api_tokens','documents','share_links')"
+        "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('users','api_tokens','documents','share_links','invite_codes')"
     ).all() as { name: string }[];
-    expect(rows.map((r) => r.name).sort()).toEqual(['api_tokens', 'documents', 'share_links', 'users']);
+    expect(rows.map((r) => r.name).sort()).toEqual(['api_tokens', 'documents', 'invite_codes', 'share_links', 'users']);
 });
 
 test('foreign_keys PRAGMA 已开启（FK 约束生效）', () => {
@@ -18,13 +18,14 @@ test('journal_mode = WAL', () => {
 
 test('性能索引已创建（M12）', () => {
     const rows = sqlite.prepare(
-        "SELECT name FROM sqlite_master WHERE type='index' AND name IN ('documents_owner_parent_idx','documents_owner_parent_name_type_idx','share_links_document_id_idx','api_tokens_user_id_idx','api_tokens_token_hash_idx')"
+        "SELECT name FROM sqlite_master WHERE type='index' AND name IN ('documents_owner_parent_idx','documents_owner_parent_name_type_idx','share_links_document_id_idx','api_tokens_user_id_idx','api_tokens_token_hash_idx','invite_codes_code_hash_idx')"
     ).all() as { name: string }[];
     expect(rows.map((r) => r.name).sort()).toEqual([
         'api_tokens_token_hash_idx',
         'api_tokens_user_id_idx',
         'documents_owner_parent_idx',
         'documents_owner_parent_name_type_idx',
+        'invite_codes_code_hash_idx',
         'share_links_document_id_idx'
     ]);
 });
