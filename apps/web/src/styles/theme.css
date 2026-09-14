@@ -105,10 +105,12 @@ pre.shiki {
     color: var(--shiki-dark);
 }
 
-/* 响应式显隐（spec 2026-09-14 移动端文件管理器 §7.2）：跨组件共用故置于全局单源；
-   display:revert 回元素默认 display，组件内自带布局类不受影响 */
-.mobile-only { display: none; }
+/* 响应式显隐（spec 2026-09-14 移动端文件管理器 §7.2）：跨组件共用故置于全局单源。
+   !important 必要——scoped 布局类（.inline-actions/.create-folder 等，特异性 0,2,0）
+   会反杀普通全局规则（0,1,0）导致桌面按钮在移动端泄漏显示。
+   revert 回元素默认 display；移动端展开的 create-form 需 flex 由组件断点显式恢复。 */
+.mobile-only { display: none !important; }
 @media (max-width: 768px) {
-    .mobile-only { display: revert; }
-    .desktop-only { display: none; }
+    .mobile-only { display: revert !important; }
+    .desktop-only { display: none !important; }
 }

@@ -53,6 +53,7 @@
     .sheet {
         position: fixed; inset: auto 0 0 0;
         width: 100%; max-width: 30rem; margin: 0 auto;
+        box-sizing: border-box;
         border: none; border-radius: 12px 12px 0 0;
         padding: 0.5rem 0.75rem calc(0.75rem + env(safe-area-inset-bottom, 0px));
         background: var(--rr-card-bg); color: var(--rr-text);
