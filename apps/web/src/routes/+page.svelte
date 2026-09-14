@@ -1,7 +1,7 @@
 <script lang="ts">
     import FolderTree from '$components/FolderTree.svelte';
     import RecentList from '$components/RecentList.svelte';
-    import type { TreeFolder } from '$lib/shared/folder-tree';
+    import { ancestorChainOf, type TreeFolder } from '$lib/shared/folder-tree';
     import { enhance } from '$app/forms';
     import { goto, invalidateAll } from '$app/navigation';
     let { data } = $props();
@@ -13,6 +13,7 @@
     let tagInput = $state('');
     let rightPane = $state<HTMLElement | null>(null);
     let recentRef = $state<{ reSync: () => Promise<void> } | null>(null);
+    let showCreate = $state(false);
 
     // 组装目录树入参：folder 行 + 直接子项计数合成 TreeFolder（组件不感知后端结构，spec §5.1）
     const treeFolders = $derived<TreeFolder[]>(
@@ -25,6 +26,7 @@
     const view = $derived(data.view);
     // 面包屑用：folder id → TreeFolder 的 Map（load 已全量加载 folders，零额外查询，spec §6.4）
     const folderById = $derived(new Map(treeFolders.map((f) => [f.id, f] as const)));
+    const crumbs = $derived(view === 'dir' && currentDir ? ancestorChainOf(folderById, currentDir) : []);
 
     // 用 SvelteKit 标准导航：原生 history.pushState 只改地址栏、不更新 SvelteKit 内部 url，
     // invalidateAll 重跑 load 时 url.searchParams 仍读旧 dir → 切目录无反应。
@@ -40,6 +42,8 @@
         await goto(url, { keepFocus: true });
         rightPane?.scrollTo(0, 0);
     }
+
+    function openDrawer(): void { /* Task 6 实现：pushState + showModal */ }
 
     function startMove(id: string) { movingId = id; moveError = null; }
     async function pickTarget(targetId: string | null) {
@@ -84,7 +88,28 @@
     <section class="fm-right" bind:this={rightPane}>
         <div class="fm-head">
             <div class="fm-title">
-                <h1>{view === 'recent' ? '最近文档' : view === 'viewed' ? '最近浏览' : currentDir ? '子目录' : '根目录'}</h1>
+                <button type="button" class="icon-btn menu-btn mobile-only"
+                    aria-label="打开目录树" onclick={openDrawer}>
+                    <svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M1 2.75A.75.75 0 0 1 1.75 2h12.5a.75.75 0 0 1 0 1.5H1.75A.75.75 0 0 1 1 2.75Zm0 5A.75.75 0 0 1 1.75 7h12.5a.75.75 0 0 1 0 1.5H1.75A.75.75 0 0 1 1 7.75ZM1.75 12h12.5a.75.75 0 0 1 0 1.5H1.75a.75.75 0 0 1 0-1.5Z"></path></svg>
+                </button>
+                {#if view === 'dir'}
+                    <nav class="crumbs" aria-label="当前目录路径">
+                        <button type="button" class="crumb" class:current={crumbs.length === 0}
+                            onclick={() => selectDir(null)}>根目录</button>
+                        {#each crumbs as c, i}
+                            <span class="crumb-sep" aria-hidden="true">/</span>
+                            {#if i === crumbs.length - 1}
+                                <span class="crumb current" aria-current="page">{c.name}</span>
+                            {:else}
+                                <button type="button" class="crumb" onclick={() => selectDir(c.id)}>{c.name}</button>
+                            {/if}
+                        {/each}
+                    </nav>
+                {:else}
+                    <h1>{view === 'recent' ? '最近文档' : '最近浏览'}</h1>
+                {/if}
+            </div>
+            <div class="fm-title">
                 <div class="segmented" role="group" aria-label="视图切换">
                     <button type="button" class="seg-btn" class:active={view === 'dir'}
                         aria-pressed={view === 'dir'} onclick={() => switchView('/')}>目录内容</button>
@@ -93,11 +118,23 @@
                     <button type="button" class="seg-btn" class:active={view === 'viewed'}
                         aria-pressed={view === 'viewed'} onclick={() => switchView('/?view=viewed')}>最近浏览</button>
                 </div>
+                {#if view === 'dir'}
+                    <button type="button" class="btn sm mobile-only" onclick={() => (showCreate = !showCreate)}>＋ 文件夹</button>
+                {/if}
             </div>
             {#if view === 'dir'}
-                <form class="create-folder" method="POST" action="?/createFolder" use:enhance={() => async ({ result }) => { if (result.type === 'success') await invalidateAll(); }}>
+                <form class="create-folder desktop-only" method="POST" action="?/createFolder"
+                    use:enhance={() => async ({ result }) => { if (result.type === 'success') await invalidateAll(); }}>
                     <input name="name" placeholder="新文件夹名" required>
                     <button class="btn primary" type="submit">+ 新建文件夹</button>
+                </form>
+            {/if}
+            {#if showCreate && view === 'dir'}
+                <form class="create-folder mobile-only" method="POST" action="?/createFolder"
+                    use:enhance={() => async ({ result }) => { if (result.type === 'success') { showCreate = false; await invalidateAll(); } }}>
+                    <input name="name" placeholder="新文件夹名" required>
+                    <button class="btn primary" type="submit">新建</button>
+                    <button type="button" class="btn" onclick={() => (showCreate = false)}>收起</button>
                 </form>
             {/if}
         </div>
@@ -237,6 +274,13 @@
     .fm-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
     .fm-head h1 { margin: 0; font-size: 1.15rem; }
     .fm-title { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+    .crumbs { display: flex; align-items: center; gap: 0.25rem; min-width: 0; overflow-x: auto; scrollbar-width: none; font-size: 1.1rem; }
+    .crumbs::-webkit-scrollbar { display: none; }
+    .crumb { border: none; background: none; color: var(--rr-link); cursor: pointer; padding: 0.2rem 0.3rem; border-radius: 4px; white-space: nowrap; font-size: inherit; }
+    .crumb:hover { background: var(--rr-hover-bg); }
+    .crumb.current { color: var(--rr-text); font-weight: 600; white-space: nowrap; padding: 0.2rem 0.3rem; }
+    .crumb-sep { color: var(--rr-text-muted); flex-shrink: 0; }
+    .menu-btn { padding: 0.45rem 0.5rem; }
     .segmented { display: inline-flex; border: 1px solid var(--rr-border); border-radius: 6px; overflow: hidden; }
     .seg-btn {
         border: none; background: var(--rr-btn-bg); color: var(--rr-btn-text); cursor: pointer;
