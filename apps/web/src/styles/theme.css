@@ -40,6 +40,7 @@
     --rr-success-soft: #dafbe1;
     --rr-warning-soft: #fff8c5;
     --rr-warning-border: #d4a72c;
+    --rr-scrim: rgba(0, 0, 0, 0.4);
 }
 
 [data-theme="dark"] {
@@ -79,6 +80,7 @@
     --rr-success-soft: rgba(46, 160, 67, 0.15);
     --rr-warning-soft: rgba(187, 128, 9, 0.15);
     --rr-warning-border: #bb8009;
+    --rr-scrim: rgba(0, 0, 0, 0.6);
 }
 
 /* body 全局承接：/d/、login 等无页面级底色的路由在暗色下不再白底刺眼（G2） */
