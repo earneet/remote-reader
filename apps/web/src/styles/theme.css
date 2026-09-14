@@ -104,3 +104,11 @@ pre.shiki {
 [data-theme="dark"] pre.shiki span {
     color: var(--shiki-dark);
 }
+
+/* 响应式显隐（spec 2026-09-14 移动端文件管理器 §7.2）：跨组件共用故置于全局单源；
+   display:revert 回元素默认 display，组件内自带布局类不受影响 */
+.mobile-only { display: none; }
+@media (max-width: 768px) {
+    .mobile-only { display: revert; }
+    .desktop-only { display: none; }
+}

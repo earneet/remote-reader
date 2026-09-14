@@ -371,17 +371,19 @@
         overflow-y: auto; overscroll-behavior: contain;
     }
 
-    /* 窄屏回到整页滚动：触屏上嵌套双滚动区体验差，纵排 + 页面滚更自然。
-       桌面 app-shell 的定高/内部滚动均在此还原（height 回 auto、右栏 overflow 回可见、
-       左树改 max-height 限高自己滚）。 */
+    /* 移动端（spec 2026-09-14）：树收进抽屉（.fm-left 隐藏、dialog 承载），内容独占页面宽度，
+       单一滚动轴（页面整体滚）；触屏以 :active 替代不存在的 hover 反馈。 */
     @media (max-width: 768px) {
-        .fm { flex-direction: column; gap: 1rem; padding: 1rem; height: auto; }
-        .fm-left {
-            width: auto; max-height: 32vh;
-            border-right: none; border-bottom: 1px solid var(--rr-border);
-            padding: 0 0 0.75rem;
-        }
+        .fm { flex-direction: column; gap: 0; padding: 0.75rem 1rem; height: auto; }
+        .fm-left { display: none; }
         .fm-right { overflow-y: visible; }
+        .fm-head { gap: 0.6rem; }
+        .create-folder.mobile-only { width: 100%; }
+        .create-folder.mobile-only input { flex: 1; min-width: 0; }
+        .item { padding: 0.5rem 0.25rem; }
+        .item:active { background: var(--rr-hover-bg); }
+        .crumbs { flex: 1; }
+        .menu-btn { flex-shrink: 0; }
     }
     .fm-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
     .fm-head h1 { margin: 0; font-size: 1.15rem; }

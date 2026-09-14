@@ -317,6 +317,7 @@
     /* 窄屏：面包屑折行到第二行（spec §6.4） */
     @media (max-width: 768px) {
         .item { flex-wrap: wrap; }
+        .item:active { background: var(--rr-hover-bg); }
         .path { order: 5; flex-basis: 100%; max-width: none; white-space: normal; }
     }
 </style>
