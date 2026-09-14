@@ -35,6 +35,7 @@ beforeEach(async () => {
     db.delete(schema.shareLinks).run();
     db.delete(schema.apiTokens).run();
     db.delete(schema.documents).run();
+    db.delete(schema.inviteCodes).run();
     db.delete(schema.users).run();
     const ownerId = generateId();
     db.insert(schema.users).values({
