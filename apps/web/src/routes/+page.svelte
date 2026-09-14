@@ -17,6 +17,9 @@
     let showCreate = $state(false);
     let sheet = $state<ActionSheet | null>(null);
     let sheetItem = $state<{ id: string; type: string } | null>(null);
+    let drawerOpen = $state(false);
+    let drawerRef = $state<HTMLDialogElement | null>(null);
+    let menuBtn = $state<HTMLButtonElement | null>(null);
 
     // 组装目录树入参：folder 行 + 直接子项计数合成 TreeFolder（组件不感知后端结构，spec §5.1）
     const treeFolders = $derived<TreeFolder[]>(
@@ -46,9 +49,55 @@
         rightPane?.scrollTo(0, 0);
     }
 
-    function openDrawer(): void { /* Task 6 实现：pushState + showModal */ }
+    function openDrawer(): void {
+        drawerOpen = true;
+        history.pushState({ rrDrawer: true }, '');
+        drawerRef?.showModal();
+        document.body.style.overflow = 'hidden';
+    }
 
-    function startMove(id: string) { movingId = id; moveError = null; }
+    // 非返回键关闭须 await popstate 消费完 pushState 的那条 state 再做后续导航：
+    // SvelteKit goto 也 pushState，乱序会把刚推的导航条目弹掉（spec §6.4）。
+    function popOnce(): Promise<void> {
+        return new Promise((resolve) => {
+            const once = () => { window.removeEventListener('popstate', once); resolve(); };
+            window.addEventListener('popstate', once);
+            history.back();
+        });
+    }
+
+    async function closeDrawer(viaPopstate = false): Promise<void> {
+        if (!drawerOpen) return;
+        drawerOpen = false;
+        drawerRef?.close();
+        document.body.style.overflow = '';
+        menuBtn?.focus();
+        if (!viaPopstate && history.state?.rrDrawer) await popOnce();
+    }
+
+    // dialog 原生 Esc 关闭不经 closeDrawer，onclose 兜底同步状态
+    function onDrawerClose(): void {
+        if (drawerOpen) void closeDrawer();
+    }
+
+    // 抽屉内选目录：先消费完 history 再 goto（见 popOnce 注释）
+    async function selectFromDrawer(id: string | null): Promise<void> {
+        await closeDrawer();
+        await selectDir(id);
+    }
+
+    // 系统返回键 = 关抽屉而非退出整页（spec §6.4）
+    $effect(() => {
+        const onPop = () => { if (drawerOpen) void closeDrawer(true); };
+        window.addEventListener('popstate', onPop);
+        return () => window.removeEventListener('popstate', onPop);
+    });
+
+    function startMove(id: string) {
+        movingId = id; moveError = null;
+        // 移动端树在抽屉里：选择模式自动打开抽屉；桌面常驻左树无需弹层
+        if (typeof window !== 'undefined' && window.matchMedia('(max-width: 768px)').matches) openDrawer();
+    }
     async function pickTarget(targetId: string | null) {
         if (!movingId) return;
         const fd = new FormData();
@@ -58,6 +107,7 @@
         if (r.ok) {
             movingId = null;
             moveError = null;
+            await closeDrawer();
             await invalidateAll();
             await recentRef?.reSync();
         }
@@ -118,7 +168,7 @@
     <section class="fm-right" bind:this={rightPane}>
         <div class="fm-head">
             <div class="fm-title">
-                <button type="button" class="icon-btn menu-btn mobile-only"
+                <button type="button" class="icon-btn menu-btn mobile-only" bind:this={menuBtn}
                     aria-label="打开目录树" onclick={openDrawer}>
                     <svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M1 2.75A.75.75 0 0 1 1.75 2h12.5a.75.75 0 0 1 0 1.5H1.75A.75.75 0 0 1 1 2.75Zm0 5A.75.75 0 0 1 1.75 7h12.5a.75.75 0 0 1 0 1.5H1.75A.75.75 0 0 1 1 7.75ZM1.75 12h12.5a.75.75 0 0 1 0 1.5H1.75a.75.75 0 0 1 0-1.5Z"></path></svg>
                 </button>
@@ -289,6 +339,20 @@
     onSelect={onSheetAction}
 />
 
+<dialog class="drawer" bind:this={drawerRef} onclose={onDrawerClose} aria-label="目录导航">
+    {#if movingId !== null}
+        <p class="hint">选择移动目标，或<button class="link" onclick={() => (movingId = null)}>取消</button></p>
+        {#if moveError}<p class="error">{moveError}</p>{/if}
+    {/if}
+    <FolderTree
+        folders={treeFolders}
+        currentId={view === 'dir' ? currentDir : undefined}
+        selecting={movingId !== null}
+        onSelect={movingId !== null ? pickTarget : selectFromDrawer}
+        storageKey="rr:tree-expanded:{data.user?.id ?? 'anon'}"
+    />
+</dialog>
+
 <style>
     /* app-shell：顶栏 + 内容区恰好铺满视口（--nav-h 由 +layout 实测注入，-1rem 是 body
        上下 margin），滚动只发生在左右栏内部，页面级滚动条不再出现。
@@ -388,6 +452,20 @@
     .btn.primary:hover { background: var(--rr-btn-primary-hover); }
 
     .inline { display: inline-flex; }
+
+    /* 移动端目录树抽屉（spec §6）：左贴边、自身滚动、backdrop 取遮罩语义色；桌面 display:none */
+    .drawer {
+        position: fixed; inset: 0 auto 0 0;
+        width: min(80vw, 20rem); max-width: none; max-height: none;
+        margin: 0; border: none; border-right: 1px solid var(--rr-border);
+        border-radius: 0; padding: 1rem 0.75rem;
+        background: var(--rr-card-bg); color: var(--rr-text);
+        font-family: system-ui, sans-serif;
+    }
+    .drawer::backdrop { background: var(--rr-scrim); }
+    .drawer[open] { animation: drawer-in 180ms ease-out; }
+    @keyframes drawer-in { from { transform: translateX(-100%); } }
+    @media (min-width: 769px) { .drawer { display: none !important; } }
 
     .hint { color: var(--rr-success); font-size: 0.85em; }
     .error { color: var(--rr-danger); font-size: 0.9em; }
