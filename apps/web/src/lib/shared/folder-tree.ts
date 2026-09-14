@@ -59,3 +59,20 @@ export function folderNamesOf(byId: Map<string, TreeFolder>, parentId: string | 
     }
     return out;
 }
+
+// 面包屑用：目录自身的祖先链（自顶向下、含自身，带 id 供点击导航）；
+// 父缺失即止（脏数据安全），环走 MAX_TREE_DEPTH 上限安全截断。
+export type Crumb = { id: string; name: string };
+export function ancestorChainOf(byId: Map<string, TreeFolder>, id: string): Crumb[] {
+    const out: Crumb[] = [];
+    let cursor: string | null = id;
+    let depth = 0;
+    while (cursor) {
+        const node = byId.get(cursor);
+        if (!node) break;
+        if (depth++ > MAX_TREE_DEPTH) break;
+        out.unshift({ id: node.id, name: node.name });
+        cursor = node.parentId;
+    }
+    return out;
+}

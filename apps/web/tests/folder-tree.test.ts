@@ -1,5 +1,5 @@
 import { test, expect } from 'vitest';
-import { ancestorsOf, visibleNodes, folderNamesOf, type TreeFolder } from '../src/lib/shared/folder-tree';
+import { ancestorsOf, visibleNodes, folderNamesOf, ancestorChainOf, type TreeFolder } from '../src/lib/shared/folder-tree';
 
 function f(id: string, parentId: string | null, childFolders = 0, childFiles = 0): TreeFolder {
     return { id, name: id, parentId, childFolders, childFiles };
@@ -104,4 +104,33 @@ test('folderNamesOf parentId 环不死循环', () => {
     const cyc = new Map([f('x', 'y'), f('y', 'x')].map((x) => [x.id, x]));
     expect(() => folderNamesOf(cyc, 'x')).not.toThrow();
     expect(folderNamesOf(cyc, 'x').length).toBeLessThanOrEqual(1001);
+});
+
+// ===== ancestorChainOf（文件管理器面包屑，spec 2026-09-14 §5） =====
+
+test('ancestorChainOf 返回自顶向下 id+name 链（含自身）', () => {
+    const byId = new Map(fixture().map((x) => [x.id, x]));
+    expect(ancestorChainOf(byId, 'd')).toEqual([
+        { id: 'a', name: 'a' }, { id: 'b', name: 'b' }, { id: 'c', name: 'c' }, { id: 'd', name: 'd' }
+    ]);
+});
+
+test('ancestorChainOf 顶层目录返回仅自身', () => {
+    const byId = new Map(fixture().map((x) => [x.id, x]));
+    expect(ancestorChainOf(byId, 'a')).toEqual([{ id: 'a', name: 'a' }]);
+});
+
+test('ancestorChainOf 不存在的 id / 空 Map 返回空数组', () => {
+    expect(ancestorChainOf(new Map(), 'nope')).toEqual([]);
+});
+
+test('ancestorChainOf 父缺失即止（脏数据安全）', () => {
+    const byId = new Map([f('orphan', 'missing')].map((x) => [x.id, x]));
+    expect(ancestorChainOf(byId, 'orphan')).toEqual([{ id: 'orphan', name: 'orphan' }]);
+});
+
+test('ancestorChainOf parentId 环不死循环（深度上限截断）', () => {
+    const cyc = new Map([f('x', 'y'), f('y', 'x')].map((x) => [x.id, x]));
+    expect(() => ancestorChainOf(cyc, 'x')).not.toThrow();
+    expect(ancestorChainOf(cyc, 'x').length).toBeLessThanOrEqual(1001);
 });
