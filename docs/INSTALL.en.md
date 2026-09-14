@@ -111,7 +111,7 @@ Recommended: keep the process alive with systemd / pm2, behind an HTTPS reverse 
 
 ### 4.1 Register the first admin
 
-After startup, visit `/register` and register with `INITIAL_INVITE_CODE` — **the first registered user automatically becomes `admin`**. Subsequent users register as `member`. Rotating `INITIAL_INVITE_CODE` after the initial batch of users is recommended.
+After startup, visit `/register` and register with `INITIAL_INVITE_CODE` — **the first registered user automatically becomes `admin`**. Subsequent users register as `member`. Once the first admin exists, DB invite codes can be generated at `/settings/invites` to invite others (see the user guide); `INITIAL_INVITE_CODE` is a long-lived bootstrap code — rotate it after the initial batch of users.
 
 ### 4.2 Generate an API token (for the Agent)
 
@@ -245,7 +245,7 @@ Docker deployments: migrations are already executed at image build time; a schem
 | Variable | Default | Description |
 |---|---|---|
 | `SESSION_SECRET` | (none, required in production) | Session signing key; missing in production fails fast, missing in dev uses an insecure default and warns |
-| `INITIAL_INVITE_CODE` | (none) | Invite code required to register |
+| `INITIAL_INVITE_CODE` | (none) | Bootstrap invite code: required to register the first admin, valid long-term; afterwards use DB invite codes from `/settings/invites` |
 | `DATABASE_PATH` | `./data/app.db` | SQLite path (relative to the runtime cwd) |
 | `DATA_DIR` | `./data/documents` | Root directory where documents persist to disk |
 | `BASE_URL` | `http://localhost:5173` | External URL prefix used when generating share links |
@@ -273,7 +273,7 @@ Docker deployments: migrations are already executed at image build time; a schem
 | Production startup reports `Invalid BODY_SIZE_LIMIT` | Use a byte count (e.g. `8388608`), no unit |
 | `better-sqlite3 ... not supported` / `ERR_DLOPEN_FAILED` | You're starting the service with `bun run` — switch to `node apps/web/build/index.js` |
 | Upload >512K returns 413 but you're sure it's < `MAX_UPLOAD_BYTES` | `BODY_SIZE_LIMIT` is smaller than the content size (adapter-node default is only 512K) |
-| Invite code rejected at registration | Verify `INITIAL_INVITE_CODE` matches what was set at startup |
+| Invite code rejected at registration | Bootstrap code: verify `INITIAL_INVITE_CODE` matches what was set at startup; DB code: may have expired or been revoked (check `/settings/invites`) |
 | seed-token reports `Cannot find package 'better-sqlite3'` | Run it from the **repository root** (not apps/web) |
 | Docker container `unhealthy` | `docker compose logs web`; usually a missing port/config/env |
 | Share link won't open / 404 | Share token revoked or document deleted; have the Agent re-upload |

@@ -243,6 +243,7 @@ Agent                   本地桥              Web应用              用户
 | `/register` | 邀请码 | 接受邀请注册（管理员邀请制） |
 | `/settings/tokens` | 需登录 | API token 管理（生成/查看/撤销） |
 | `/settings/shares` | 需登录 | 分享链接管理（查看/撤销） |
+| `/settings/invites` | 需登录（admin） | 邀请码管理（生成/撤销，2026-09-14） |
 
 ---
 
@@ -425,7 +426,7 @@ API token：UI 内可生成（`/settings/tokens`），不再依赖 `node scripts
 
 ### 15.3 待做
 
-子计划 1/2/3 及后续增强（视觉改造 / 表格手机端渲染 / tags + 全文搜索 / 代码高亮语言扩充 / 冷热分层归档 2026-09-04——spec 见 `2026-09-04-cold-hot-tiering-design.md`）均已完成。剩余仅为 Phase 3 扩展：
+子计划 1/2/3 及后续增强（视觉改造 / 表格手机端渲染 / tags + 全文搜索 / 代码高亮语言扩充 / 冷热分层归档 2026-09-04——spec 见 `2026-09-04-cold-hot-tiering-design.md` / 邀请码管理 2026-09-14：注册邀请码升级为 DB 管理——`invite_codes` 表仅存 sha256 哈希，admin 专属 `/settings/invites` 生成/软撤销/一次性 reveal，注册 = env 引导码（`INITIAL_INVITE_CODE`，长期有效）或未过期未撤销的 DB 码，核销走同步事务）均已完成。剩余仅为 Phase 3 扩展：
 
 - 远程 MCP server（Streamable HTTP，复用 `packages/shared` 的工具函数）
 

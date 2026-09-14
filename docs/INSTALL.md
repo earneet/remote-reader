@@ -166,7 +166,7 @@ node apps/web/build/index.js
 
 ### 5.1 注册首个管理员
 
-启动后访问 `/register`，用 `INITIAL_INVITE_CODE` 注册——**第一个注册的用户自动成为 `admin`**。之后注册的用户为 `member`。`INITIAL_INVITE_CODE` 建议注册完首批用户后轮换。
+启动后访问 `/register`，用 `INITIAL_INVITE_CODE` 注册——**第一个注册的用户自动成为 `admin`**。之后注册的用户为 `member`。首个 admin 就位后可在 `/settings/invites` 生成 DB 邀请码邀请他人（详见用户手册）；`INITIAL_INVITE_CODE` 为引导码，长期有效，建议注册完首批用户后轮换。
 
 ### 5.2 生成 API token（给 Agent）
 
@@ -324,7 +324,7 @@ bun --filter remote-reader-web db:migrate    # 应用（生产在停服/维护�
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `SESSION_SECRET` | （无，生产必填） | session 签名密钥；生产缺失 fail-fast，dev 缺失用不安全默认并告警 |
-| `INITIAL_INVITE_CODE` | （无） | 注册所需邀请码 |
+| `INITIAL_INVITE_CODE` | （无） | 引导邀请码：注册首个 admin 所必需，长期有效；此后可用 `/settings/invites` 的 DB 邀请码 |
 | `DATABASE_PATH` | `./data/app.db` | SQLite 路径（相对运行时 cwd） |
 | `DATA_DIR` | `./data/documents` | 文档落盘根目录 |
 | `BASE_URL` | `http://localhost:5173` | 生成分享链接的外链前缀 |
@@ -354,7 +354,7 @@ bun --filter remote-reader-web db:migrate    # 应用（生产在停服/维护�
 | 生产启动报 `Invalid BODY_SIZE_LIMIT` | 改成字节数（如 `8388608`），不带单位 |
 | `better-sqlite3 ... not supported` / `ERR_DLOPEN_FAILED` | 你在用 `bun run` 启服务——改用 `node apps/web/build/index.js` |
 | 上传 >512K 返回 413 但你确定 < `MAX_UPLOAD_BYTES` | `BODY_SIZE_LIMIT` < 内容大小（adapter-node 默认仅 512K） |
-| 注册时邀请码无效 | 核对 `INITIAL_INVITE_CODE` 与启动时一致 |
+| 注册时邀请码无效 | 引导码：核对 `INITIAL_INVITE_CODE` 与启动时一致；DB 码：可能已过期或被 admin 撤销（`/settings/invites` 查看） |
 | seed-token 报 `Cannot find package 'better-sqlite3'` | 在**仓库根目录**执行（非 apps/web） |
 | 链接打不开 / 404 | share token 失效或文档被删；让 Agent 重新上传 |
 | 端口 5173 被占 | dev 自动切 5174；或改 `--port` |

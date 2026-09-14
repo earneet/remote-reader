@@ -61,7 +61,7 @@ bun --filter remote-reader-web dev          # http://localhost:5173 (falls back 
 
 Then:
 
-1. Visit `/register` and register with `INITIAL_INVITE_CODE` (the first user automatically becomes admin)
+1. Visit `/register` and register with `INITIAL_INVITE_CODE` (the first user automatically becomes admin; afterwards invite others via `/settings/invites`)
 2. Generate an API token: `node scripts/seed-token.mjs <your-email>` (the plaintext is shown only once — save it immediately)
 3. Upload a document:
 

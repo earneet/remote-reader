@@ -61,7 +61,7 @@ bun --filter remote-reader-web dev          # http://localhost:5173（被占会�
 
 然后：
 
-1. 访问 `/register`，用 `INITIAL_INVITE_CODE` 注册（首个用户自动成为 admin）
+1. 访问 `/register`，用 `INITIAL_INVITE_CODE` 注册（首个用户自动成为 admin；此后可在 `/settings/invites` 生成邀请码邀请他人）
 2. 生成 API token：`node scripts/seed-token.mjs <your-email>`（明文仅显示一次，立即保存）
 3. 上传文档：
 

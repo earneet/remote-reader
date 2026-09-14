@@ -58,7 +58,9 @@ For full deployment (Docker / manual node / reverse proxy / HTTPS / backup / upg
 
 ### 1.1 Register first admin
 
-After startup, visit `/register` and register with `INITIAL_INVITE_CODE` — **the first registered user automatically becomes `admin`**. Subsequently registered users become `member`. It is recommended to rotate `INITIAL_INVITE_CODE` after the first batch of users has registered.
+After startup, visit `/register` and register with `INITIAL_INVITE_CODE` — **the first registered user automatically becomes `admin`**. Subsequently registered users become `member`.
+
+Once the first admin exists, DB invite codes can be generated at `/settings/invites` (admin-only) to invite others: choose a validity window (1/7/30 days) at creation, reusable within validity, revocable anytime; the plaintext is shown exactly once. `INITIAL_INVITE_CODE` is a long-lived bootstrap code — rotate it after the initial batch of users, or switch to DB invite codes.
 
 ### 1.2 API token management ✅
 
@@ -196,7 +198,7 @@ To browse / delete / organize your own document library: visit the site home →
 | Variable | Default | Description |
 |---|---|---|
 | `SESSION_SECRET` | (none, required in production) | Session signing key; missing in production triggers fail-fast, missing in dev falls back to an insecure default with a warning |
-| `INITIAL_INVITE_CODE` | (none) | Invite code required for registration |
+| `INITIAL_INVITE_CODE` | (none) | Bootstrap invite code: required to register the first admin, valid long-term; afterwards use DB invite codes from `/settings/invites` |
 | `DATABASE_PATH` | `./data/app.db` | SQLite path (relative to the runtime cwd) |
 | `DATA_DIR` | `./data/documents` | Root directory for documents persisted to disk |
 | `BASE_URL` | `http://localhost:5173` | External URL prefix used when generating share links |
@@ -223,7 +225,7 @@ To browse / delete / organize your own document library: visit the site home →
 | `better-sqlite3 ... not supported` / `ERR_DLOPEN_FAILED` | You are starting the service with `bun run` — switch to `node apps/web/build/index.js` |
 | `bun run test` reports better-sqlite3 load failure | Don't use `bun test`; tests run under vitest via `bun run test` (through node) |
 | Upload >512K returns 413 but you are certain it's < `MAX_UPLOAD_BYTES` | `BODY_SIZE_LIMIT` is smaller than the content size (adapter-node defaults to just 512K) |
-| Invite code invalid at registration | Verify `INITIAL_INVITE_CODE` matches what was used at startup |
+| Invite code invalid at registration | Bootstrap code: verify `INITIAL_INVITE_CODE` matches what was used at startup; DB code: may have expired or been revoked (check `/settings/invites`) |
 | seed-token reports `Cannot find package 'better-sqlite3'` | Run it from the **repo root** (not apps/web) |
 | Docker container `unhealthy` | `docker compose logs web`; commonly a missing port/config/env |
 | Link won't open / 404 | Share token revoked or document deleted; have the Agent re-upload |
