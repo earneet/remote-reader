@@ -7,6 +7,7 @@ import { uploadDocument } from '../src/lib/server/documents';
 
 const tokensMod = await import('../src/routes/settings/tokens/+page.server');
 const sharesMod = await import('../src/routes/settings/shares/+page.server');
+const invitesMod = await import('../src/routes/settings/invites/+page.server');
 
 const TMP = `./data/test-settings-${Date.now().toString(36)}`;
 
@@ -18,6 +19,7 @@ beforeEach(() => {
     db.delete(schema.shareLinks).run();
     db.delete(schema.apiTokens).run();
     db.delete(schema.documents).run();
+    db.delete(schema.inviteCodes).run();
     db.delete(schema.users).run();
 });
 
@@ -27,9 +29,9 @@ afterEach(() => {
     } catch {}
 });
 
-function insertUser(id: string): void {
+function insertUser(id: string, role: 'admin' | 'member' = 'member'): void {
     db.insert(schema.users).values({
-        id, email: `t-${id}@x.com`, passwordHash: 'x', role: 'member', createdAt: Date.now()
+        id, email: `t-${id}@x.com`, passwordHash: 'x', role, createdAt: Date.now()
     }).run();
 }
 
@@ -133,4 +135,66 @@ test('shares revoke 空 token → 400', async () => {
 
 test('shares 未登录 load → redirect 302', async () => {
     await expect(sharesMod.load({ locals: { user: null } } as never)).rejects.toMatchObject({ status: 302 });
+});
+
+// ===== settings/invites =====
+
+test('invites 未登录 load → redirect 302', async () => {
+    await expect(invitesMod.load({ locals: { user: null } } as never)).rejects.toMatchObject({ status: 302 });
+});
+
+test('invites member load → 403', async () => {
+    const uid = generateId();
+    insertUser(uid);
+    await expect(invitesMod.load({ locals: { user: { id: uid, role: 'member' } } } as never))
+        .rejects.toMatchObject({ status: 403 });
+});
+
+test('invites admin create 返回 ri_ 明文且 load 列表不含 codeHash', async () => {
+    const adminId = generateId();
+    insertUser(adminId, 'admin');
+    const r = (await invitesMod.actions.create({
+        locals: { user: { id: adminId, role: 'admin' } }, request: formRequest({ note: 'new', days: '7' })
+    } as never)) as { plaintext: string };
+    expect(r.plaintext).toMatch(/^ri_/);
+    const result = (await invitesMod.load({ locals: { user: { id: adminId, role: 'admin' } } } as never)) as { invites: unknown[] };
+    expect(result.invites.length).toBe(1);
+    expect(JSON.stringify(result)).not.toContain('codeHash');
+});
+
+test('invites create 空 note → 400', async () => {
+    const adminId = generateId();
+    insertUser(adminId, 'admin');
+    await expect(invitesMod.actions.create({
+        locals: { user: { id: adminId, role: 'admin' } }, request: formRequest({ note: '', days: '7' })
+    } as never)).rejects.toMatchObject({ status: 400 });
+});
+
+test('invites create 非法 days → 400', async () => {
+    const adminId = generateId();
+    insertUser(adminId, 'admin');
+    await expect(invitesMod.actions.create({
+        locals: { user: { id: adminId, role: 'admin' } }, request: formRequest({ note: 'x', days: '5' })
+    } as never)).rejects.toMatchObject({ status: 400 });
+});
+
+test('invites member create → 403', async () => {
+    const uid = generateId();
+    insertUser(uid);
+    await expect(invitesMod.actions.create({
+        locals: { user: { id: uid, role: 'member' } }, request: formRequest({ note: 'x', days: '7' })
+    } as never)).rejects.toMatchObject({ status: 403 });
+});
+
+test('invites revoke 置 revokedAt', async () => {
+    const adminId = generateId();
+    insertUser(adminId, 'admin');
+    await invitesMod.actions.create({
+        locals: { user: { id: adminId, role: 'admin' } }, request: formRequest({ note: 'x', days: '7' })
+    } as never);
+    const row = db.select().from(schema.inviteCodes).all()[0];
+    await invitesMod.actions.revoke({
+        locals: { user: { id: adminId, role: 'admin' } }, request: formRequest({ id: row.id })
+    } as never);
+    expect(db.select().from(schema.inviteCodes).all()[0].revokedAt).not.toBeNull();
 });
