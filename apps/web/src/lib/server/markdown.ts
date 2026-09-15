@@ -103,6 +103,8 @@ async function getMarkdown(): Promise<MarkdownIt> {
         if (close === -1 || close === state.pos + 1) return false;
         const content = state.src.slice(state.pos + 1, close);
         if (content.includes('\n')) return false;
+        // KaTeX 定界符惯例：$...$ 首尾不能是空白——防「价格 $5 和 $10」这类货币写法被误判为公式
+        if (/^\s|\s$/.test(content)) return false;
         if (!silent) {
             const tok = state.push('math_inline', 'span', 0);
             tok.markup = '$';
@@ -118,24 +120,29 @@ async function getMarkdown(): Promise<MarkdownIt> {
             const start = state.bMarks[startLine] + state.tShift[startLine];
             if (start + 2 > state.eMarks[startLine]) return false;
             if (state.src.slice(start, start + 2) !== '$$') return false;
-            if (silent) return true;
             let nextLine = startLine;
+            let closed = false;
             while (nextLine < endLine) {
                 nextLine++;
                 const pos = state.bMarks[nextLine] + state.tShift[nextLine];
-                if (state.src.slice(pos, pos + 2) === '$$') break;
+                if (state.src.slice(pos, pos + 2) === '$$') { closed = true; break; }
             }
-            if (nextLine >= endLine) return false;
-            const contentStart = state.bMarks[startLine + 1];
-            const contentEnd = state.eMarks[nextLine - 1];
+            // 未闭合按普通文本回落（silent 与实际解析判定一致，防段落中断探测误报）
+            if (!closed) return false;
+            if (silent) return true;
+            // $$ 同行尾随内容并入公式体（KaTeX 惯例：`$$ E=mc^2` 不应丢弃 E=mc^2）
+            const firstLineRest = state.src.slice(start + 2, state.eMarks[startLine]).trim();
+            const midBody = state.src.slice(state.bMarks[startLine + 1], state.eMarks[nextLine - 1]).trim();
             const tok = state.push('math_block', 'div', 0);
             tok.block = true;
             tok.markup = '$$';
-            tok.content = state.src.slice(contentStart, contentEnd).trim();
+            tok.content = firstLineRest && midBody ? `${firstLineRest}\n${midBody}` : (firstLineRest || midBody);
             tok.map = [startLine, nextLine];
             state.line = nextLine + 1;
             return true;
-        }
+        },
+        // 允许中断段落：正文段落直连 $$ 公式块（无空行分隔）也要渲染
+        { alt: ['paragraph', 'reference'] }
     );
     md.renderer.rules.math_inline = (tokens: any, idx: number) =>
         `<span class="math inline">${md.utils.escapeHtml(tokens[idx].content)}</span>`;

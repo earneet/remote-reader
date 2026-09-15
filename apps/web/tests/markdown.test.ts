@@ -86,3 +86,28 @@ test('表格被 overflow 壳包裹（防手机撑破布局）', async () => {
     expect(html).toContain('</table></div>');
     expect(html).toContain('<table>');
 });
+
+// ===== math 解析器边界（cycle2 审查）=====
+
+test('货币写法 $5 和 $10 不误判为行内公式（首尾空白防护）', async () => {
+    const html = await renderMarkdown('价格 $5 和 $10 总计');
+    expect(html).not.toContain('class="math inline"');
+});
+
+test('紧邻正文的 $$ 公式块也渲染（段落中断，无空行分隔）', async () => {
+    const html = await renderMarkdown('前文段落\n$$\nx = y\n$$');
+    expect(html).toContain('class="math block"');
+    expect(html).toContain('x = y');
+});
+
+test('$$ 同行尾随内容并入公式体不丢弃', async () => {
+    const html = await renderMarkdown('$$ E=mc^2\n$$');
+    expect(html).toContain('class="math block"');
+    expect(html).toContain('E=mc^2');
+});
+
+test('未闭合 $$ 按普通文本回落，不吞后续内容', async () => {
+    const html = await renderMarkdown('$$\n没有闭合的公式\n\n后面段落');
+    expect(html).not.toContain('class="math block"');
+    expect(html).toContain('后面段落');
+});
