@@ -66,3 +66,15 @@ test('末段 .. 归一化后为空 → 抛（#50）', () => {
     expect(() => parsePath('a/..')).toThrow();
     expect(() => parsePath('a/b/../..')).toThrow();
 });
+
+test('单段超 255 字节 → 抛（NAME_MAX，防 ENAMETOOLONG 500 + 孤儿 folder 行）', () => {
+    expect(() => parsePath('a'.repeat(256) + '.md')).toThrow(/segment too long/);
+    expect(() => parsePath('ok/' + 'b'.repeat(256))).toThrow(/segment too long/);
+    // 多字节按字节计，不按字符数：'每' = 3 字节 × 86 = 258 字节
+    expect(() => parsePath('每'.repeat(86))).toThrow(/segment too long/);
+});
+
+test('单段恰 255 字节合法', () => {
+    expect(parsePath('a'.repeat(255))).toEqual(['a'.repeat(255)]);
+    expect(parsePath('每'.repeat(85))).toEqual(['每'.repeat(85)]); // 255 字节整
+});

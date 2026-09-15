@@ -70,6 +70,20 @@ test('401 / 413 / 429 映射', async () => {
     }
 });
 
+test('409 冲突透传服务端 message（Agent 才知道该换 path，B2 回归）', async () => {
+    mockFetch(409, { message: '路径段 "reports" 已被同名文件占用，无法作为目录' });
+    await expect(
+        createApiClient({ baseUrl: 'http://x', token: 't' }).uploadDocument({ name: 'n', content: 'c' })
+    ).rejects.toMatchObject({ status: 409, message: expect.stringContaining('已被同名文件占用') });
+});
+
+test('409 无 message → 保留状态码兜底文案', async () => {
+    mockFetch(409, {});
+    await expect(
+        createApiClient({ baseUrl: 'http://x', token: 't' }).uploadDocument({ name: 'n', content: 'c' })
+    ).rejects.toMatchObject({ status: 409, message: '上传失败：HTTP 409' });
+});
+
 test('网络错误映射为 ApiError(status=0)', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => {
         throw new Error('ENOTFOUND');

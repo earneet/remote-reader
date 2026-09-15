@@ -29,8 +29,9 @@ export function loadConfig(): BridgeConfig {
             console.error(`[remote-reader] 配置文件 ${file} 不是合法 JSON，已忽略——请检查是否有多余逗号/引号`);
         }
     }
-    const baseUrl = (process.env.REMOTE_READER_URL || fileUrl || '').trim();
-    const token = (process.env.REMOTE_READER_TOKEN || fileToken || '').trim();
+    // 先 trim 再 fallback：空白 env（如模板残留空格）是 truthy，会静默压过文件里的合法配置并误报“缺少配置”
+    const baseUrl = (process.env.REMOTE_READER_URL ?? '').trim() || (fileUrl ?? '').trim();
+    const token = (process.env.REMOTE_READER_TOKEN ?? '').trim() || (fileToken ?? '').trim();
     if (!baseUrl || !token) {
         console.error(
             '[remote-reader] 缺少配置：需要 baseUrl 与 token。\n' +

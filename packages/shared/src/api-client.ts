@@ -32,7 +32,8 @@ function mapMessage(status: number, msg: string | undefined): string {
         case 429:
             return '上传过于频繁，请稍后重试';
         default:
-            return `上传失败：HTTP ${status}`;
+            // 透传服务端 message（如 409 的“路径段已被同名文件占用”）——否则 Agent 无从自愈
+            return msg ? `上传失败：HTTP ${status}：${msg}` : `上传失败：HTTP ${status}`;
     }
 }
 

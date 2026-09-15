@@ -31,6 +31,8 @@
 
 **运行时分工（重要）**：`better-sqlite3` 是原生 addon，**bun 直接运行时加载失败**（仅 `bun + vite dev/build` 下可用）。因此测试用 vitest（node 下跑）、dev/build/install 用 bun、**生产用 `node apps/web/build/index.js`**。三种部署方式都已按此处理。
 
+**文件系统要求**：`DATA_DIR` 所在盘须为**大小写敏感**文件系统（Linux 原生满足；Docker 镜像基于 Linux）。macOS 默认 APFS 卷大小写不敏感——在其上运行服务端时，`Report.md` 与 `report.md` 会被视为同一物理文件，导致两行 DB 记录共享一份磁盘内容（数据错位）。macOS 开发请用大小写敏感的区分大小写卷/磁盘映像存放 `DATA_DIR`。
+
 ---
 
 ## 2. 方式一：systemd 一键安装（最简）

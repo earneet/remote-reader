@@ -47,3 +47,10 @@ test('都缺失则 process.exit(1)', () => {
     expect(spy).toHaveBeenCalledWith(1);
     spy.mockRestore();
 });
+
+test('空白 env 值回退到文件配置而非误报缺少配置（B5 回归）', () => {
+    writeFileSync(CFG_FILE, JSON.stringify({ baseUrl: 'https://file', token: 'rr_file' }));
+    process.env.REMOTE_READER_URL = '   ';
+    process.env.REMOTE_READER_TOKEN = ' ';
+    expect(loadConfig()).toEqual({ baseUrl: 'https://file', token: 'rr_file' });
+});
