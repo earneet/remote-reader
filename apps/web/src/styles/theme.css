@@ -41,6 +41,8 @@
     --rr-warning-soft: #fff8c5;
     --rr-warning-border: #d4a72c;
     --rr-scrim: rgba(0, 0, 0, 0.4);
+    /* lightbox/mermaid 全屏遮罩用的更强遮蔽（浅深两档同值：内容以暗底对比为主） */
+    --rr-scrim-strong: rgba(0, 0, 0, 0.8);
 }
 
 [data-theme="dark"] {
@@ -81,6 +83,7 @@
     --rr-warning-soft: rgba(187, 128, 9, 0.15);
     --rr-warning-border: #bb8009;
     --rr-scrim: rgba(0, 0, 0, 0.6);
+    --rr-scrim-strong: rgba(0, 0, 0, 0.8);
 }
 
 /* body 全局承接：/d/、login 等无页面级底色的路由在暗色下不再白底刺眼（G2） */

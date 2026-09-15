@@ -2,7 +2,7 @@ import { test, expect, beforeEach } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { db, schema, sqlite } from '../src/lib/server/db';
 import { generateId, hashPassword, hashToken } from '../src/lib/server/auth';
-import { listInvites, createInviteCode, revokeInvite, redeemInviteCode, isInviteCodeValid } from '../src/lib/server/invites';
+import { listInvites, createInviteCode, revokeInvite, redeemInviteCodeTx, isInviteCodeValid } from '../src/lib/server/invites';
 
 import { resetDb } from './helpers';
 let adminId: string;
@@ -19,6 +19,10 @@ beforeEach(async () => {
         createdAt: Date.now()
     }).run();
 });
+
+// 生产路径即事务内核销（register/+page.server.ts）；独立核销用同款事务包装
+const redeemTx = (code: string): boolean => db.transaction((tx) => redeemInviteCodeTx(tx, code));
+
 
 test('createInviteCode 落库 hash 并返回 ri_ 明文一次', async () => {
     const { id, plaintext } = await createInviteCode(adminId, '给同事', 7);
@@ -49,31 +53,31 @@ test('revokeInvite 软撤销（置 revokedAt），重复撤销返回 false', asy
 
 test('redeemInviteCode 有效码 → true 且核销 usedCount/lastUsedAt，可多次使用', async () => {
     const { plaintext } = await createInviteCode(adminId, 'a', 7);
-    expect(redeemInviteCode(plaintext)).toBe(true);
+    expect(redeemTx(plaintext)).toBe(true);
     const row = db.select().from(schema.inviteCodes).all()[0];
     expect(row.usedCount).toBe(1);
     expect(row.lastUsedAt).not.toBeNull();
     // 有效期内可多次使用（无 max_uses）
-    expect(redeemInviteCode(plaintext)).toBe(true);
+    expect(redeemTx(plaintext)).toBe(true);
     expect(db.select().from(schema.inviteCodes).all()[0].usedCount).toBe(2);
 });
 
 test('redeemInviteCode 错误码 → false', async () => {
     await createInviteCode(adminId, 'a', 7);
-    expect(redeemInviteCode('ri_nope')).toBe(false);
+    expect(redeemTx('ri_nope')).toBe(false);
 });
 
 test('redeemInviteCode 已过期 → false 且不核销', async () => {
     const { plaintext } = await createInviteCode(adminId, 'a', 1);
     db.update(schema.inviteCodes).set({ expiresAt: Date.now() - 1 }).run();
-    expect(redeemInviteCode(plaintext)).toBe(false);
+    expect(redeemTx(plaintext)).toBe(false);
     expect(db.select().from(schema.inviteCodes).all()[0].usedCount).toBe(0);
 });
 
 test('redeemInviteCode 已撤销 → false 且不核销', async () => {
     const { id, plaintext } = await createInviteCode(adminId, 'a', 7);
     revokeInvite(id);
-    expect(redeemInviteCode(plaintext)).toBe(false);
+    expect(redeemTx(plaintext)).toBe(false);
     expect(db.select().from(schema.inviteCodes).all()[0].usedCount).toBe(0);
 });
 

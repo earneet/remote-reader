@@ -295,15 +295,15 @@
         position: fixed;
         inset: 0;
         z-index: 1000;
-        background: rgba(0, 0, 0, 0.8);
+        background: var(--rr-scrim-strong);
         display: flex;
         align-items: center;
         justify-content: center;
         padding: 16px;
     }
     .rr-mermaid-overlay-inner {
-        background: var(--rr-card-bg, #fff);
-        border: 1px solid var(--rr-border, #d0d7de);
+        background: var(--rr-card-bg);
+        border: 1px solid var(--rr-border);
         border-radius: 12px;
         max-width: 95vw;
         max-height: 92vh;
@@ -317,13 +317,13 @@
         align-items: center;
         justify-content: space-between;
         padding: 6px 10px;
-        border-bottom: 1px solid var(--rr-border-soft, #eaecef);
-        background: var(--rr-bg, #f6f8fa);
+        border-bottom: 1px solid var(--rr-border-soft);
+        background: var(--rr-bg);
         flex-shrink: 0;
     }
     .rr-mermaid-label {
         font-size: 12px;
-        color: var(--rr-text-muted, #57606a);
+        color: var(--rr-text-muted);
     }
     .rr-mermaid-ctrls {
         display: flex;
@@ -333,16 +333,16 @@
         min-width: 28px;
         height: 28px;
         padding: 0 6px;
-        border: 1px solid var(--rr-border, #d0d7de);
+        border: 1px solid var(--rr-border);
         border-radius: 5px;
-        background: var(--rr-card-bg, #fff);
-        color: var(--rr-text-muted, #57606a);
+        background: var(--rr-card-bg);
+        color: var(--rr-text-muted);
         cursor: pointer;
         font-size: 14px;
         line-height: 1;
     }
     .rr-mermaid-btn:hover {
-        color: var(--rr-text, #1f2328);
+        color: var(--rr-text);
     }
     .rr-mermaid-stage {
         flex: 1;
@@ -371,7 +371,7 @@
     /* 全屏（⛶）：去标题栏、控件浮右上角、图表占满视口。
        class 驱动（.rr-fs）跨平台，:fullscreen 兜底桌面/Android 浏览器全屏。 */
     .rr-mermaid-overlay.rr-fs {
-        background: var(--rr-bg, #f6f8fa);
+        background: var(--rr-bg);
         padding: 0;
         align-items: stretch;
         justify-content: stretch;
@@ -398,11 +398,11 @@
         max-height: 100vh;
     }
     :global(.rr-mermaid-overlay.rr-fs) {
-        background: var(--rr-bg, #f6f8fa);
+        background: var(--rr-bg);
         padding: 0;
     }
     :global(.rr-mermaid-overlay:fullscreen) {
-        background: var(--rr-bg, #f6f8fa);
+        background: var(--rr-bg);
         padding: 0;
     }
     :global(.rr-mermaid-overlay:fullscreen .rr-mermaid-overlay-inner) {

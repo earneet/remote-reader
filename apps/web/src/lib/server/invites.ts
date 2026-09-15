@@ -79,10 +79,6 @@ export function redeemInviteCodeTx(tx: InviteTx, plaintext: string): boolean {
     return true;
 }
 
-export function redeemInviteCode(plaintext: string): boolean {
-    return db.transaction((tx) => redeemInviteCodeTx(tx, plaintext));
-}
-
 // 只验有效性不核销（注册流程的预检）：与 redeemInviteCodeTx 同一判定语义
 export function isInviteCodeValid(plaintext: string): boolean {
     const row = db.select().from(schema.inviteCodes)

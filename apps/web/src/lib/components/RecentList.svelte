@@ -289,7 +289,6 @@
     .sentinel { height: 1px; }
     .muted { color: var(--rr-text-muted); }
     .error { color: var(--rr-danger); font-size: 0.9em; }
-    .hint { color: var(--rr-success); font-size: 0.85em; }
     .link { border: none; background: none; color: var(--rr-link); cursor: pointer; padding: 0; }
 
     /* 窄屏：面包屑折行到第二行（spec §6.4） */

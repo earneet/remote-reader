@@ -61,19 +61,19 @@
         font-size: 16px;
         line-height: 1.75;
         font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-        color: var(--rr-text, #1f2328);
+        color: var(--rr-text);
         --rr-mono: "RR Mono", "Sarasa Mono SC", "Noto Sans Mono CJK SC", "Source Han Mono SC", "思源等宽", ui-monospace, SFMono-Regular, "SF Mono", "Cascadia Mono", "Cascadia Code", Consolas, "Liberation Mono", "DejaVu Sans Mono", Menlo, monospace;
         --rr-mono-west: ui-monospace, SFMono-Regular, "SF Mono", "Cascadia Mono", "Cascadia Code", Consolas, "Liberation Mono", "DejaVu Sans Mono", Menlo, monospace;
     }
     .markdown-body :global(a) {
-        color: var(--rr-link, #0969da);
+        color: var(--rr-link);
     }
     .markdown-body :global(a:hover) {
         text-decoration: underline;
     }
     .markdown-body :global(h1),
     .markdown-body :global(h2) {
-        border-bottom: 1px solid var(--rr-border-soft, #eaecef);
+        border-bottom: 1px solid var(--rr-border-soft);
         padding-bottom: 0.3em;
     }
     .markdown-body :global(pre) {
@@ -102,8 +102,8 @@
     .markdown-body :global(:not(pre) > code) {
         font-family: var(--rr-mono-west);
         padding: 0.15em 0.35em;
-        background: var(--rr-inline-code-bg, #eff2f5);
-        color: var(--rr-inline-code-text, #bc4b00);
+        background: var(--rr-inline-code-bg);
+        color: var(--rr-inline-code-text);
         border-radius: 4px;
     }
     .markdown-body :global(.rr-table-wrap) {
@@ -133,16 +133,16 @@
             display: inline-block;
             padding: 2px 10px;
             border-radius: 5px;
-            border: 1px solid var(--rr-border, #d0d7de);
-            background: var(--rr-card-bg, #fff);
-            color: var(--rr-text-muted, #57606a);
+            border: 1px solid var(--rr-border);
+            background: var(--rr-card-bg);
+            color: var(--rr-text-muted);
             cursor: pointer;
             font-size: 12px;
             line-height: 1.5;
             white-space: nowrap;
         }
         .markdown-body :global(.rr-table-outer .rr-table-expand-btn:hover) {
-            background: var(--rr-bg, #f6f8fa);
+            background: var(--rr-bg);
         }
     }
     @media (max-width: 768px) {
@@ -153,8 +153,8 @@
             display: inline-flex; align-items: center; justify-content: center;
             position: absolute; top: 4px; right: 4px; z-index: 2;
             width: 28px; height: 28px; border-radius: 5px;
-            border: 1px solid var(--rr-border, #d0d7de);
-            background: var(--rr-card-bg, #fff); color: var(--rr-text-muted, #57606a);
+            border: 1px solid var(--rr-border);
+            background: var(--rr-card-bg); color: var(--rr-text-muted);
             cursor: pointer; font-size: 14px; line-height: 1;
         }
     }
@@ -163,15 +163,15 @@
     }
     .markdown-body :global(th),
     .markdown-body :global(td) {
-        border: 1px solid var(--rr-border, #d0d7de);
+        border: 1px solid var(--rr-border);
         padding: 0.4rem 0.8rem;
         overflow-wrap: break-word;
     }
     .markdown-body :global(blockquote) {
-        border-left: 3px solid var(--rr-border, #d0d7de);
+        border-left: 3px solid var(--rr-border);
         margin: 1rem 0;
         padding: 0 1rem;
-        color: var(--rr-text-muted, #57606a);
+        color: var(--rr-text-muted);
     }
     .markdown-body :global(img) {
         max-width: 100%;

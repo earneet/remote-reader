@@ -280,21 +280,21 @@
 <style>
     .rr-tbl-overlay {
         position: fixed; inset: 0; z-index: 1000;
-        background: rgba(0, 0, 0, 0.8);
+        background: var(--rr-scrim-strong);
         display: flex; flex-direction: column;
     }
     .rr-tbl-bar {
         display: flex; align-items: center; justify-content: space-between;
         padding: 6px 10px; flex-shrink: 0; position: relative; z-index: 2;
-        background: var(--rr-bg, #f6f8fa);
-        border-bottom: 1px solid var(--rr-border-soft, #eaecef);
+        background: var(--rr-bg);
+        border-bottom: 1px solid var(--rr-border-soft);
     }
-    .rr-tbl-label { font-size: 12px; color: var(--rr-text-muted, #57606a); }
+    .rr-tbl-label { font-size: 12px; color: var(--rr-text-muted); }
     .rr-tbl-ctrls { display: flex; gap: 4px; }
     .rr-tbl-ctrls button {
         min-width: 28px; height: 28px; padding: 0 6px;
-        border: 1px solid var(--rr-border, #d0d7de); border-radius: 5px;
-        background: var(--rr-card-bg, #fff); color: var(--rr-text-muted, #57606a);
+        border: 1px solid var(--rr-border); border-radius: 5px;
+        background: var(--rr-card-bg); color: var(--rr-text-muted);
         cursor: pointer; font-size: 14px; line-height: 1;
     }
     .rr-tbl-stage {
@@ -316,23 +316,23 @@
         transform-origin: center center;
         box-sizing: border-box;
         user-select: text; -webkit-user-select: text;
-        background: var(--rr-card-bg, #fff); color: var(--rr-text, #1f2328);
+        background: var(--rr-card-bg); color: var(--rr-text);
         padding: 8px; border-radius: 8px;
     }
     .rr-tbl-scroll :global(table) { border-collapse: separate; border-spacing: 0; width: 100%; }
     .rr-tbl-scroll :global(th),
     .rr-tbl-scroll :global(td) {
         overflow-wrap: break-word;
-        border: 1px solid var(--rr-border, #d0d7de);
-        padding: 0.4rem 0.8rem; color: var(--rr-text, #1f2328);
+        border: 1px solid var(--rr-border);
+        padding: 0.4rem 0.8rem; color: var(--rr-text);
     }
     .rr-tbl-scroll :global(th) {
-        position: sticky; top: 0; background: var(--rr-card-bg, #fff); z-index: 1;
+        position: sticky; top: 0; background: var(--rr-card-bg); z-index: 1;
     }
-    .rr-tbl-scroll :global(a) { color: var(--rr-link, #0969da); }
+    .rr-tbl-scroll :global(a) { color: var(--rr-link); }
     .rr-tbl-scroll :global(:not(pre) > code) {
         font-family: ui-monospace, "SF Mono", Menlo, monospace;
-        background: var(--rr-inline-code-bg, #eff2f5); color: var(--rr-inline-code-text, #bc4b00);
+        background: var(--rr-inline-code-bg); color: var(--rr-inline-code-text);
         padding: 0.15em 0.35em; border-radius: 4px;
     }
     .rr-tbl-overlay.rr-fs .rr-tbl-bar {

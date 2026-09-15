@@ -99,9 +99,9 @@
         width: 32px;
         height: 32px;
         border-radius: 8px;
-        border: 1px solid var(--rr-border, #d0d7de);
-        background: var(--rr-toggle-bg, #eaeef1);
-        color: var(--rr-text-muted, #57606a);
+        border: 1px solid var(--rr-border);
+        background: var(--rr-toggle-bg);
+        color: var(--rr-text-muted);
         display: inline-flex;
         align-items: center;
         justify-content: center;
@@ -109,6 +109,6 @@
         padding: 0;
     }
     .rr-theme-toggle:hover {
-        color: var(--rr-text, #1f2328);
+        color: var(--rr-text);
     }
 </style>
