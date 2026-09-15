@@ -9,7 +9,8 @@ export function envInt(key: string, def: number): number {
 }
 
 export function getBaseUrl(): string {
-    return process.env.BASE_URL ?? 'http://localhost:5173';
+    // 尾斜杠归一化：拼接 `${getBaseUrl()}/s/${token}` 时防产生 `//s/<token>` 双斜杠链接（实测 404）
+    return (process.env.BASE_URL ?? 'http://localhost:5173').replace(/\/+$/, '');
 }
 
 export function getSessionMaxAgeSeconds(): number {

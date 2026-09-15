@@ -46,6 +46,13 @@ test('getBaseUrl 默认 + env 覆盖', () => {
     expect(getBaseUrl()).toBe('https://example.com');
 });
 
+test('getBaseUrl 尾斜杠归一化（防 //s/<token> 双斜杠 404）', () => {
+    process.env.BASE_URL = 'https://example.com/';
+    expect(getBaseUrl()).toBe('https://example.com');
+    process.env.BASE_URL = 'https://example.com//';
+    expect(getBaseUrl()).toBe('https://example.com');
+});
+
 test('getSessionMaxAgeSeconds 默认 30 天 + env 覆盖', () => {
     expect(getSessionMaxAgeSeconds()).toBe(2_592_000);
     process.env.SESSION_MAX_AGE = '3600';
