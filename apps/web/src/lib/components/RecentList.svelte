@@ -3,7 +3,11 @@
     import { RECENT_PAGE_SIZE, type RecentDoc, type RecentSort } from '$lib/shared/recent';
     import { folderNamesOf, type TreeFolder } from '$lib/shared/folder-tree';
     import { formatRelative } from '$lib/shared/time';
+    import { submitAction, actionErrorMessage } from '$lib/shared/form-action';
     import ActionSheet from '$components/ActionSheet.svelte';
+    import InlineNameForm from '$components/InlineNameForm.svelte';
+    import InlineTagForm from '$components/InlineTagForm.svelte';
+    import RowActions from '$components/RowActions.svelte';
 
     let {
         initialRows,
@@ -46,27 +50,6 @@
     let busyId = $state<string | null>(null);
 
     const pathOf = (item: RecentDoc): string => folderNamesOf(folderById, item.parentId).join(' / ');
-
-    // use: action 仅客户端挂载时执行（SSR 无真实 DOM），安全聚焦+全选（与页面同款）
-    function autofocus(node: HTMLInputElement) {
-        node.focus();
-        node.select();
-    }
-
-    // SvelteKit form action 直调（与页面 pickTarget 的 move 同款做法）：返回状态码供失败反馈
-    async function submitAction(action: string, fields: Record<string, string>): Promise<number> {
-        const fd = new FormData();
-        for (const [k, v] of Object.entries(fields)) fd.append(k, v);
-        const r = await fetch(`?/${action}`, { method: 'POST', body: fd });
-        return r.status;
-    }
-
-    function actionErrorMessage(status: number): string {
-        if (status === 409) return '同名节点已存在';
-        if (status === 400) return '名称非法';
-        if (status === 404) return '文档不存在（可能已被删除）';
-        return '操作失败，请重试';
-    }
 
     function cursorOfLast(): string | null {
         const last = rows[rows.length - 1];
@@ -139,8 +122,7 @@
         else if (key === 'delete') void doDelete(item);
     }
 
-    async function doRename(id: string): Promise<void> {
-        const name = renameValue.trim();
+    async function doRename(id: string, name: string): Promise<void> {
         if (!name) return;
         busyId = id;
         const status = await submitAction('rename', { id, name });
@@ -154,9 +136,9 @@
         }
     }
 
-    async function doSetTags(id: string): Promise<void> {
+    async function doSetTags(id: string, tags: string): Promise<void> {
         busyId = id;
-        const status = await submitAction('setTags', { id, tags: tagInput });
+        const status = await submitAction('setTags', { id, tags });
         busyId = null;
         if (status === 200) {
             taggingId = null;
@@ -204,14 +186,13 @@
         {#each rows as item (item.id)}
             <li class="item" class:editing={editingId === item.id}>
                 {#if editingId === item.id}
-                    <form class="rename-form" onsubmit={(e) => { e.preventDefault(); void doRename(item.id); }}>
-                        <input value={renameValue} required use:autofocus disabled={busyId === item.id}
-                            oninput={(e) => (renameValue = e.currentTarget.value)}
-                            onkeydown={(e) => { if (e.key === 'Escape') editingId = null; }}>
-                        <button type="submit" class="btn sm primary" disabled={busyId === item.id}>保存</button>
-                        <button type="button" class="btn sm" onclick={() => (editingId = null)}>取消</button>
-                        {#if renameError}<span class="form-error">{renameError}</span>{/if}
-                    </form>
+                    <InlineNameForm
+                        initialName={renameValue}
+                        busy={busyId === item.id}
+                        error={renameError}
+                        onSave={(name) => void doRename(item.id, name)}
+                        onCancel={() => (editingId = null)}
+                    />
                 {:else}
                     <span class="name">
                         <a href="/d/{item.id}">📄 {item.name}</a>
@@ -231,35 +212,27 @@
                             <span class="chip-static">{tg.name}</span>
                         {/each}
                         {#if taggingId === item.id}
-                            <form class="tag-form" onsubmit={(e) => { e.preventDefault(); void doSetTags(item.id); }}>
-                                <input value={tagInput} placeholder="逗号分隔，如 周报, api" use:autofocus disabled={busyId === item.id}
-                                    oninput={(e) => (tagInput = e.currentTarget.value)}
-                                    onkeydown={(e) => { if (e.key === 'Escape') taggingId = null; }}>
-                                <button type="submit" class="btn sm primary" disabled={busyId === item.id}>保存</button>
-                                <button type="button" class="btn sm" onclick={() => (taggingId = null)}>取消</button>
-                                {#if tagError}<span class="form-error">{tagError}</span>{/if}
-                            </form>
+                            <InlineTagForm
+                                initialValue={tagInput}
+                                busy={busyId === item.id}
+                                error={tagError}
+                                onSave={(tags) => void doSetTags(item.id, tags)}
+                                onCancel={() => (taggingId = null)}
+                            />
                         {:else}
                             <button class="icon-btn desktop-only" title="编辑标签"
                                 onclick={() => { taggingId = item.id; tagInput = item.tags.map((t) => t.name).join(', '); }}>🏷</button>
                         {/if}
                     </span>
-                    <span class="actions">
-                        <button type="button" class="icon-btn more-btn mobile-only" aria-label="更多操作"
-                            onclick={() => openSheet(item.id)}>
-                            <svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M8 9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3ZM1.5 9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Zm13 0a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z"></path></svg>
-                        </button>
-                        <span class="desktop-only inline-actions">
-                            <button class="icon-btn" title="重命名" onclick={() => startRename(item)}>✏</button>
-                            {#if movingId === item.id}
-                                <span class="hint">← 左树选目标</span>
-                                <button class="btn sm" onclick={onCancelMove}>取消</button>
-                            {:else}
-                                <button class="icon-btn" title="移动到…" onclick={() => onStartMove(item.id)}>📂</button>
-                            {/if}
-                            <button class="icon-btn danger" title="删除" onclick={() => void doDelete(item)}>🗑</button>
-                        </span>
-                    </span>
+                    <RowActions
+                        moving={movingId === item.id}
+                        busy={busyId === item.id}
+                        onMore={() => openSheet(item.id)}
+                        onRename={() => startRename(item)}
+                        onMove={() => onStartMove(item.id)}
+                        onCancelMove={onCancelMove}
+                        onDelete={() => void doDelete(item)}
+                    />
                 {/if}
             </li>
         {/each}
@@ -289,7 +262,6 @@
 />
 
 <style>
-    /* 与目录视图行样式同源（Svelte 样式作用域隔离，组件各持一份） */
     .empty { padding: 2rem 0; }
     .items { list-style: none; padding: 0; margin: 1rem 0; }
     .item {
@@ -312,41 +284,11 @@
     }
     .time { color: var(--rr-text-muted); font-size: 0.8em; flex-shrink: 0; font-variant-numeric: tabular-nums; }
 
-    .actions { display: inline-flex; align-items: center; gap: 0.2rem; flex-shrink: 0; }
-    .more-btn { padding: 0.45rem 0.5rem; }
-    .inline-actions { display: inline-flex; align-items: center; gap: 0.2rem; }
-
-    .rename-form { display: flex; align-items: center; gap: 0.5rem; flex: 1; min-width: 0; }
-    .rename-form input {
-        flex: 1; min-width: 0; padding: 0.3rem 0.5rem;
-        border: 1px solid var(--rr-accent); border-radius: 5px; font-size: 0.95rem; background: var(--rr-input-bg);
-    }
-    .rename-form input:focus { outline: none; box-shadow: 0 0 0 2px var(--rr-focus-ring); }
-
-    .icon-btn {
-        border: 1px solid transparent; background: transparent; cursor: pointer;
-        padding: 0.35rem 0.5rem; border-radius: 5px; color: var(--rr-text-muted); font-size: 1rem; line-height: 1;
-    }
-    .icon-btn:hover { background: var(--rr-btn-bg); border-color: var(--rr-btn-border); color: var(--rr-btn-text); }
-    .icon-btn.danger:hover { color: var(--rr-danger); border-color: var(--rr-danger); }
-
-    .btn {
-        border: 1px solid var(--rr-btn-border); background: var(--rr-btn-bg); color: var(--rr-btn-text); cursor: pointer;
-        padding: 0.35rem 0.8rem; border-radius: 5px; font-size: 0.85rem; line-height: 1.2;
-    }
-    .btn.sm { padding: 0.3rem 0.65rem; }
-    .btn.primary { background: var(--rr-btn-primary-bg); color: var(--rr-btn-primary-text); border-color: var(--rr-btn-primary-bg); }
-    .btn.primary:hover { background: var(--rr-btn-primary-hover); }
-
     .doc-tags { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.25rem; }
-    .chip-static { display: inline-block; padding: 0 0.4rem; background: var(--rr-accent-soft); color: var(--rr-link); border-radius: 999px; font-size: 0.72rem; }
-    .tag-form { display: inline-flex; align-items: center; gap: 0.3rem; }
-    .tag-form input { padding: 0.25rem 0.5rem; border: 1px solid var(--rr-accent); border-radius: 5px; font-size: 0.8rem; min-width: 12rem; }
 
     .sentinel { height: 1px; }
     .muted { color: var(--rr-text-muted); }
     .error { color: var(--rr-danger); font-size: 0.9em; }
-    .form-error { color: var(--rr-danger); font-size: 0.8em; white-space: nowrap; }
     .hint { color: var(--rr-success); font-size: 0.85em; }
     .link { border: none; background: none; color: var(--rr-link); cursor: pointer; padding: 0; }
 

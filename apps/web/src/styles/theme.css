@@ -114,3 +114,34 @@ pre.shiki {
     .mobile-only { display: revert !important; }
     .desktop-only { display: none !important; }
 }
+
+/* ── 行级控件基类（全局单源，A-1）──────────────────────────────
+   目录视图（+page.svelte）与 RecentList/RowActions/InlineNameForm/InlineTagForm 共用；
+   原先两处 scoped 各持一份 ~90 行副本。settings 等页自带 scoped 同名类时
+   特异性（0,2,0）高于此处（0,1,0），互不影响。 */
+.btn {
+    border: 1px solid var(--rr-btn-border); background: var(--rr-btn-bg); color: var(--rr-btn-text);
+    cursor: pointer; padding: 0.35rem 0.8rem; border-radius: 5px; font-size: 0.85rem; line-height: 1.2;
+    font-family: inherit;
+}
+.btn.sm { padding: 0.3rem 0.65rem; }
+.btn.primary {
+    background: var(--rr-btn-primary-bg); color: var(--rr-btn-primary-text);
+    border-color: var(--rr-btn-primary-bg);
+}
+.btn.primary:hover { background: var(--rr-btn-primary-hover); }
+.btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.icon-btn {
+    border: 1px solid transparent; background: transparent; cursor: pointer;
+    padding: 0.35rem 0.5rem; border-radius: 5px; color: var(--rr-text-muted);
+    font-size: 1rem; line-height: 1; font-family: inherit;
+}
+.icon-btn:hover { background: var(--rr-btn-bg); border-color: var(--rr-btn-border); color: var(--rr-btn-text); }
+.icon-btn.danger:hover { color: var(--rr-danger); border-color: var(--rr-danger); }
+.icon-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.chip-static {
+    display: inline-block; padding: 0 0.4rem; background: var(--rr-accent-soft);
+    color: var(--rr-link); border-radius: 999px; font-size: 0.72rem;
+}

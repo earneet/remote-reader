@@ -2,9 +2,13 @@
     import FolderTree from '$components/FolderTree.svelte';
     import RecentList from '$components/RecentList.svelte';
     import ActionSheet from '$components/ActionSheet.svelte';
+    import InlineNameForm from '$components/InlineNameForm.svelte';
+    import InlineTagForm from '$components/InlineTagForm.svelte';
+    import RowActions from '$components/RowActions.svelte';
     import { ancestorChainOf, type TreeFolder } from '$lib/shared/folder-tree';
     import { lockBodyScroll, unlockBodyScroll } from '$lib/shared/body-scroll';
     import { createOverlayHistory } from '$lib/shared/overlay-history';
+    import { submitAction, actionErrorMessage } from '$lib/shared/form-action';
     import { enhance } from '$app/forms';
     import { goto, invalidateAll } from '$app/navigation';
     let { data } = $props();
@@ -113,18 +117,15 @@
     }
     async function pickTarget(targetId: string | null) {
         if (!movingId) return;
-        const fd = new FormData();
-        fd.set('id', movingId);
-        fd.set('target', targetId ?? 'root');
-        const r = await fetch('?/move', { method: 'POST', body: fd });
-        if (r.ok) {
+        const status = await submitAction('move', { id: movingId, target: targetId ?? 'root' });
+        if (status === 200) {
             movingId = null;
             moveError = null;
             await closeDrawer();
             await invalidateAll();
             await recentRef?.reSync();
         }
-        else { moveError = '移动失败（目标无效或会造成环路），请重选目标或取消'; }
+        else { moveError = actionErrorMessage(status) + '，请重选目标或取消'; }
     }
 
     function startRename(id: string) { editingId = id; renameError = null; }
@@ -140,7 +141,23 @@
 
     function failureMessage(result: { type: string; status?: number; data?: { error?: string } }): string {
         if (result.type === 'failure' && result.data?.error) return String(result.data.error);
-        return result.status === 409 ? '名称冲突' : '操作失败，请重试';
+        return actionErrorMessage(result.status ?? 0);
+    }
+
+    async function doRename(id: string, name: string): Promise<void> {
+        busyId = id; renameError = null;
+        const status = await submitAction('rename', { id, name });
+        busyId = null;
+        if (status === 200) { editingId = null; await invalidateAll(); }
+        else renameError = actionErrorMessage(status);
+    }
+
+    async function doSetTags(id: string, tags: string): Promise<void> {
+        busyId = id; tagError = null;
+        const status = await submitAction('setTags', { id, tags });
+        busyId = null;
+        if (status === 200) { taggingId = null; tagInput = ''; await invalidateAll(); }
+        else tagError = actionErrorMessage(status);
     }
 
     function openSheet(id: string, type: string): void {
@@ -158,23 +175,22 @@
         else if (key === 'delete') void doDelete(it.id, it.type);
     }
 
-    // 移动端 ⋯ 菜单的删除入口：fetch 直调 form action（RecentList submitAction 同款先例）
+    // 移动端 ⋯ 菜单与桌面行内删除的统一入口：确认后 fetch 直调 form action
     async function doDelete(id: string, type: string): Promise<void> {
         const msg = type === 'folder'
             ? '确认删除该文件夹？将级联删除其全部内容，且不可恢复。'
             : '确认删除该文件？此操作不可恢复。';
         if (!confirm(msg)) return;
-        const fd = new FormData();
-        fd.set('id', id);
-        const r = await fetch('?/delete', { method: 'POST', body: fd });
-        if (r.ok) { actionError = null; await invalidateAll(); await recentRef?.reSync(); }
-        else actionError = r.status === 404 ? '文档已不存在，请刷新' : '删除失败，请重试';
-    }
-
-    // use: action 仅客户端挂载时执行（SSR 无真实 DOM），安全聚焦+全选
-    function autofocus(node: HTMLInputElement) {
-        node.focus();
-        node.select();
+        busyId = id;
+        const status = await submitAction('delete', { id });
+        busyId = null;
+        if (status === 200 || status === 404) {
+            actionError = null;
+            await invalidateAll();
+            await recentRef?.reSync();
+        } else {
+            actionError = actionErrorMessage(status);
+        }
     }
 </script>
 
@@ -290,23 +306,13 @@
                     {#each data.children as item (item.id)}
                         <li class="item" class:editing={editingId === item.id}>
                             {#if editingId === item.id}
-                                <form class="rename-form" method="POST" action="?/rename"
-                                    use:enhance={() => {
-                                        busyId = item.id; renameError = null;
-                                        return async ({ result }) => {
-                                            busyId = null;
-                                            if (result.type === 'success') { editingId = null; await invalidateAll(); }
-                                            else if (result.type === 'failure') renameError = failureMessage(result);
-                                        };
-                                    }}
-                                >
-                                    <input type="hidden" name="id" value={item.id}>
-                                    <input name="name" value={item.name} required use:autofocus disabled={busyId === item.id}
-                                        onkeydown={(e) => { if (e.key === 'Escape') cancelRename(); }}>
-                                    <button type="submit" class="btn sm primary" disabled={busyId === item.id}>保存</button>
-                                    <button type="button" class="btn sm" onclick={cancelRename}>取消</button>
-                                    {#if renameError}<span class="form-error">{renameError}</span>{/if}
-                                </form>
+                                <InlineNameForm
+                                    initialName={item.name}
+                                    busy={busyId === item.id}
+                                    error={renameError}
+                                    onSave={(name) => void doRename(item.id, name)}
+                                    onCancel={cancelRename}
+                                />
                             {:else}
                                 <span class="name">
                                     {#if item.type === 'folder'}
@@ -325,60 +331,27 @@
                                             <span class="chip-static">{tg.name}</span>
                                         {/each}
                                         {#if taggingId === item.id}
-                                            <form class="tag-form" method="POST" action="?/setTags"
-                                                use:enhance={() => {
-                                                    busyId = item.id; tagError = null;
-                                                    return async ({ result }) => {
-                                                        busyId = null;
-                                                        if (result.type === 'success') { taggingId = null; tagInput = ''; await invalidateAll(); }
-                                                        else if (result.type === 'failure') tagError = failureMessage(result);
-                                                    };
-                                                }}>
-                                                <input type="hidden" name="id" value={item.id}>
-                                                <input name="tags" value={tagInput || (data.tagsByDoc.get(item.id) ?? []).map(t => t.name).join(', ')}
-                                                    placeholder="逗号分隔，如 周报, api" use:autofocus disabled={busyId === item.id}
-                                                    onkeydown={(e) => { if (e.key === 'Escape') { taggingId = null; } }}>
-                                                <button type="submit" class="btn sm primary" disabled={busyId === item.id}>保存</button>
-                                                <button type="button" class="btn sm" onclick={() => (taggingId = null)}>取消</button>
-                                                {#if tagError}<span class="form-error">{tagError}</span>{/if}
-                                            </form>
+                                            <InlineTagForm
+                                                initialValue={tagInput || (data.tagsByDoc.get(item.id) ?? []).map(t => t.name).join(', ')}
+                                                busy={busyId === item.id}
+                                                error={tagError}
+                                                onSave={(tags) => void doSetTags(item.id, tags)}
+                                                onCancel={() => (taggingId = null)}
+                                            />
                                         {:else}
                                             <button class="icon-btn desktop-only" title="编辑标签" onclick={() => { taggingId = item.id; tagInput = ''; }}>🏷</button>
                                         {/if}
                                     </span>
                                 {/if}
-                                <span class="actions">
-                                    <button type="button" class="icon-btn more-btn mobile-only" aria-label="更多操作"
-                                        onclick={() => openSheet(item.id, item.type)}>
-                                        <svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M8 9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3ZM1.5 9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Zm13 0a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z"></path></svg>
-                                    </button>
-                                    <span class="desktop-only inline-actions">
-                                        <button class="icon-btn" title="重命名" onclick={() => startRename(item.id)}>✏</button>
-                                        {#if movingId === item.id}
-                                            <span class="hint">← 左树选目标</span>
-                                            <button class="btn sm" onclick={() => (movingId = null)}>取消</button>
-                                        {:else}
-                                            <button class="icon-btn" title="移动到…" onclick={() => startMove(item.id)}>📂</button>
-                                        {/if}
-                                        <form class="inline" method="POST" action="?/delete"
-                                            use:enhance={({ cancel }) => {
-                                                const msg = item.type === 'folder'
-                                                    ? '确认删除该文件夹？将级联删除其全部内容，且不可恢复。'
-                                                    : '确认删除该文件？此操作不可恢复。';
-                                                if (!confirm(msg)) { cancel(); return; }
-                                                busyId = item.id;
-                                                return async ({ result }) => {
-                                                    busyId = null;
-                                                    if (result.type === 'success') { actionError = null; await invalidateAll(); }
-                                                    else if (result.type === 'failure') actionError = failureMessage(result);
-                                                };
-                                            }}
-                                        >
-                                            <input type="hidden" name="id" value={item.id}>
-                                            <button class="icon-btn danger" title="删除" disabled={busyId === item.id}>🗑</button>
-                                        </form>
-                                    </span>
-                                </span>
+                                <RowActions
+                                    moving={movingId === item.id}
+                                    busy={busyId === item.id}
+                                    onMore={() => openSheet(item.id, item.type)}
+                                    onRename={() => startRename(item.id)}
+                                    onMove={() => startMove(item.id)}
+                                    onCancelMove={() => (movingId = null)}
+                                    onDelete={() => void doDelete(item.id, item.type)}
+                                />
                             {/if}
                         </li>
                     {/each}
@@ -481,7 +454,6 @@
         border: 1px solid var(--rr-danger); border-radius: 6px;
         color: var(--rr-danger); font-size: 0.9rem; background: var(--rr-card-bg);
     }
-    .form-error { color: var(--rr-danger); font-size: 0.8em; white-space: nowrap; }
     .create-error { margin: 0.25rem 0 0; }
 
     .items { list-style: none; padding: 0; margin: 1rem 0; }
@@ -500,34 +472,13 @@
     .size { color: var(--rr-text-muted); font-size: 0.8em; flex-shrink: 0; }
 
     .actions { display: inline-flex; align-items: center; gap: 0.2rem; flex-shrink: 0; }
-    .more-btn { padding: 0.45rem 0.5rem; }
-    .inline-actions { display: inline-flex; align-items: center; gap: 0.2rem; }
 
-    .rename-form { display: flex; align-items: center; gap: 0.5rem; flex: 1; min-width: 0; }
-    .rename-form input {
-        flex: 1; min-width: 0; padding: 0.3rem 0.5rem;
-        border: 1px solid var(--rr-accent); border-radius: 5px; font-size: 0.95rem; background: var(--rr-input-bg); color: var(--rr-text);
-    }
-    .rename-form input:focus { outline: none; box-shadow: 0 0 0 2px var(--rr-focus-ring); }
+    .hint { color: var(--rr-success); font-size: 0.85em; }
+    .error { color: var(--rr-danger); font-size: 0.9em; }
+    .link { border: none; background: none; color: var(--rr-link); cursor: pointer; padding: 0; }
+    .muted { color: var(--rr-text-muted); }
 
-    .icon-btn {
-        border: 1px solid transparent; background: transparent; cursor: pointer;
-        padding: 0.35rem 0.5rem; border-radius: 5px; color: var(--rr-text-muted); font-size: 1rem; line-height: 1;
-    }
-    .icon-btn:hover { background: var(--rr-btn-bg); border-color: var(--rr-btn-border); color: var(--rr-btn-text); }
-    .icon-btn.danger:hover { color: var(--rr-danger); border-color: var(--rr-danger); }
-
-    .btn {
-        border: 1px solid var(--rr-btn-border); background: var(--rr-btn-bg); color: var(--rr-btn-text); cursor: pointer;
-        padding: 0.35rem 0.8rem; border-radius: 5px; font-size: 0.85rem; line-height: 1.2;
-    }
-    .btn.sm { padding: 0.3rem 0.65rem; }
-    .btn.primary { background: var(--rr-btn-primary-bg); color: var(--rr-btn-primary-text); border-color: var(--rr-btn-primary-bg); }
-    .btn.primary:hover { background: var(--rr-btn-primary-hover); }
-
-    .inline { display: inline-flex; }
-
-    /* 移动端目录树抽屉（spec §6）：左贴边、自身滚动、backdrop 取遮罩语义色；桌面 display:none */
+    .doc-tags { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.25rem; }
     .drawer {
         position: fixed; inset: 0 auto 0 0;
         width: min(80vw, 20rem); max-width: none; max-height: none;
@@ -547,7 +498,4 @@
     .muted { color: var(--rr-text-muted); }
 
     .doc-tags { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.25rem; }
-    .chip-static { display: inline-block; padding: 0 0.4rem; background: var(--rr-accent-soft); color: var(--rr-link); border-radius: 999px; font-size: 0.72rem; }
-    .tag-form { display: inline-flex; align-items: center; gap: 0.3rem; }
-    .tag-form input { padding: 0.25rem 0.5rem; border: 1px solid var(--rr-accent); border-radius: 5px; font-size: 0.8rem; min-width: 12rem; background: var(--rr-input-bg); color: var(--rr-text); }
 </style>
