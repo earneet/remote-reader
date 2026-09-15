@@ -1,9 +1,9 @@
 import { fail, redirect } from '@sveltejs/kit';
-import { and, eq, isNull } from 'drizzle-orm';
 import type { Actions, PageServerLoad } from './$types';
-import { generateId } from '$server/auth';
-import { db, schema } from '$server/db';
-import { deleteNode, listChildren, listFolders, folderChildCounts, moveNode, recentFiles, renameNode, toDocDTO } from '$server/documents';
+import {
+    createFolder, deleteNode, listChildren, listFolders, folderChildCounts,
+    moveNode, recentFiles, renameNode, toDocDTO
+} from '$server/documents';
 import { listTags, listTagsForDocs, setDocTags, SetTagsError } from '$server/tags';
 import { parsePath } from '@remote-reader/shared/paths';
 import { RECENT_PAGE_SIZE } from '$lib/shared/recent';
@@ -57,21 +57,8 @@ export const actions: Actions = {
         } catch (e) {
             return fail(400, { error: (e as Error).message });
         }
-        // 同 parent 同名即冲突——不区分 type（file/folder 同名在磁盘上必然冲突，防陷阱目录）
-        const dup = db.select().from(schema.documents).where(and(
-            eq(schema.documents.ownerId, locals.user.id),
-            parentId === null ? isNull(schema.documents.parentId) : eq(schema.documents.parentId, parentId),
-            eq(schema.documents.name, name)
-        )).get();
-        if (dup) {
-            return fail(409, { error: dup.type === 'folder' ? '同名文件夹已存在' : '同名文件已存在（文件与文件夹不能同名）' });
-        }
-        const now = Date.now();
-        db.insert(schema.documents).values({
-            id: generateId(), ownerId: locals.user.id, parentId, name,
-            type: 'folder', storagePath: null, contentHash: null, sizeBytes: null,
-            createdAt: now, updatedAt: now
-        }).run();
+        const r = createFolder(locals.user.id, parentId, name);
+        if (!r.ok) return fail(409, { error: r.reason });
         return { ok: true };
     },
     rename: async ({ request, locals }) => {

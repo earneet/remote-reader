@@ -36,12 +36,13 @@ function formRequest(form: Record<string, string>): Request {
 async function invoke(
     fn: (evt: any) => unknown,
     userId: string | null,
-    form: Record<string, string>
+    form: Record<string, string>,
+    url: URL = new URL('http://localhost/')
 ): Promise<unknown> {
     return fn({
         locals: userId ? { user: { id: userId } } : { user: null },
         request: formRequest(form),
-        url: new URL('http://localhost/')
+        url
     });
 }
 
@@ -67,6 +68,20 @@ test('createFolder：正常创建文件夹', async () => {
         .where(and(eq(schema.documents.ownerId, ownerId), eq(schema.documents.type, 'folder'))).all();
     expect(folders.length).toBe(1);
     expect(folders[0].name).toBe('reports');
+});
+
+test('createFolder：URL 带 dir 参数 → 建到指定子目录而非根（F1 回归）', async () => {
+    const ownerId = generateId();
+    insertUser(ownerId);
+    await uploadDocument(ownerId, 'seed.md', 'x', ['parent']);
+    const parent = db.select().from(schema.documents)
+        .where(and(eq(schema.documents.ownerId, ownerId), eq(schema.documents.name, 'parent'), eq(schema.documents.type, 'folder'))).get()!;
+    // 前端表单 action="?dir=<id>&/createFolder"——WHATWG 相对解析保留 dir
+    await invoke(mod.actions.createFolder, ownerId, { name: 'child' },
+        new URL(`http://localhost/?dir=${parent.id}&/createFolder`));
+    const child = db.select().from(schema.documents)
+        .where(and(eq(schema.documents.ownerId, ownerId), eq(schema.documents.name, 'child'))).get();
+    expect(child?.parentId).toBe(parent.id);
 });
 
 test('createFolder：空 name → 400', async () => {

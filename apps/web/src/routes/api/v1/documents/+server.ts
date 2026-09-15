@@ -36,7 +36,8 @@ export const POST: RequestHandler = async ({ request, getClientAddress }) => {
         if (e instanceof Error && typeof (e as { status?: unknown }).status === 'number') throw e;
         error(400, 'invalid json');
     });
-    const { name, content, path } = body as { name?: string; content?: string; path?: string };
+    // body 可能是 JSON null/标量（request.json() 不抛）——解构 null 会 TypeError 裸 500，兜成 400
+    const { name, content, path } = (body ?? {}) as { name?: string; content?: string; path?: string };
 
     if (typeof name !== 'string' || !name || typeof content !== 'string') error(400, 'name and content required');
     if (path !== undefined && typeof path !== 'string') error(400, 'path must be a string');

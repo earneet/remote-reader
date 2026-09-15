@@ -248,7 +248,10 @@
                 {/if}
             </div>
             {#if view === 'dir'}
-                <form class="create-folder desktop-only" method="POST" action="?/createFolder"
+                <!-- action 必须编入 dir：WHATWG 相对解析 "?/createFolder" 会替换整个 query，
+                     子目录下丢 dir 参数会把文件夹建到根目录（F1） -->
+                <form class="create-folder desktop-only" method="POST"
+                    action={currentDir ? `?dir=${encodeURIComponent(currentDir)}&/createFolder` : '?/createFolder'}
                     use:enhance={() => async ({ formElement, result }) => {
                         if (result.type === 'success') { createError = null; formElement.reset(); await invalidateAll(); }
                         else if (result.type === 'failure') createError = failureMessage(result);
@@ -259,7 +262,8 @@
             {/if}
             {#if createError && view === 'dir'}<p class="error create-error">{createError}</p>{/if}
             {#if showCreate && view === 'dir'}
-                <form class="create-folder mobile-only" method="POST" action="?/createFolder"
+                <form class="create-folder mobile-only" method="POST"
+                    action={currentDir ? `?dir=${encodeURIComponent(currentDir)}&/createFolder` : '?/createFolder'}
                     use:enhance={() => async ({ formElement, result }) => {
                         if (result.type === 'success') { showCreate = false; createError = null; formElement.reset(); await invalidateAll(); }
                         else if (result.type === 'failure') createError = failureMessage(result);
@@ -471,8 +475,6 @@
     .cold-chip { color: var(--rr-text-muted); font-weight: 400; }
     .size { color: var(--rr-text-muted); font-size: 0.8em; flex-shrink: 0; }
 
-    .actions { display: inline-flex; align-items: center; gap: 0.2rem; flex-shrink: 0; }
-
     .hint { color: var(--rr-success); font-size: 0.85em; }
     .error { color: var(--rr-danger); font-size: 0.9em; }
     .link { border: none; background: none; color: var(--rr-link); cursor: pointer; padding: 0; }
@@ -491,11 +493,6 @@
     .drawer[open] { animation: drawer-in 180ms ease-out; }
     @keyframes drawer-in { from { transform: translateX(-100%); } }
     @media (min-width: 769px) { .drawer { display: none !important; } }
-
-    .hint { color: var(--rr-success); font-size: 0.85em; }
-    .error { color: var(--rr-danger); font-size: 0.9em; }
-    .link { border: none; background: none; color: var(--rr-link); cursor: pointer; padding: 0; }
-    .muted { color: var(--rr-text-muted); }
 
     .doc-tags { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.25rem; }
 </style>

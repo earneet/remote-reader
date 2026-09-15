@@ -94,8 +94,9 @@ export function searchDocuments(ownerId: string, query: string, tagNames: string
             }
         }
         const nameLike = `%${escapeLike(q)}%`;
+        // 仅 file：folder 混入会渲染成 /d/ 死链（load 层 type!=='file' 404）并挤占 SEARCH_LIMIT 名额
         const nameRows = sqlite.prepare(`
-            SELECT id FROM documents WHERE owner_id = ? AND name LIKE ? ESCAPE '\\'
+            SELECT id FROM documents WHERE owner_id = ? AND type = 'file' AND name LIKE ? ESCAPE '\\'
         `).all(ownerId, nameLike) as { id: string }[];
         for (const r of nameRows) {
             if (!candidateIds.has(r.id)) candidateIds.add(r.id);
@@ -133,7 +134,7 @@ export function searchDocuments(ownerId: string, query: string, tagNames: string
                d.size_bytes AS "sizeBytes", d.created_at AS "createdAt", d.updated_at AS "updatedAt",
                d.storage_tier AS "storageTier", d.last_viewed_at AS "lastViewedAt", d.archived_at AS "archivedAt",
                d.owner_viewed_at AS "ownerViewedAt"
-        FROM documents d WHERE d.owner_id = ? AND d.id IN (${ph})
+        FROM documents d WHERE d.owner_id = ? AND d.type = 'file' AND d.id IN (${ph})
     `).all(ownerId, ...ids) as DocumentRow[];
 
     return docs.map(doc => ({

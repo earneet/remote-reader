@@ -639,15 +639,115 @@ test('覆盖上传写窗口内 renameNode → 走全新插入，两行各得其�
     expect(await readFile(fresh.storagePath!)).toBe('v2');
 });
 
-test('move 后覆盖上传清理旧位置物理文件（备忘：正常流程不留孤儿）', async () => {
+test('move 同步迁移磁盘文件与 storagePath（S1 回归：move 后旧路径上传不再覆盖本行）', async () => {
     const r = await uploadDocument(ownerId, 'a.md', 'v1', []);
-    const target = await uploadDocument(ownerId, 'b.md', 'x', ['fold']);
+    await uploadDocument(ownerId, 'b.md', 'x', ['fold']);
     const foldRow = db.select().from(schema.documents)
         .where(and(eq(schema.documents.ownerId, ownerId), eq(schema.documents.type, 'folder'))).get()!;
+    const oldPhys = db.select().from(schema.documents).where(eq(schema.documents.id, r.id)).get()!.storagePath!;
     expect(moveNode(ownerId, r.id, foldRow.id).ok).toBe(true);
-    const oldPath = db.select().from(schema.documents).where(eq(schema.documents.id, r.id)).get()!.storagePath!;
-    await uploadDocument(ownerId, 'a.md', 'v2', ['fold']);
+    const moved = db.select().from(schema.documents).where(eq(schema.documents.id, r.id)).get()!;
+    expect(moved.storagePath).toBe(join(oldPhys, '..', 'fold', 'a.md'));
+    expect(await readFile(moved.storagePath!)).toBe('v1');
+    await expect(readFile(oldPhys)).rejects.toMatchObject({ code: 'FILE_NOT_FOUND' });
+    // 向旧路径上传新文档：新建独立行，绝不覆盖被移走行的内容
+    const fresh = await uploadDocument(ownerId, 'a.md', 'v2', []);
+    const movedAfter = db.select().from(schema.documents).where(eq(schema.documents.id, r.id)).get()!;
+    expect(await readFile(movedAfter.storagePath!)).toBe('v1');
+    expect(fresh.id).not.toBe(r.id);
+    expect(await readFile(
+        db.select().from(schema.documents).where(eq(schema.documents.id, fresh.id)).get()!.storagePath!
+    )).toBe('v2');
+});
+
+test('move folder 递归迁移子孙文件到新路径前缀（S1 回归）', async () => {
+    const r = await uploadDocument(ownerId, 'f.md', 'deep', ['a', 'sub']);
+    const aFolder = db.select().from(schema.documents)
+        .where(and(eq(schema.documents.ownerId, ownerId), eq(schema.documents.name, 'a'), eq(schema.documents.type, 'folder'))).get()!;
+    await uploadDocument(ownerId, 'anchor.md', 'x', ['dest']);
+    const dest = db.select().from(schema.documents)
+        .where(and(eq(schema.documents.ownerId, ownerId), eq(schema.documents.name, 'dest'), eq(schema.documents.type, 'folder'))).get()!;
+    expect(moveNode(ownerId, aFolder.id, dest.id).ok).toBe(true);
     const row = db.select().from(schema.documents).where(eq(schema.documents.id, r.id)).get()!;
-    expect(await readFile(row.storagePath!)).toBe('v2');
-    await expect(readFile(oldPath)).rejects.toMatchObject({ code: 'FILE_NOT_FOUND' });
+    expect(row.storagePath!.endsWith(join('dest', 'a', 'sub', 'f.md'))).toBe(true);
+    expect(await readFile(row.storagePath!)).toBe('deep');
+});
+
+test('陈旧 storagePath 占位（历史 move 遗留）→ 上传自愈迁移占位行，双方各得其所（S1 回归）', async () => {
+    const r = await uploadDocument(ownerId, 'a.md', 'v1', []);
+    const oldPhys = db.select().from(schema.documents).where(eq(schema.documents.id, r.id)).get()!.storagePath!;
+    await uploadDocument(ownerId, 'b.md', 'x', ['fold']);
+    const foldRow = db.select().from(schema.documents)
+        .where(and(eq(schema.documents.ownerId, ownerId), eq(schema.documents.type, 'folder'))).get()!;
+    // 手工模拟历史遗留：行已 move 到 fold/ 但 storagePath 仍指旧位置
+    db.update(schema.documents).set({ parentId: foldRow.id })
+        .where(eq(schema.documents.id, r.id)).run();
+    const fresh = await uploadDocument(ownerId, 'a.md', 'v2', []);
+    const healed = db.select().from(schema.documents).where(eq(schema.documents.id, r.id)).get()!;
+    // 占位行被迁回自己的逻辑位置 fold/a.md，内容 v1 完好；新行落在根，内容 v2
+    expect(healed.storagePath).toBe(join(oldPhys, '..', 'fold', 'a.md'));
+    expect(await readFile(healed.storagePath!)).toBe('v1');
+    expect(fresh.id).not.toBe(r.id);
+    expect(await readFile(
+        db.select().from(schema.documents).where(eq(schema.documents.id, fresh.id)).get()!.storagePath!
+    )).toBe('v2');
+});
+
+test('覆盖上传写窗口内 moveNode → 不产生 parent/storagePath 错位（S2 回归）', async () => {
+    const r = await uploadDocument(ownerId, 'a.md', 'v1', []);
+    await uploadDocument(ownerId, 'b.md', 'x', ['fold']);
+    const foldRow = db.select().from(schema.documents)
+        .where(and(eq(schema.documents.ownerId, ownerId), eq(schema.documents.type, 'folder'))).get()!;
+    const up = uploadDocument(ownerId, 'a.md', 'v2', []);
+    await new Promise((res) => setImmediate(res));
+    expect(moveNode(ownerId, r.id, foldRow.id).ok).toBe(true);
+    await up;
+    const moved = db.select().from(schema.documents).where(eq(schema.documents.id, r.id)).get()!;
+    const fresh = db.select().from(schema.documents)
+        .where(and(eq(schema.documents.ownerId, ownerId), eq(schema.documents.name, 'a.md'))).all()
+        .find((x) => x.id !== r.id)!;
+    // 被移行走：逻辑位置 fold/、物理路径一致、hash 与磁盘内容对齐（迁移重读自愈）
+    // 被移走行：逻辑位置 fold/、hash 与磁盘内容对齐（迁移重读自愈）。交错时序下 move 先于
+    // 覆盖写的最终 rename 落地 → 迁走的是原内容 v1（完整保留），v2 留在旧路径由重试后的新行接手
+    expect(moved.parentId).toBe(foldRow.id);
+    expect(moved.storagePath!.endsWith(join('fold', 'a.md'))).toBe(true);
+    expect(await readFile(moved.storagePath!)).toBe('v1');
+    expect(moved.contentHash).toBe(sha256Hex('v1'));
+    // 新上传落在根，独立成行
+    expect(fresh).toBeTruthy();
+    expect(await readFile(fresh.storagePath!)).toBe('v2');
+});
+
+// ===== P2-2：父链断裂孤儿行的清理与防产生 =====
+
+test('父链断裂的孤儿占位行 → 上传时清理孤儿并正常落盘（P2-2 自愈）', async () => {
+    const r = await uploadDocument(ownerId, 'f.md', 'v1', ['a']);
+    // 手工制造 delete-race 遗留：行的 parent 指向不存在的 id（树中不可见）
+    db.update(schema.documents).set({ parentId: 'ghost-id' })
+        .where(eq(schema.documents.id, r.id)).run();
+    const r2 = await uploadDocument(ownerId, 'f.md', 'v2', ['a']);
+    const rows = db.select().from(schema.documents)
+        .where(and(eq(schema.documents.ownerId, ownerId), eq(schema.documents.name, 'f.md'))).all();
+    expect(rows.length).toBe(1);
+    expect(rows[0].id).toBe(r2.id);
+    expect(await readFile(rows[0].storagePath!)).toBe('v2');
+    // 树中可见（父链可达）
+    const parent = db.select().from(schema.documents).where(eq(schema.documents.id, rows[0].parentId!)).get();
+    expect(parent?.name).toBe('a');
+});
+
+test('上传写窗口内目标文件夹被删 → 重建父链落库，不产生孤儿行（P2-2 根因）', async () => {
+    await uploadDocument(ownerId, 'seed.md', 'x', ['a']);
+    const aFolder = db.select().from(schema.documents)
+        .where(and(eq(schema.documents.ownerId, ownerId), eq(schema.documents.name, 'a'), eq(schema.documents.type, 'folder'))).get()!;
+    const up = uploadDocument(ownerId, 'f.md', 'v1', ['a']);
+    await new Promise((res) => setImmediate(res));
+    deleteNode(ownerId, aFolder.id);
+    await up;
+    const rows = db.select().from(schema.documents)
+        .where(and(eq(schema.documents.ownerId, ownerId), eq(schema.documents.name, 'f.md'))).all();
+    expect(rows.length).toBe(1);
+    expect(rows[0].parentId).not.toBe(aFolder.id); // 落在重建后的 a 下，而非 dangling 旧 id
+    const parent = db.select().from(schema.documents).where(eq(schema.documents.id, rows[0].parentId!)).get();
+    expect(parent?.name).toBe('a');
 });

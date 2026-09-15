@@ -82,6 +82,10 @@ test('非法 json → 400', async () => {
     expect((await call({ authorization: validAuth }, '{not json')).status).toBe(400);
 });
 
+test('body 为 JSON null → 400 而非解构 TypeError 500（B3 回归）', async () => {
+    expect((await call({ authorization: validAuth }, 'null')).status).toBe(400);
+});
+
 test('body 读取抛带 status 的错误（adapter 413 流）→ 透传状态码而非吞成 400', async () => {
     const e413 = Object.assign(new Error('request body size exceeded BODY_SIZE_LIMIT'), { status: 413 });
     const request = {

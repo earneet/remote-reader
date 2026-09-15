@@ -79,6 +79,17 @@ test('空查询 + 空标签返回 []', async () => {
     expect(searchDocuments(ownerId, '', [])).toEqual([]);
 });
 
+test('名称匹配只含 file：folder 不混入结果（S3 回归，防 /d/ 死链）', async () => {
+    db.insert(schema.documents).values({
+        id: 'folderdemo', ownerId, parentId: null, name: 'demo-notes', type: 'folder',
+        storagePath: null, contentHash: null, sizeBytes: null, createdAt: now(), updatedAt: now()
+    }).run();
+    await uploadDocument(ownerId, 'demo.md', 'x', []);
+    const r = searchDocuments(ownerId, 'demo', []);
+    expect(r.map(x => x.doc.name)).toEqual(['demo.md']);
+    expect(r.every(x => x.doc.type === 'file')).toBe(true);
+});
+
 test('FTS 特殊字符不报错（双引号、星号）', async () => {
     await uploadDocument(ownerId, 'a.md', 'hello world', []);
     expect(() => searchDocuments(ownerId, '"*AND', [])).not.toThrow();
