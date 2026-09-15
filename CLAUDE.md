@@ -30,7 +30,9 @@ Remote Reader 让远程工作的 Agent 通过 MCP 上传 Markdown 文档，用�
 
 **移动端文件管理器（2026-09-14）**：≤768px 布局重构「内容全屏 + 侧滑抽屉目录树 + 面包屑 + ⋯ action sheet」，桌面端（>768px）零改动——树从顶部 `max-height:32vh` 霸占改为 `<dialog>` 左侧抽屉（`min(80vw,20rem)` 自身滚动，消除双重滚动嵌套；SvelteKit `pushState` 同 URL 浅路由条目兜系统返回键，非返回键关闭 `await popstate` 消费完条目再导航防 SvelteKit 路由条目被弹掉，关闭后焦点归还汉堡）；面包屑替换「根目录/子目录」占位标题（新纯函数 `ancestorChainOf` 返回含 id 链供点击导航，TDD 5 用例）；行操作收进 `ActionSheet.svelte` 底部菜单（`<dialog>` top-layer 原生 Esc/焦点管理，48px 触屏命中区，文件 4 项/文件夹 3 项——重命名/标签关 sheet 后行内表单复用、删除 fetch 直调 `?/delete` 同 RecentList `submitAction` 先例）；移动文档经 matchMedia 判断断点自动开抽屉选择模式；＋📁 紧凑按钮展开新建表单；全局显隐类 `.mobile-only`/`.desktop-only` 置 theme.css（**必须 `!important`**——scoped 布局类特异性 0,2,0 会反杀普通全局规则 0,1,0 致桌面元素在移动端泄漏）；树双份渲染（aside 桌面常驻 + dialog 抽屉内一份，CSS 断点显隐，同 storageKey 折叠记忆共享）。验收：Playwright 375×667 冒烟 7 项（布局/抽屉导航/返回键/面包屑/四操作全流程/新建/三视图）+ 1280×800 桌面回归 + 深色双档视觉（抽屉/sheet 均取语义变量）；验收期修复 4 处（显隐特异性泄漏/目录行 🏷 漏包 desktop-only/sheet content-box 宽度溢出/原生 pushState 触发 SvelteKit dev warning）。测试 382→387。spec：`docs/superpowers/specs/2026-09-14-mobile-fm-design.md`、计划：`docs/superpowers/plans/2026-09-14-mobile-fm.md`。
 
-**下一步（低优先）**：spec §12 Phase 3 扩展（远程 MCP server / 多文档批量上传等），详见 spec §15.3 待做；CSP 由 report-only 转 enforcing（需线上观察 mermaid/katex 违规）；session 服务端撤销表 / 审计日志（设计级，未做）。
+**全项目审查修复（2026-09-14，审查报告 `docs/reviews/2026-09-14-project-review.md` 全项落地）**：正确性 P1×4——并发首传唯一索引 `documents_owner_parent_name_type_uniq`（COALESCE 表达式索引，插入撞索引回壳层重试；迁移 0007 含存量去重，ensureSchema 启动兜底同款）、file/folder 跨类型同名提前 409（`NameConflictError`，upload/ensureFolder 预检 + createFolder/rename/move 去掉 type 过滤）、adapter 413 不再被吞成 400 + `BODY_SIZE_LIMIT≥MAX_UPLOAD_BYTES×1.5` 启动校验（解析器与 adapter-node 同语义）、getBaseUrl 尾斜杠归一化（防 `//s/<token>` 404）。P2×12——api-client 60s 超时 + 错误体读真实 `{message}` 形状、覆盖上传 `changes()` 翻转守卫（防孤儿 FTS/FK 500/路径错位，锁内不递归防自死锁）、rename 同步 `docs_fts.name`、注册核销与建用户同事务（409 不烧计数 + UNIQUE 兜 409）、登录叠加 `login-agg:${ip}` 聚合限流（`LOGIN_IP_RATE_LIMIT_MAX` 默认 30）、DTO 收敛（`toDocDTO`：/api/recent、FM load、search 显式映射，storagePath/contentHash 不进载荷）、归档候选 ORDER BY + 坏候选 24h 暂缓（防饥饿）、上传 path ≤32 段/≤1024B。前端——滚动锁引用计数 `lib/shared/body-scroll.ts`（ActionSheet 异步 close 事件不再误清抽屉锁）、浮层 history 编排 `lib/shared/overlay-history.ts`（ActionSheet 也兜返回键）、Mermaid Enter 判 target + gestures destroy、双树断点互斥挂载（matchMedia `isMobile`，折叠记忆经 localStorage 承接）、旧 WebKit fullscreen promise 守卫、lightbox Tab 焦点圈定 `lib/shared/focus-trap.ts`、表单失败可见反馈+防重（FM actions 统一 `fail()` 带消息；**fetch 调 action 须用 `lib/shared/form-action.ts` 的 `submitAction`——fail() 以 HTTP 200 + `{type:'failure',status}` 信封返回，裸读 r.status/r.ok 会把失败当成功**）。架构——A-1 行级三组件 `InlineNameForm/InlineTagForm/RowActions` + 行级基类收敛 theme.css、A-2 schema↔ensureSchema 等价性守卫测试、A-3 `tests/helpers.ts resetDb()`（21 文件）、A-5 `AuthCard`、A-7/A-8/A-9 小项。**服务层错误风格裁定**：路由层 `error()/fail()`；服务层"预期业务失败"用 result 对象（rename/move）或类型化异常（NameConflictError/SetTagsError），"系统错误"抛裸异常——新代码照此选边。测试 387→418，Playwright 13/13 冒烟（桌面+移动全流程）。
+
+**下一步（低优先）**：spec §12 Phase 3 扩展（远程 MCP server / 多文档批量上传等），详见 spec §15.3 待做；CSP 由 report-only 转 enforcing（需线上观察 mermaid/katex 违规）；session 服务端撤销表 / 审计日志（设计级，未做）；审查报告 A-1 第二步行容器（DocRow）与 A-4 lightbox 合并（触发条件：第三个 viewer 或下个行级功能）；recent 视图跨路由返回列表缩回为已备案产品取舍。
 
 **桥运行时**：无原生依赖（纯 fetch + MCP SDK）→ `bun apps/mcp-bridge/src/index.ts` 直跑；`tsc --noEmit` 类型检查（`bun --filter remote-reader-mcp-bridge check`）。配置 = `~/.config/remote-reader/config.json`（XDG）默认 + `REMOTE_READER_URL`/`REMOTE_READER_TOKEN` env 覆盖。**注册进 MCP 客户端时入口必须用绝对路径**——客户端拉起 stdio 进程的 cwd 无保证（如 ZCode 设置页探针），相对路径会间歇性 Module not found（README/INSTALL/USER_GUIDE 的注册命令均已改为 `$(pwd)` 展开写法）。
 
@@ -101,9 +103,11 @@ docker compose up --build                      # 一键起服务（:3000），da
 
 ## 环境变量（完整清单见 `.env.example`）
 
-核心：`DATABASE_PATH`、`DATA_DIR`、`BASE_URL`、`SESSION_SECRET`（生产必填，缺失 fail-fast）、`INITIAL_INVITE_CODE`（注册首个管理员所需）、`MAX_UPLOAD_BYTES`。运行时数据在 `data/`（已 gitignore，**绝不入库**）。
+env 助手为 `lib/server/env.ts`（共享 getter + DATA_DIR 等调用点就地读取，测试需逐文件覆写）；生产启动校验（SESSION_SECRET/INITIAL_INVITE_CODE/BASE_URL/BODY_SIZE_LIMIT×1.5）见 `lib/server/startup-check.ts`。
 
-速率限制 / 会话 / 网关：`RATE_LIMIT_MAX` + `RATE_LIMIT_WINDOW_MS`（每 token 上传）、`LOGIN_RATE_LIMIT_MAX`（每邮箱登录）、`SESSION_MAX_AGE`（session 有效期秒，默认 30 天）、`BODY_SIZE_LIMIT`（adapter-node 请求体字节数，须 > `MAX_UPLOAD_BYTES`）、`PORT`（生产端口，默认 3000）。
+核心：`DATABASE_PATH`、`DATA_DIR`、`BASE_URL`（生产必填，缺失 fail-fast；尾斜杠自动归一化）、`SESSION_SECRET`（生产必填，缺失 fail-fast）、`INITIAL_INVITE_CODE`（注册首个管理员所需）、`MAX_UPLOAD_BYTES`。运行时数据在 `data/`（已 gitignore，**绝不入库**）。
+
+速率限制 / 会话 / 网关：`RATE_LIMIT_MAX` + `RATE_LIMIT_WINDOW_MS`（每 token 上传）、`LOGIN_RATE_LIMIT_MAX`（每 (IP,邮箱) 精确桶）+ `LOGIN_IP_RATE_LIMIT_MAX`（每 IP 聚合桶，默认 30，防密码喷洒）、`REGISTER_RATE_LIMIT_MAX`、`SESSION_MAX_AGE`（session 有效期秒，默认 30 天）、`BODY_SIZE_LIMIT`（adapter-node 请求体字节数，生产须 ≥ `MAX_UPLOAD_BYTES`×1.5，启动校验强制）、`PORT`（生产端口，默认 3000）。
 
 冷热分层：`OBJECT_STORE_ENDPOINT/REGION/BUCKET/ACCESS_KEY_ID/SECRET_ACCESS_KEY`（S3 兼容，全部留空=关闭）、`OBJECT_STORE_FORCE_PATH_STYLE`、`COLD_TIER_AFTER_DAYS`（默认 30）。
 
