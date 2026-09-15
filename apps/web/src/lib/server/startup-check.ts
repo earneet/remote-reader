@@ -1,7 +1,16 @@
 import { parseObjectStoreEnv } from './object-store';
 import { sqlite } from './db';
+import { envInt } from './env';
 
 const WEAK_SECRET = /^change-me|^dev-insecure|insecure|placeholder|example|^secret$|^password$/i;
+
+// 与 adapter-node files/utils.js parse_as_bytes 同语义（尾字符 K/M/G 按 1024 进制），保证校验值与运行时一致
+function parseBodySizeLimitBytes(raw: string): number {
+    const units: Record<string, number> = { K: 1024, M: 1024 ** 2, G: 1024 ** 3 };
+    const last = raw[raw.length - 1]?.toUpperCase();
+    const unit = last !== undefined && last in units ? units[last] : 1;
+    return Number(unit !== 1 ? raw.slice(0, -1) : raw) * unit;
+}
 
 // M3/H4：生产启动 fail-fast——拒弱 SESSION_SECRET（占位值/过短）与未设/占位 INITIAL_INVITE_CODE。
 // dev 不校验。在 hooks.server.ts 模块级调用，使配置错误时服务拒绝启动而非带病运行。
@@ -46,5 +55,17 @@ export function validateStartupConfig(): void {
     }
     if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0' || hostname === '::1') {
         throw new Error(`BASE_URL 生产环境不可指向本地地址 (${hostname})，请改为公网/反代地址`);
+    }
+
+    // adapter-node BODY_SIZE_LIMIT 默认仅 512K：不足 MAX_UPLOAD_BYTES×1.5 时超限上传在路由前
+    // 就被 adapter 拦截，且错误会被误报为 400 invalid json（JSON 转义还会使 body 大于 content 本身）
+    const rawLimit = process.env.BODY_SIZE_LIMIT;
+    const limit = parseBodySizeLimitBytes(rawLimit ?? '512K');
+    const maxUpload = envInt('MAX_UPLOAD_BYTES', 5 * 1024 * 1024);
+    if (!Number.isFinite(limit) || limit < maxUpload * 1.5) {
+        throw new Error(
+            `BODY_SIZE_LIMIT "${rawLimit ?? '512K'}"(${limit}B) 须 ≥ MAX_UPLOAD_BYTES(${maxUpload}B)×1.5——` +
+            '否则超限上传会被 adapter 在路由前拦成 400/413，排障方向被带偏；如 5M 上限配 8M（8388608）'
+        );
     }
 }

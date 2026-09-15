@@ -28,10 +28,15 @@ export const POST: RequestHandler = async ({ request, getClientAddress }) => {
     const rl = checkRateLimit(`upload:${auth.tokenId}`, RATE_LIMIT);
     if (!rl.allowed) error(429, 'rate limit exceeded');
 
-    const body = await request.json().catch(() => error(400, 'invalid json'));
+    // adapter 在 body 超限时向流注入 SvelteKitError(413)——带 status 的错误须透传，只有真·坏 JSON 才 400
+    const body = await request.json().catch((e: unknown) => {
+        if (e instanceof Error && typeof (e as { status?: unknown }).status === 'number') throw e;
+        error(400, 'invalid json');
+    });
     const { name, content, path } = body as { name?: string; content?: string; path?: string };
 
-    if (!name || typeof content !== 'string') error(400, 'name and content required');
+    if (typeof name !== 'string' || !name || typeof content !== 'string') error(400, 'name and content required');
+    if (path !== undefined && typeof path !== 'string') error(400, 'path must be a string');
     if (Buffer.byteLength(content) > MAX_BYTES) error(413, 'document too large');
 
     // name 与 path 都由 Agent 控制，必须一并过 parsePath：node:path.join 会归一化 ..，

@@ -88,6 +88,21 @@ test('非法 json → 400', async () => {
     expect((await call({ authorization: validAuth }, '{not json')).status).toBe(400);
 });
 
+test('body 读取抛带 status 的错误（adapter 413 流）→ 透传状态码而非吞成 400', async () => {
+    const e413 = Object.assign(new Error('request body size exceeded BODY_SIZE_LIMIT'), { status: 413 });
+    const request = {
+        headers: new Headers({ authorization: validAuth }),
+        json: () => Promise.reject(e413)
+    } as unknown as Request;
+    let status: number | null = null;
+    try {
+        status = (await POST({ request, getClientAddress: () => '127.0.0.1' } as Parameters<typeof POST>[0])).status;
+    } catch (e) {
+        status = (e as { status?: number })?.status ?? 500;
+    }
+    expect(status).toBe(413);
+});
+
 test('name 含 .. 路径穿越 → 400（H5）', async () => {
     const r = await call({ authorization: validAuth }, { name: '../../../etc/passwd', content: 'x' });
     expect(r.status).toBe(400);

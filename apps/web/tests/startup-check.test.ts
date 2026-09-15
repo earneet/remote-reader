@@ -58,9 +58,53 @@ test('prod 强配置通过', () => {
     prod({
         SESSION_SECRET: 'a'.repeat(64),
         INITIAL_INVITE_CODE: 'goodcode123',
-        BASE_URL: 'https://reader.example.com'
+        BASE_URL: 'https://reader.example.com',
+        BODY_SIZE_LIMIT: '8M'
     });
     expect(() => validateStartupConfig()).not.toThrow();
+});
+
+test('prod 未设 BODY_SIZE_LIMIT（adapter 默认 512K < MAX_UPLOAD_BYTES 默认 5M）→ 抛', () => {
+    prod({
+        SESSION_SECRET: 'a'.repeat(64),
+        INITIAL_INVITE_CODE: 'goodcode123',
+        BASE_URL: 'https://reader.example.com',
+        BODY_SIZE_LIMIT: undefined,
+        MAX_UPLOAD_BYTES: undefined
+    });
+    expect(() => validateStartupConfig()).toThrow(/BODY_SIZE_LIMIT/);
+});
+
+test('prod BODY_SIZE_LIMIT 不足 MAX_UPLOAD_BYTES×1.5 → 抛', () => {
+    prod({
+        SESSION_SECRET: 'a'.repeat(64),
+        INITIAL_INVITE_CODE: 'goodcode123',
+        BASE_URL: 'https://reader.example.com',
+        BODY_SIZE_LIMIT: '1M',
+        MAX_UPLOAD_BYTES: String(5 * 1024 * 1024)
+    });
+    expect(() => validateStartupConfig()).toThrow(/BODY_SIZE_LIMIT/);
+});
+
+test('prod BODY_SIZE_LIMIT 带单位后缀按 1024 进制解析（512K ≥ 1KB×1.5 通过）', () => {
+    prod({
+        SESSION_SECRET: 'a'.repeat(64),
+        INITIAL_INVITE_CODE: 'goodcode123',
+        BASE_URL: 'https://reader.example.com',
+        BODY_SIZE_LIMIT: '512K',
+        MAX_UPLOAD_BYTES: '1024'
+    });
+    expect(() => validateStartupConfig()).not.toThrow();
+});
+
+test('prod BODY_SIZE_LIMIT 非法值 → 抛', () => {
+    prod({
+        SESSION_SECRET: 'a'.repeat(64),
+        INITIAL_INVITE_CODE: 'goodcode123',
+        BASE_URL: 'https://reader.example.com',
+        BODY_SIZE_LIMIT: '8X'
+    });
+    expect(() => validateStartupConfig()).toThrow(/BODY_SIZE_LIMIT/);
 });
 
 test('prod 缺 BASE_URL 抛', () => {
