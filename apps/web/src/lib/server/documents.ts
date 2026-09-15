@@ -9,7 +9,7 @@ import { rewarmDocument, withDocLock } from './tiering';
 import { getObjectStore, objectKeyFor, ObjectNotFoundError, ArchiveUnavailableError } from './object-store';
 import { createShareLink } from './shares';
 import { getBaseUrl, getDataDir } from './env';
-import { indexDoc } from './fts';
+import { indexDoc, unindexDocs } from './fts';
 import type { RecentSort, RecentDoc } from '../shared/recent';
 
 type DocumentRow = typeof schema.documents.$inferSelect;
