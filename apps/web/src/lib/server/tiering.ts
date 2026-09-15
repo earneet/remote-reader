@@ -1,4 +1,4 @@
-import { eq, and } from 'drizzle-orm';
+import { eq, and, asc } from 'drizzle-orm';
 import { unlink } from 'node:fs/promises';
 import { db, sqlite, schema } from './db';
 import { sha256Hex } from './auth';
@@ -11,6 +11,16 @@ type DocumentRow = typeof schema.documents.$inferSelect;
 
 export const ARCHIVE_BATCH_LIMIT = 50;
 export const TIERING_INTERVAL_MS = 3_600_000; // 1 小时
+
+// P2-8：盘不可读/hash 不符的候选是"永久性 skip"——不暂缓会在无排序截断下占死批头，
+// 让排在后面的正常冷文档永远轮不到归档（≥50 个坏候选即饥饿）。进程内暂缓 24h，
+// 重启即重试一次（可接受）；到期条目在周期入口清理，Map 有界
+const ARCHIVE_SKIP_RETRY_MS = 24 * 3_600_000;
+const archiveSkipUntil = new Map<string, number>();
+
+export function __clearArchiveSkipForTest(): void {
+    archiveSkipUntil.clear();
+}
 
 // ── 冷判定（纯函数）────────────────────────────────────────────
 // 冷 = N 天内既没人看（last_viewed_at ?? created_at）也没更新（updated_at）
@@ -63,11 +73,13 @@ async function archiveDocument(doc: DocumentRow, store: ObjectStore, days: numbe
             content = await readFile(fresh.storagePath);
         } catch (e) {
             console.warn('[tiering] 本地文件不可读，跳过归档（保持 hot 不造"两边皆空"）', fresh.id, e);
+            archiveSkipUntil.set(fresh.id, Date.now() + ARCHIVE_SKIP_RETRY_MS);
             return 'skipped';
         }
         // 完整性防线：盘内容与 DB hash 不一致（损坏/篡改）绝不归档
         if (sha256Hex(content) !== fresh.contentHash) {
             console.warn('[tiering] 内容 hash 与 DB 不一致，跳过归档', fresh.id);
+            archiveSkipUntil.set(fresh.id, Date.now() + ARCHIVE_SKIP_RETRY_MS);
             return 'skipped';
         }
         await store.put(objectKeyFor(fresh), content);
@@ -75,7 +87,13 @@ async function archiveDocument(doc: DocumentRow, store: ObjectStore, days: numbe
         db.transaction((tx) => {
             tx.update(schema.documents)
                 .set({ storageTier: 'cold', archivedAt: Date.now() })
-                .where(and(eq(schema.documents.id, fresh.id), eq(schema.documents.storageTier, 'hot')))
+                .where(and(
+                    eq(schema.documents.id, fresh.id),
+                    eq(schema.documents.storageTier, 'hot'),
+                    // 与 rewarm 对称的竞态加固：PUT 的长 await 窗口内 renameNode 可能已把行
+                    // 指向新路径——路径不符即不翻转，保持 hot 由下轮按新状态收敛，防"行 cold 指旧路径"
+                    eq(schema.documents.storagePath, fresh.storagePath)
+                ))
                 .run();
             // §4.2 状态翻转验证：未翻转（被不可上锁的同步路径如 deleteNode 改变状态）则跳过 FTS 清空
             flipped = (sqlite.prepare('SELECT changes() AS n').get() as { n: number }).n > 0;
@@ -150,10 +168,15 @@ export async function runArchiveCycle(store?: ObjectStore): Promise<number> {
     if (!s) return 0;
     const days = getColdTierAfterDays();
     const now = Date.now();
+    for (const [id, until] of archiveSkipUntil) {
+        if (until <= now) archiveSkipUntil.delete(id);
+    }
     const candidates = db.select().from(schema.documents)
         .where(eq(schema.documents.type, 'file'))
+        .orderBy(asc(schema.documents.updatedAt))
         .all()
         .filter((r) => isColdCandidate(r, now, days))
+        .filter((r) => (archiveSkipUntil.get(r.id) ?? 0) <= now)
         .slice(0, ARCHIVE_BATCH_LIMIT);
     let archived = 0;
     for (const c of candidates) {

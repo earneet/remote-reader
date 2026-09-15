@@ -126,3 +126,20 @@ test('同 IP 连续无效 token 触发认证失败限流 → 429', async () => {
     }
     expect((await call({ authorization: 'Bearer rr_wrong' }, { name: 'a.md', content: 'x' }, ip)).status).toBe(429);
 });
+
+test('path 超 32 段 → 400（P2-9 防深路径）', async () => {
+    const deep = Array(40).fill('a').join('/');
+    const r = await call({ authorization: validAuth }, { name: 'a.md', content: 'x', path: deep });
+    expect(r.status).toBe(400);
+});
+
+test('path 总长超 1024 字节 → 400（P2-9）', async () => {
+    const long = `x/${'b'.repeat(1100)}`;
+    const r = await call({ authorization: validAuth }, { name: 'a.md', content: 'x', path: long });
+    expect(r.status).toBe(400);
+});
+
+test('正常深度 path（2 段）不受限', async () => {
+    const r = await call({ authorization: validAuth }, { name: 'a.md', content: 'x', path: 'reports/2026' });
+    expect(r.status).toBe(200);
+});

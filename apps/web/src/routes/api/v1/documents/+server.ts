@@ -7,6 +7,9 @@ import { parsePath } from '@remote-reader/shared/paths';
 import { envInt } from '$server/env';
 
 const MAX_BYTES = envInt('MAX_UPLOAD_BYTES', 5 * 1024 * 1024);
+// P2-9：防深路径——无上限时数千段 path 会先插数千 folder 行再 ENAMETOOLONG 裸 500
+const MAX_PATH_SEGMENTS = 32;
+const MAX_PATH_BYTES = 1024;
 const RATE_LIMIT = {
     max: envInt('RATE_LIMIT_MAX', 60),
     windowMs: envInt('RATE_LIMIT_WINDOW_MS', 60_000)
@@ -49,6 +52,8 @@ export const POST: RequestHandler = async ({ request, getClientAddress }) => {
     }
     const fileName = parts[parts.length - 1];
     const segments = parts.slice(0, -1);
+    if (parts.length > MAX_PATH_SEGMENTS) error(400, `path 过深（>${MAX_PATH_SEGMENTS} 段）`);
+    if (Buffer.byteLength(parts.join('/')) > MAX_PATH_BYTES) error(400, `path 过长（>${MAX_PATH_BYTES} 字节）`);
 
     let result: { id: string; url: string };
     try {

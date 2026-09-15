@@ -3,7 +3,7 @@ import { rmSync, existsSync } from 'node:fs';
 import { db, schema, sqlite } from '../src/lib/server/db';
 import { generateId, sha256Hex } from '../src/lib/server/auth';
 import { uploadDocument, renameNode, deleteNode } from '../src/lib/server/documents';
-import { isColdCandidate, runArchiveCycle, rewarmDocument, withDocLock } from '../src/lib/server/tiering';
+import { isColdCandidate, runArchiveCycle, rewarmDocument, withDocLock, __clearArchiveSkipForTest } from '../src/lib/server/tiering';
 import { MemoryObjectStore, __setObjectStoreForTest, objectKeyFor } from '../src/lib/server/object-store';
 import { eq } from 'drizzle-orm';
 
@@ -32,6 +32,7 @@ beforeEach(async () => {
     }).run();
     store = new MemoryObjectStore();
     __setObjectStoreForTest(store);
+    __clearArchiveSkipForTest();
 });
 
 afterEach(() => {
@@ -291,4 +292,63 @@ test('!flipped 防御：回热窗口内行被删 → 不恢复 FTS、不删远�
     const ftsCnt = (sqlite.prepare('SELECT COUNT(*) AS c FROM docs_fts WHERE doc_id = ?').get(r.id) as { c: number }).c;
     expect(ftsCnt).toBe(0);                                      // 未插入孤儿 FTS 行（无守卫时会插入）
     expect(gated.data.size).toBe(1);                             // 未删远端对象（留孤儿，无害）
+});
+
+// ===== P2-8：永久 skip 候选的饥饿防护 =====
+
+test('P2-8 归档饥饿防护：>50 个坏候选暂缓重试，不阻塞后面的正常冷文档', async () => {
+    for (let i = 0; i < 51; i++) {
+        const r = await uploadDocument(ownerId, `bad-${i}.md`, 'v1', []);
+        const row = getDoc(r.id);
+        db.update(schema.documents).set({ updatedAt: Date.now() - 40 * DAY, createdAt: Date.now() - 40 * DAY }).where(eq(schema.documents.id, r.id)).run();
+        const { writeFile } = await import('../src/lib/server/storage');
+        await writeFile(row.storagePath!, 'tampered');
+    }
+    const good = await uploadDocument(ownerId, 'good.md', 'clean', []);
+    db.update(schema.documents).set({ updatedAt: Date.now() - 40 * DAY, createdAt: Date.now() - 40 * DAY }).where(eq(schema.documents.id, good.id)).run();
+    // 首轮：坏候选占批全 skip 并登记暂缓（good 可能未入批）
+    expect(await runArchiveCycle(store)).toBe(0);
+    // 次轮：坏候选被暂缓出候选集，good 正常归档——修复前 good 会永远饿死
+    expect(await runArchiveCycle(store)).toBe(1);
+    expect(getDoc(good.id).storageTier).toBe('cold');
+});
+
+test('P2-8 暂缓 24h 后坏候选恢复重试（窗口过期自动出列）', async () => {
+    __clearArchiveSkipForTest(); // 直接清空暂缓表模拟窗口过期
+    const r = await uploadDocument(ownerId, 'bad.md', 'v1', []);
+    const row = getDoc(r.id);
+    db.update(schema.documents).set({ updatedAt: Date.now() - 40 * DAY, createdAt: Date.now() - 40 * DAY }).where(eq(schema.documents.id, r.id)).run();
+    const { writeFile } = await import('../src/lib/server/storage');
+    await writeFile(row.storagePath!, 'tampered');
+    expect(await runArchiveCycle(store)).toBe(0);
+    expect(await runArchiveCycle(store)).toBe(0); // 暂缓期内不再重试
+    __clearArchiveSkipForTest();
+    // 窗口清空（模拟过期）后重新成为候选（仍 skip，因为盘内容还是坏的）
+    expect(await runArchiveCycle(store)).toBe(0);
+});
+
+// ===== 备忘：归档 flip 补 storagePath 守卫（与 rewarm 对称） =====
+
+test('归档 PUT 窗口内 renameNode → 翻转守卫拦下，保持 hot，次轮按新路径收敛', async () => {
+    const gated = new GatedMemoryStore();
+    __setObjectStoreForTest(gated);
+    const r = await uploadDocument(ownerId, 'old.md', '# arc', []);
+    db.update(schema.documents).set({ updatedAt: Date.now() - 40 * DAY, createdAt: Date.now() - 40 * DAY }).where(eq(schema.documents.id, r.id)).run();
+    let release!: () => void;
+    gated.gate = new Promise((res) => { release = res; });
+    const cycle = runArchiveCycle(gated);                        // 卡在 PUT
+    await new Promise((res) => setTimeout(res, 30));
+    expect(renameNode(ownerId, r.id, 'new.md').ok).toBe(true);   // PUT 窗口内改名（盘+DB 均新路径）
+    release!();
+    await cycle;
+    const row = getDoc(r.id);
+    expect(row.storageTier).toBe('hot');                          // 未翻转：不造"行 cold 指旧路径"
+    expect(row.name).toBe('new.md');
+    expect(gated.data.size).toBe(0);                              // 刚 PUT 的对象被 !flipped 分支清理
+    const { existsSync } = await import('node:fs');
+    expect(existsSync(row.storagePath!)).toBe(true);              // 本地文件在新路径完好
+    // 次轮按新状态正常归档（rename 会刷新 updatedAt，需重新老化）
+    db.update(schema.documents).set({ updatedAt: Date.now() - 40 * DAY, createdAt: Date.now() - 40 * DAY }).where(eq(schema.documents.id, r.id)).run();
+    expect(await runArchiveCycle(gated)).toBe(1);
+    expect(getDoc(r.id).storageTier).toBe('cold');
 });
