@@ -5,17 +5,11 @@ import { writeFile } from '../src/lib/server/storage';
 import { createShareLink } from '../src/lib/server/shares';
 import { join } from 'node:path';
 
+import { resetDb } from './helpers';
 const { load } = await import('../src/routes/s/[token]/+page.server');
 
 beforeEach(() => {
-    sqlite.prepare('DELETE FROM docs_fts').run();
-    db.delete(schema.documentTags).run();
-    db.delete(schema.tags).run();
-    db.delete(schema.shareLinks).run();
-    db.delete(schema.apiTokens).run();
-    db.delete(schema.documents).run();
-    db.delete(schema.inviteCodes).run();
-    db.delete(schema.users).run();
+    resetDb();
 });
 
 function insertUser(id: string): void {

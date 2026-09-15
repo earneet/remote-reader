@@ -24,6 +24,7 @@ import { MemoryObjectStore, __setObjectStoreForTest, objectKeyFor } from '../src
 import { join, dirname } from 'node:path';
 import { eq, and, isNull } from 'drizzle-orm';
 
+import { resetDb } from './helpers';
 let ownerId: string;
 let store: MemoryObjectStore;
 const DAY = 86_400_000;
@@ -31,14 +32,7 @@ const TMP_DOCS = `./data/test-docs-${Date.now().toString(36)}`;
 
 beforeEach(async () => {
     process.env.DATA_DIR = TMP_DOCS;
-    sqlite.prepare('DELETE FROM docs_fts').run();
-    db.delete(schema.documentTags).run();
-    db.delete(schema.tags).run();
-    db.delete(schema.shareLinks).run();
-    db.delete(schema.apiTokens).run();
-    db.delete(schema.documents).run();
-    db.delete(schema.inviteCodes).run();
-    db.delete(schema.users).run();
+    resetDb();
     ownerId = generateId();
     db.insert(schema.users).values({
         id: ownerId,

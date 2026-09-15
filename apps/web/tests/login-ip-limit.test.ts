@@ -4,19 +4,13 @@ import { eq } from 'drizzle-orm';
 import { hashPassword, generateId } from '../src/lib/server/auth';
 
 // P2-6：IP 聚合桶须小上限才可测——须在 import 路由模块前设
+import { resetDb } from './helpers';
 process.env.LOGIN_IP_RATE_LIMIT_MAX = '3';
 process.env.LOGIN_RATE_LIMIT_MAX = '10000';
 const loginMod = await import('../src/routes/login/+page.server');
 
 beforeEach(async () => {
-    sqlite.prepare('DELETE FROM docs_fts').run();
-    db.delete(schema.documentTags).run();
-    db.delete(schema.tags).run();
-    db.delete(schema.shareLinks).run();
-    db.delete(schema.apiTokens).run();
-    db.delete(schema.documents).run();
-    db.delete(schema.inviteCodes).run();
-    db.delete(schema.users).run();
+    resetDb();
     db.insert(schema.users).values({
         id: generateId(), email: 'u@x.com', passwordHash: await hashPassword('right-password'),
         role: 'member', createdAt: Date.now()

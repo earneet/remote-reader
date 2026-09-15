@@ -3,6 +3,7 @@ import { db, schema, sqlite } from '../src/lib/server/db';
 import { generateApiToken, generateId, hashPassword } from '../src/lib/server/auth';
 
 // 413 测试需要小上限；限流放宽避免测试间互相触发——须在 import +server 前设
+import { resetDb } from './helpers';
 process.env.MAX_UPLOAD_BYTES = '10';
 process.env.RATE_LIMIT_MAX = '10000';
 process.env.AUTH_FAIL_RATE_LIMIT_MAX = '3';
@@ -29,14 +30,7 @@ async function call(headers: Record<string, string>, body: unknown, address?: st
 }
 
 beforeEach(async () => {
-    sqlite.prepare('DELETE FROM docs_fts').run();
-    db.delete(schema.documentTags).run();
-    db.delete(schema.tags).run();
-    db.delete(schema.shareLinks).run();
-    db.delete(schema.apiTokens).run();
-    db.delete(schema.documents).run();
-    db.delete(schema.inviteCodes).run();
-    db.delete(schema.users).run();
+    resetDb();
     const ownerId = generateId();
     db.insert(schema.users).values({
         id: ownerId,

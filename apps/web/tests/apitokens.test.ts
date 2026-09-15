@@ -4,17 +4,11 @@ import { db, schema, sqlite } from '../src/lib/server/db';
 import { generateId, hashPassword, hashToken } from '../src/lib/server/auth';
 import { listTokens, createTokenForUser, revokeToken } from '../src/lib/server/apitokens';
 
+import { resetDb } from './helpers';
 let userId: string;
 
 beforeEach(async () => {
-    sqlite.prepare('DELETE FROM docs_fts').run();
-    db.delete(schema.documentTags).run();
-    db.delete(schema.tags).run();
-    db.delete(schema.shareLinks).run();
-    db.delete(schema.apiTokens).run();
-    db.delete(schema.documents).run();
-    db.delete(schema.inviteCodes).run();
-    db.delete(schema.users).run();
+    resetDb();
     userId = generateId();
     db.insert(schema.users).values({
         id: userId,

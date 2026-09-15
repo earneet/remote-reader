@@ -6,18 +6,12 @@ import { setDocTags } from '../src/lib/server/tags';
 import { searchDocuments, getDocPath } from '../src/lib/server/search';
 import { eq, and } from 'drizzle-orm';
 
+import { resetDb } from './helpers';
 let ownerId: string;
 const now = () => Date.now();
 
 beforeEach(() => {
-    sqlite.prepare('DELETE FROM docs_fts').run();
-    db.delete(schema.documentTags).run();
-    db.delete(schema.tags).run();
-    db.delete(schema.shareLinks).run();
-    db.delete(schema.apiTokens).run();
-    db.delete(schema.documents).run();
-    db.delete(schema.inviteCodes).run();
-    db.delete(schema.users).run();
+    resetDb();
     ownerId = generateId();
     db.insert(schema.users).values(
         { id: ownerId, email: `s-${Date.now()}@x.com`, passwordHash: 'x', role: 'member', createdAt: now() }

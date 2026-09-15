@@ -4,19 +4,13 @@ import { db, schema, sqlite } from '../src/lib/server/db';
 import { generateApiToken, generateId, hashPassword } from '../src/lib/server/auth';
 import { authenticateApiToken } from '../src/lib/server/apitoken-auth';
 
+import { resetDb } from './helpers';
 let plaintext: string;
 let userId: string;
 let tokenId: string;
 
 beforeEach(async () => {
-    sqlite.prepare('DELETE FROM docs_fts').run();
-    db.delete(schema.documentTags).run();
-    db.delete(schema.tags).run();
-    db.delete(schema.shareLinks).run();
-    db.delete(schema.apiTokens).run();
-    db.delete(schema.documents).run();
-    db.delete(schema.inviteCodes).run();
-    db.delete(schema.users).run();
+    resetDb();
     userId = generateId();
     db.insert(schema.users).values({
         id: userId,

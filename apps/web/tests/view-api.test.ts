@@ -5,6 +5,7 @@ import { db, schema, sqlite } from '../src/lib/server/db';
 import { generateId } from '../src/lib/server/auth';
 import { uploadDocument } from '../src/lib/server/documents';
 
+import { resetDb } from './helpers';
 const { POST } = await import('../src/routes/api/view/[id]/+server');
 
 const TMP = `./data/test-view-${Date.now().toString(36)}`;
@@ -12,14 +13,7 @@ let ownerId: string;
 
 beforeEach(() => {
     process.env.DATA_DIR = TMP;
-    sqlite.prepare('DELETE FROM docs_fts').run();
-    db.delete(schema.documentTags).run();
-    db.delete(schema.tags).run();
-    db.delete(schema.shareLinks).run();
-    db.delete(schema.apiTokens).run();
-    db.delete(schema.documents).run();
-    db.delete(schema.inviteCodes).run();
-    db.delete(schema.users).run();
+    resetDb();
     ownerId = generateId();
     db.insert(schema.users).values({
         id: ownerId, email: `t-${Date.now()}@x.com`, passwordHash: 'x', role: 'member', createdAt: Date.now()

@@ -9,18 +9,12 @@ import {
     revokeShare
 } from '../src/lib/server/shares';
 
+import { resetDb } from './helpers';
 let docId: string;
 let userId: string;
 
 beforeEach(() => {
-    sqlite.prepare('DELETE FROM docs_fts').run();
-    db.delete(schema.documentTags).run();
-    db.delete(schema.tags).run();
-    db.delete(schema.shareLinks).run();
-    db.delete(schema.apiTokens).run();
-    db.delete(schema.documents).run();
-    db.delete(schema.inviteCodes).run();
-    db.delete(schema.users).run();
+    resetDb();
     userId = generateId();
     db.insert(schema.users).values({
         id: userId,

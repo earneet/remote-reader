@@ -4,6 +4,7 @@ import { eq } from 'drizzle-orm';
 import { createInviteCode, revokeInvite } from '../src/lib/server/invites';
 
 // 放宽限流、设测试 invite，须在 import 路由模块前
+import { resetDb } from './helpers';
 process.env.REGISTER_RATE_LIMIT_MAX = '10000';
 process.env.LOGIN_RATE_LIMIT_MAX = '10000';
 process.env.INITIAL_INVITE_CODE = 'testinvite';
@@ -11,14 +12,7 @@ const registerMod = await import('../src/routes/register/+page.server');
 const loginMod = await import('../src/routes/login/+page.server');
 
 beforeEach(() => {
-    sqlite.prepare('DELETE FROM docs_fts').run();
-    db.delete(schema.documentTags).run();
-    db.delete(schema.tags).run();
-    db.delete(schema.shareLinks).run();
-    db.delete(schema.apiTokens).run();
-    db.delete(schema.documents).run();
-    db.delete(schema.inviteCodes).run();
-    db.delete(schema.users).run();
+    resetDb();
 });
 
 function mockCookies() {

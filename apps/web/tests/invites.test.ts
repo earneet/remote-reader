@@ -4,18 +4,12 @@ import { db, schema, sqlite } from '../src/lib/server/db';
 import { generateId, hashPassword, hashToken } from '../src/lib/server/auth';
 import { listInvites, createInviteCode, revokeInvite, redeemInviteCode, isInviteCodeValid } from '../src/lib/server/invites';
 
+import { resetDb } from './helpers';
 let adminId: string;
 
 beforeEach(async () => {
     // 与 settings.test.ts 相同的清表顺序（FK 依赖从叶到根）
-    sqlite.prepare('DELETE FROM docs_fts').run();
-    db.delete(schema.documentTags).run();
-    db.delete(schema.tags).run();
-    db.delete(schema.shareLinks).run();
-    db.delete(schema.apiTokens).run();
-    db.delete(schema.documents).run();
-    db.delete(schema.inviteCodes).run();
-    db.delete(schema.users).run();
+    resetDb();
     adminId = generateId();
     db.insert(schema.users).values({
         id: adminId,
