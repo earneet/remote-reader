@@ -16,6 +16,7 @@ function configFilePath(): string {
 export function loadConfig(): BridgeConfig {
     let fileUrl: string | undefined;
     let fileToken: string | undefined;
+    let fileBroken = false;
     const file = configFilePath();
     if (existsSync(file)) {
         try {
@@ -23,7 +24,9 @@ export function loadConfig(): BridgeConfig {
             if (typeof parsed?.baseUrl === 'string') fileUrl = parsed.baseUrl;
             if (typeof parsed?.token === 'string') fileToken = parsed.token;
         } catch {
-            // 配置文件损坏：忽略，靠 env 兜底
+            // 配置文件损坏：提示后忽略，靠 env 兜底（不回显文件内容，token 不进日志）
+            fileBroken = true;
+            console.error(`[remote-reader] 配置文件 ${file} 不是合法 JSON，已忽略——请检查是否有多余逗号/引号`);
         }
     }
     const baseUrl = (process.env.REMOTE_READER_URL || fileUrl || '').trim();
@@ -33,6 +36,7 @@ export function loadConfig(): BridgeConfig {
             '[remote-reader] 缺少配置：需要 baseUrl 与 token。\n' +
             '  方式一：设环境变量 REMOTE_READER_URL 与 REMOTE_READER_TOKEN。\n' +
             `  方式二：写配置文件 ${file}，内容 {"baseUrl":"https://...","token":"rr_..."}。`
+            + (fileBroken ? `\n  注意：上述文件存在但解析失败（见上方提示），字段未被读取。` : '')
         );
         process.exit(1);
     }
