@@ -84,7 +84,7 @@
     .tag-filter h2 { font-size: 0.9rem; margin: 0 0 0.5rem; color: var(--rr-text-muted); }
     .chips { display: flex; flex-wrap: wrap; gap: 0.4rem; }
     .chip { padding: 0.2rem 0.6rem; border: 1px solid var(--rr-border); border-radius: 999px; text-decoration: none; color: var(--rr-text); font-size: 0.8rem; background: var(--rr-card-bg); }
-    .chip.active { background: var(--rr-accent); color: #ffffff; border-color: var(--rr-accent); }
+    .chip.active { background: var(--rr-accent); color: var(--rr-btn-primary-text); border-color: var(--rr-accent); }
     .chip .count { opacity: 0.7; font-size: 0.75rem; }
     .results ul { list-style: none; padding: 0; }
     .results li { padding: 0.6rem 0; border-bottom: 1px solid var(--rr-border-soft); }
