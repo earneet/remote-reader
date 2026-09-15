@@ -1,6 +1,7 @@
 <script lang="ts">
     import { clampZoom, nextZoom, formatZoom, ZOOM_STEP } from '$lib/shared/mermaid-zoom';
     import { trapTabKey } from '$lib/shared/focus-trap';
+    import { lockBodyScroll, unlockBodyScroll } from '$lib/shared/body-scroll';
 
     let { container, html }: { container: HTMLDivElement | undefined; html: string } = $props();
 
@@ -60,11 +61,14 @@
         browserFs = !!document.fullscreenElement;
     }
 
-    function focusOnMount(node: HTMLElement) {
+    // overlay 打开时聚焦、锁 body 滚动（顶栏/边距区的滚轮会穿透滚动背景），关闭时解锁 + 焦点归还
+    function overlayOnMount(node: HTMLElement) {
         const prev = document.activeElement as HTMLElement | null;
         node.focus();
+        lockBodyScroll();
         return {
             destroy() {
+                unlockBodyScroll();
                 if (prev && typeof prev.focus === 'function') prev.focus();
             }
         };
@@ -254,7 +258,7 @@
         role="dialog"
         aria-modal="true"
         tabindex="-1"
-        use:focusOnMount
+        use:overlayOnMount
         onclick={(e) => { if (e.target === e.currentTarget) closeOverlay(); }}
         onkeydown={(e) => {
             if (e.key === 'Escape') closeOverlay();

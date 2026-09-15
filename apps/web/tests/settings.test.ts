@@ -63,7 +63,7 @@ test('tokens create 空 name → 400', async () => {
     insertUser(ownerId);
     await expect(tokensMod.actions.create({
         locals: { user: { id: ownerId } }, request: formRequest({ name: '' })
-    } as never)).rejects.toMatchObject({ status: 400 });
+    } as never)).resolves.toMatchObject({ status: 400 });
 });
 
 test('tokens revoke 删除自己的 token', async () => {
@@ -124,7 +124,7 @@ test('shares revoke 空 token → 400', async () => {
     insertUser(ownerId);
     await expect(sharesMod.actions.revoke({
         locals: { user: { id: ownerId } }, request: formRequest({ token: '' })
-    } as never)).rejects.toMatchObject({ status: 400 });
+    } as never)).resolves.toMatchObject({ status: 400 });
 });
 
 test('shares 未登录 load → redirect 302', async () => {
@@ -161,7 +161,7 @@ test('invites create 空 note → 400', async () => {
     insertUser(adminId, 'admin');
     await expect(invitesMod.actions.create({
         locals: { user: { id: adminId, role: 'admin' } }, request: formRequest({ note: '', days: '7' })
-    } as never)).rejects.toMatchObject({ status: 400 });
+    } as never)).resolves.toMatchObject({ status: 400 });
 });
 
 test('invites create 非法 days → 400', async () => {
@@ -169,7 +169,7 @@ test('invites create 非法 days → 400', async () => {
     insertUser(adminId, 'admin');
     await expect(invitesMod.actions.create({
         locals: { user: { id: adminId, role: 'admin' } }, request: formRequest({ note: 'x', days: '5' })
-    } as never)).rejects.toMatchObject({ status: 400 });
+    } as never)).resolves.toMatchObject({ status: 400 });
 });
 
 test('invites member create → 403', async () => {

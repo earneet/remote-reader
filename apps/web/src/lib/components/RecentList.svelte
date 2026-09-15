@@ -165,15 +165,16 @@
         }
     }
 
-    // 哨兵 observer：root 为右栏滚动容器，rootMargin 提前 600px 预载（spec §6.2）。
+    // 哨兵 observer：root 用视口（null）而非右栏元素——≤768px 布局下 .fm-right 是
+    // height:auto 不裁剪的普通块，哨兵恒在其盒内 → 交叉状态永不翻转，移动端无限滚动哑火。
+    // 桌面右栏几乎占满视口，rootMargin 600px 预载语义不变。
     // 依赖仅 scrollRoot/sentinel；loadMore 内部状态在异步回调里读，不进依赖。SSR 不执行。
     $effect(() => {
-        const root = scrollRoot;
         const target = sentinel;
-        if (!root || !target) return;
+        if (!target) return;
         const io = new IntersectionObserver((entries) => {
             if (entries.some((e) => e.isIntersecting)) void loadMore();
-        }, { root, rootMargin: '600px' });
+        }, { root: null, rootMargin: '600px' });
         io.observe(target);
         return () => io.disconnect();
     });

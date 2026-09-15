@@ -6,6 +6,7 @@
     let copied = $state(false);
     // 防双发：create 无幂等约束，双击会生成两个 token
     let creating = $state(false);
+    let actionError = $state<string | null>(null);
     async function copyPlaintext(text: string) {
         try {
             await navigator.clipboard.writeText(text);
@@ -18,6 +19,7 @@
 
 <div class="settings-page">
     <h1>API Token 管理</h1>
+    {#if actionError}<p class="form-error" role="alert">{actionError}</p>{/if}
 
     {#if form?.plaintext && !dismissed}
     <div class="reveal">
@@ -55,7 +57,12 @@
                     <form method="POST" action="?/revoke"
                         use:enhance={({ cancel }) => {
                             if (!confirm('撤销此 token？相关 Agent 将无法再认证。')) { cancel(); return; }
-                            return async ({ result }) => { if (result.type === 'success') await invalidateAll(); };
+                            return async ({ result }) => {
+                                if (result.type === 'success') { actionError = null; await invalidateAll(); }
+                                else if (result.type === 'failure') {
+                                    actionError = String((result.data as { error?: string } | undefined)?.error ?? '撤销失败，请重试');
+                                }
+                            };
                         }}>
                         <input type="hidden" name="id" value={t.id}>
                         <button>撤销</button>
@@ -70,6 +77,7 @@
 <style>
     /* 页面自身留边距（勿用 :global(body)——会连 topnav 一起缩进，且各页互相污染） */
     .settings-page { font-family: system-ui, sans-serif; padding: 1.5rem; }
+    .form-error { color: var(--rr-danger); font-size: 0.9rem; }
     .reveal { background: var(--rr-warning-soft); border: 1px solid var(--rr-warning-border); padding: 1rem; border-radius: 6px; margin: 1rem 0; }
     .reveal code { display: block; word-break: break-all; padding: 0.5rem; background: var(--rr-card-bg); border-radius: 4px; margin: 0.5rem 0; }
     .reveal-actions { display: flex; gap: 0.5rem; align-items: center; }

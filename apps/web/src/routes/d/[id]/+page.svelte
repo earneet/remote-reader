@@ -29,28 +29,32 @@
 
 <a href="/" class="back">← 返回我的文档</a>
 
-<div class="tag-bar">
-    {#if !editing}
-        {#each data.tags as t (t.id)}<span class="chip-static">{t.name}</span>{/each}
-        <button class="btn sm" onclick={startEdit}>🏷 编辑标签</button>
-        <!-- no-JS 原生提交时 fail() 经 SSR 重渲染以 form prop 送达（enhance 路径走 tagError） -->
-        {#if form?.error}<span class="tag-error" role="alert">{form.error}</span>{/if}
-    {:else}
-        <form method="POST" action="?/setTags" use:enhance={() => async ({ result }) => {
-            if (result.type === 'success') { editing = false; await invalidateAll(); }
-            else if (result.type === 'failure') {
-                tagError = String((result.data as { error?: string } | undefined)?.error ?? '保存失败，请重试');
-            }
-        }}>
-            <input name="tags" value={tagInput} placeholder="逗号分隔" autofocus
-                onkeydown={(e) => { if (e.key === 'Escape') editing = false; }}
-                oninput={(e) => (tagInput = e.currentTarget.value)}>
-            <button type="submit" class="btn sm primary">保存</button>
-            <button type="button" class="btn sm" onclick={() => (editing = false)}>取消</button>
-            {#if tagError}<span class="tag-error" role="alert">{tagError}</span>{/if}
-        </form>
-    {/if}
-</div>
+<!-- key 绑定 data.id：同路由参数切换（/d/a→/d/b，文档内 markdown 链接）时组件复用会保留
+     editing/草稿 $state——A 的标签草稿会被误写到 B。key 强制随文档重建 -->
+{#key data.id}
+    <div class="tag-bar">
+        {#if !editing}
+            {#each data.tags as t (t.id)}<span class="chip-static">{t.name}</span>{/each}
+            <button class="btn sm" onclick={startEdit}>🏷 编辑标签</button>
+            <!-- no-JS 原生提交时 fail() 经 SSR 重渲染以 form prop 送达（enhance 路径走 tagError） -->
+            {#if form?.error}<span class="tag-error" role="alert">{form.error}</span>{/if}
+        {:else}
+            <form method="POST" action="?/setTags" use:enhance={() => async ({ result }) => {
+                if (result.type === 'success') { editing = false; await invalidateAll(); }
+                else if (result.type === 'failure') {
+                    tagError = String((result.data as { error?: string } | undefined)?.error ?? '保存失败，请重试');
+                }
+            }}>
+                <input name="tags" value={tagInput} placeholder="逗号分隔" autofocus
+                    onkeydown={(e) => { if (e.key === 'Escape') editing = false; }}
+                    oninput={(e) => (tagInput = e.currentTarget.value)}>
+                <button type="submit" class="btn sm primary">保存</button>
+                <button type="button" class="btn sm" onclick={() => (editing = false)}>取消</button>
+                {#if tagError}<span class="tag-error" role="alert">{tagError}</span>{/if}
+            </form>
+        {/if}
+    </div>
+{/key}
 
 <MarkdownViewer html={data.html} />
 

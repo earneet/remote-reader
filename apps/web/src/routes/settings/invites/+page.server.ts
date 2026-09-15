@@ -1,4 +1,4 @@
-import { error, redirect } from '@sveltejs/kit';
+import { error, fail, redirect } from '@sveltejs/kit';
 import type { PageServerLoad, Actions } from './$types';
 import {
     listInvites, createInviteCode, revokeInvite,
@@ -23,8 +23,8 @@ export const actions: Actions = {
         const form = await request.formData();
         const note = String(form.get('note') ?? '').trim();
         const days = Number(form.get('days'));
-        if (!note) error(400, '备注必填');
-        if (!INVITE_EXPIRY_DAYS.includes(days as InviteExpiryDays)) error(400, '有效期不合法');
+        if (!note) return fail(400, { error: '备注必填' });
+        if (!INVITE_EXPIRY_DAYS.includes(days as InviteExpiryDays)) return fail(400, { error: '有效期不合法' });
         const { plaintext } = await createInviteCode(admin.id, note, days as InviteExpiryDays);
         return { plaintext };
     },
@@ -32,7 +32,7 @@ export const actions: Actions = {
         requireAdmin(locals);
         const form = await request.formData();
         const id = String(form.get('id') ?? '');
-        if (!id) error(400, '参数缺失');
+        if (!id) return fail(400, { error: '参数缺失' });
         revokeInvite(id);
         return { ok: true };
     }

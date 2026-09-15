@@ -3,6 +3,7 @@
     import AuthCard from '$components/AuthCard.svelte';
     let { form } = $props();
     let loading = $state(false);
+    let submitBtn = $state<HTMLButtonElement | null>(null);
 </script>
 
 <AuthCard title="登录" error={form?.error}>
@@ -13,6 +14,8 @@
             return async ({ update }) => {
                 await update();
                 loading = false;
+                // disabled 会把焦点抛回 body——失败后归还，键盘用户 Enter 重提交链不断
+                submitBtn?.focus();
             };
         }}
     >
@@ -30,7 +33,7 @@
                 autocomplete="current-password"
             />
         </div>
-        <button type="submit" class="submit" disabled={loading}>登录</button>
+        <button type="submit" class="submit" bind:this={submitBtn} disabled={loading}>登录</button>
     </form>
     {#snippet footer()}
         没有账号？<a href="/register">注册</a>

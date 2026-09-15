@@ -2,6 +2,7 @@
     import { onMount } from 'svelte';
     import { nextZoom, formatZoom, ZOOM_STEP, clampZoom } from '$lib/shared/mermaid-zoom';
     import { trapTabKey } from '$lib/shared/focus-trap';
+    import { lockBodyScroll, unlockBodyScroll } from '$lib/shared/body-scroll';
 
     let { container, html }: { container: HTMLDivElement | undefined; html: string } = $props();
 
@@ -124,12 +125,15 @@
         browserFs = !!document.fullscreenElement;
     }
 
-    // lightbox 打开时聚焦 overlay、关闭时焦点回触发元素
-    function focusOnMount(node: HTMLElement) {
+    // lightbox 打开时聚焦 overlay、锁 body 滚动（顶栏/边距区的滚轮会穿透滚动背景），
+    // 关闭时解锁 + 焦点回触发元素
+    function overlayOnMount(node: HTMLElement) {
         const prev = document.activeElement as HTMLElement | null;
         node.focus();
+        lockBodyScroll();
         return {
             destroy() {
+                unlockBodyScroll();
                 if (prev && typeof prev.focus === 'function') prev.focus();
             }
         };
@@ -231,7 +235,7 @@
         role="dialog"
         aria-modal="true"
         tabindex="-1"
-        use:focusOnMount
+        use:overlayOnMount
         onclick={(e) => {
             if (e.target === e.currentTarget) fullscreen = null;
         }}
