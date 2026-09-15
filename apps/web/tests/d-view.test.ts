@@ -98,3 +98,39 @@ test('load 返回 id（「最近浏览」beacon 用，spec §7.1）', async () =
     const result = (await load(mkEvent(ownerId, docId))) as { id: string };
     expect(result.id).toBe(docId);
 });
+
+// ===== setTags action（F2：fail() 而非 error()——error() 信封前端 enhance 无分支会静默） =====
+
+test('setTags 非法标签（>32 字符）→ ActionFailure(400) 而非 HttpError 整页错误', async () => {
+    const { actions } = await import('../src/routes/d/[id]/+page.server');
+    const ownerId = generateId();
+    insertUser(ownerId);
+    const diskPath = join(TMP, ownerId, 't.md');
+    await writeFile(diskPath, '# t');
+    const docId = insertDoc(ownerId, 't.md', diskPath);
+    const fd = new FormData();
+    fd.append('tags', 'x'.repeat(33));
+    const r = await (actions.setTags as (e: unknown) => unknown)({
+        locals: { user: { id: ownerId } },
+        params: { id: docId },
+        request: new Request('http://localhost/d/x?/setTags', { method: 'POST', body: fd })
+    });
+    expect((r as { status?: number })?.status).toBe(400);
+});
+
+test('setTags 正常保存 → { ok: true }', async () => {
+    const { actions } = await import('../src/routes/d/[id]/+page.server');
+    const ownerId = generateId();
+    insertUser(ownerId);
+    const diskPath = join(TMP, ownerId, 't2.md');
+    await writeFile(diskPath, '# t2');
+    const docId = insertDoc(ownerId, 't2.md', diskPath);
+    const fd = new FormData();
+    fd.append('tags', 'a, b');
+    const r = await (actions.setTags as (e: unknown) => unknown)({
+        locals: { user: { id: ownerId } },
+        params: { id: docId },
+        request: new Request('http://localhost/d/x?/setTags', { method: 'POST', body: fd })
+    });
+    expect(r).toEqual({ ok: true });
+});

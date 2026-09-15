@@ -14,6 +14,10 @@
     // 「顶栏 + 内容恰好铺满视口」的 app-shell 高度计算，避免硬编码魔法数字。
     // 用 offsetHeight（border-box）：clientHeight 不含 border-bottom 会少算 1px 导致整页溢出。
     let navH = $state(0);
+    let menuDetails = $state<HTMLDetailsElement | null>(null);
+    function closeMenu(): void {
+        if (menuDetails) menuDetails.open = false;
+    }
     $effect(() => {
         if (navH > 0) document.documentElement.style.setProperty('--nav-h', `${navH}px`);
     });
@@ -25,14 +29,15 @@
     <form class="nav-search" method="GET" action="/search">
         <input name="q" placeholder="搜索文档…" aria-label="搜索文档">
     </form>
-    <details>
+    <details bind:this={menuDetails}>
         <summary>设置</summary>
+        <!-- 客户端导航复用布局实例，details 的 open 状态跨路由保留——点击后须手动收起 -->
         <div class="menu">
-            <a href="/settings/tokens">API Token</a>
-            <a href="/settings/shares">分享链接</a>
-            <a href="/settings/tags">标签管理</a>
+            <a href="/settings/tokens" onclick={closeMenu}>API Token</a>
+            <a href="/settings/shares" onclick={closeMenu}>分享链接</a>
+            <a href="/settings/tags" onclick={closeMenu}>标签管理</a>
             {#if data.user?.role === 'admin'}
-                <a href="/settings/invites">邀请码</a>
+                <a href="/settings/invites" onclick={closeMenu}>邀请码</a>
             {/if}
         </div>
     </details>

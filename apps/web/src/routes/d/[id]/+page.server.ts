@@ -1,4 +1,4 @@
-import { error, redirect } from '@sveltejs/kit';
+import { error, fail, redirect } from '@sveltejs/kit';
 import type { PageServerLoad, Actions } from './$types';
 import { getOwnedDocument, readDocumentContent } from '$server/documents';
 import { FileNotFoundError } from '$server/storage';
@@ -33,12 +33,13 @@ export const actions: Actions = {
         const raw = String(form.get('tags') ?? '');
         const names = raw.split(',').map(s => s.trim()).filter(Boolean);
         for (const n of names) {
-            if (!n || n.length > 32 || n.includes('/')) error(400, `标签名非法：${n}`);
+            // fail() 而非 error()：error() 信封在前端 enhance 无分支会静默（F2，对齐 FM 的 P2-10 模式）
+            if (!n || n.length > 32 || n.includes('/')) return fail(400, { error: `标签名非法：${n}` });
         }
         try {
             setDocTags(locals.user.id, params.id, names);
         } catch (e) {
-            if (e instanceof SetTagsError) error(404, '文档不存在或无权操作');
+            if (e instanceof SetTagsError) return fail(404, { error: '文档不存在或无权操作' });
             throw e;
         }
         return { ok: true };

@@ -4,6 +4,8 @@
     let { data, form } = $props();
     let dismissed = $state(false);
     let copied = $state(false);
+    // 防双发：双击会生成两个邀请码
+    let creating = $state(false);
     function statusOf(inv: { revokedAt: number | null; expiresAt: number }): string {
         if (inv.revokedAt !== null) return '已撤销';
         if (inv.expiresAt <= Date.now()) return '已过期';
@@ -35,8 +37,12 @@
 
     <!-- 必须 await update()：enhance 自定义回调不调它，applyAction 就不执行 → form prop 不更新，
           一次性明文 reveal（form?.plaintext）永不显示。invalidateAll 只刷新 data，不写 form。 -->
-    <form method="POST" action="?/create" use:enhance={() => async ({ result, update }) => {
-        if (result.type === 'success') { dismissed = false; copied = false; await update(); }
+    <form method="POST" action="?/create" use:enhance={() => {
+        creating = true;
+        return async ({ result, update }) => {
+            creating = false;
+            if (result.type === 'success') { dismissed = false; copied = false; await update(); }
+        };
     }}>
         <input name="note" placeholder="如 给同事的注册码" required>
         <select name="days" aria-label="有效期">
@@ -44,7 +50,7 @@
             <option value="7" selected>7 天</option>
             <option value="30">30 天</option>
         </select>
-        <button>生成新邀请码</button>
+        <button disabled={creating}>生成新邀请码</button>
     </form>
 
     <table>
