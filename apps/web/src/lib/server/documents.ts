@@ -8,7 +8,7 @@ import { writeFile, readFile, FileNotFoundError } from './storage';
 import { rewarmDocument, withDocLock } from './tiering';
 import { getObjectStore, objectKeyFor, ObjectNotFoundError, ArchiveUnavailableError } from './object-store';
 import { createShareLink } from './shares';
-import { getBaseUrl } from './env';
+import { getBaseUrl, getDataDir } from './env';
 import { indexDoc } from './fts';
 import type { RecentSort, RecentDoc } from '../shared/recent';
 
@@ -114,12 +114,7 @@ export async function uploadDocument(
     }
     const contentHash = sha256Hex(content);
     const now = Date.now();
-    const diskPath = join(
-        process.env.DATA_DIR ?? './data/documents',
-        ownerId,
-        ...pathSegments,
-        name
-    );
+    const diskPath = join(getDataDir(), ownerId, ...pathSegments, name);
 
     // 外壳重试：锁内检测到目标被并发删/改名（P2-3）、或 insert 撞唯一索引（P1-1 并发首传）时，
     // 回到壳层重新定位——绝不在 doc 锁回调内再次 withDocLock 同一 id（链式锁自死锁）
@@ -432,9 +427,8 @@ export function deleteNode(ownerId: string, id: string): void {
 
     db.transaction((tx) => {
         tx.delete(schema.shareLinks).where(inArray(schema.shareLinks.documentId, subtreeIds)).run();
-        // docs_fts 非 Drizzle 表，同连接同步执行故落在事务内
-        const ph = subtreeIds.map(() => '?').join(',');
-        sqlite.prepare(`DELETE FROM docs_fts WHERE doc_id IN (${ph})`).run(...subtreeIds);
+        // unindexDocs 为同连接同步执行，在事务回调内调用即落同一事务（语义等同原内联 SQL）
+        unindexDocs(subtreeIds);
         tx.delete(schema.documents).where(inArray(schema.documents.id, subtreeIds)).run();
     });
 

@@ -88,3 +88,49 @@ test('P1-1 存量库升级：ensureSchema 清洗竞态重复行后建唯一索�
     legacy.close();
     try { rmSync(tmp, { force: true }); try { rmSync(tmp + '-wal', { force: true }); rmSync(tmp + '-shm', { force: true }); } catch {} } catch {}
 });
+
+// A-2：schema.ts ↔ ensureSchema 等价性守卫——生产全新部署建表 100% 走 ensureSchema（SCHEMA_SQL），
+// drizzle migration 只服务 dev；漏改任一处会出现“dev 全绿、新部署缺列即崩”。此处遍历 schema.ts
+// 全表全列断言在空白库上 ensureSchema 后全部可见，索引（含唯一）同理
+test('A-2 schema.ts 全表全列在 ensureSchema 空白库上可见（三处同步守卫）', () => {
+    const D = (sqlite as unknown as { constructor: new (path: string) => typeof sqlite }).constructor;
+    const tmp = `./data/test-schemawait-${Date.now().toString(36)}.db`;
+    const fresh = new D(tmp);
+    fresh.pragma('foreign_keys = ON');
+    ensureSchema(fresh);
+
+    const expected: Record<string, string[]> = {
+        users: ['id', 'email', 'password_hash', 'role', 'created_at'],
+        api_tokens: ['id', 'user_id', 'name', 'token_hash', 'last_used_at', 'created_at'],
+        invite_codes: ['id', 'code_hash', 'created_by', 'note', 'expires_at', 'revoked_at', 'used_count', 'last_used_at', 'created_at'],
+        documents: ['id', 'owner_id', 'parent_id', 'name', 'type', 'storage_path', 'content_hash', 'size_bytes',
+            'created_at', 'updated_at', 'storage_tier', 'last_viewed_at', 'archived_at', 'owner_viewed_at'],
+        share_links: ['id', 'document_id', 'token', 'expires_at', 'created_at'],
+        tags: ['id', 'owner_id', 'name', 'created_at'],
+        document_tags: ['tag_id', 'document_id']
+    };
+    for (const [table, cols] of Object.entries(expected)) {
+        const got = (fresh.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name);
+        expect(got.sort(), `表 ${table} 列不一致：ensureSchema=${got.join(',')}`).toEqual([...cols].sort());
+    }
+
+    const expectedIndexes = [
+        'users_email_unique',
+        'api_tokens_user_id_idx', 'api_tokens_token_hash_idx',
+        'invite_codes_code_hash_idx',
+        'documents_owner_parent_idx', 'documents_owner_parent_name_type_idx',
+        'documents_owner_parent_name_type_uniq',
+        'documents_owner_type_updated_idx', 'documents_owner_type_viewed_idx',
+        'share_links_token_unique', 'share_links_document_id_idx',
+        'tags_owner_name_unique', 'tags_owner_id_idx',
+        'document_tags_document_id_idx', 'document_tags_tag_id_idx'
+    ];
+    const gotIdx = (fresh.prepare(
+        "SELECT name FROM sqlite_master WHERE type='index' AND name NOT LIKE 'sqlite_%' AND tbl_name IN ('users','api_tokens','invite_codes','documents','share_links','tags','document_tags')"
+    ).all() as { name: string }[]).map((r) => r.name);
+    expect(gotIdx.sort(), `索引不一致：ensureSchema=${gotIdx.join(',')}`).toEqual([...expectedIndexes].sort());
+    expect(!!fresh.prepare("SELECT name FROM sqlite_master WHERE name='docs_fts'").get()).toBe(true);
+
+    fresh.close();
+    try { rmSync(tmp, { force: true }); try { rmSync(tmp + '-wal', { force: true }); rmSync(tmp + '-shm', { force: true }); } catch {} } catch {}
+});

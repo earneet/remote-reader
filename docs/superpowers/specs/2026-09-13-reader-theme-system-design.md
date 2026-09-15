@@ -232,7 +232,7 @@ sequenceDiagram
 - `✏` 重命名按钮为裸 U+270F（无 FE0F 变体选择符）→ 文本呈现单色铅笔（master 存量，与主题无关；加 `️` 即可彩色化，+page.svelte 与 RecentList.svelte 各一处）
 - TableFullscreen 在无 `window.matchMedia` 的极端环境会 pageerror（spec §8 未承诺该组件兜底，真实浏览器 IE10+ 均具备）——建议补一行 typeof 守卫
 - SSR 首屏 ThemeToggle aria-label 短暂为默认值「自动（当前浅色）」，hydration 后修正（SSR 无法预知客户端偏好，固有窗口；`data-theme` 与页面配色由防闪脚本保证正确）
-- 全仓 CSP 头从未在代码中设置（CLAUDE.md「H6 CSP report-only」仅落地了 /api/csp-report 接收端点）——pre-existing 文档-代码漂移，与本分支无关，N4 前提不受影响
+- ~~全仓 CSP 头从未在代码中设置~~【2026-09-14 复核勘误：本条系当时审计只 grep 了 setHeaders——CSP 实际由 `svelte.config.js` 的 `kit.csp.reportOnly` 配置（SvelteKit 据此发 `Content-Security-Policy-Report-Only` 头，report-uri 指向 /api/csp-report）。CLAUDE.md「H6 CSP report-only」表述与代码一致，无漂移】
 - 代码质量 NITPICK×4：防御式 fallback 三种策略并存（MermaidViewer 裸用 / ThemeToggle、MarkdownViewer 带 fallback）、ThemeToggle 内联重复 `Theme` 联合类型、enhanceKatex 为 floating promise（存量模式）、本 spec §9 若干笔误
 
 ## §10 待做清单（实现计划输入）

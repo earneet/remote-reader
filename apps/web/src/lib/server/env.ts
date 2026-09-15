@@ -13,6 +13,11 @@ export function getBaseUrl(): string {
     return (process.env.BASE_URL ?? 'http://localhost:5173').replace(/\/+$/, '');
 }
 
+// DATA_DIR 保持调用时读取（而非模块级常量）——测试需逐文件覆写 process.env.DATA_DIR
+export function getDataDir(): string {
+    return process.env.DATA_DIR ?? './data/documents';
+}
+
 export function getSessionMaxAgeSeconds(): number {
     return envInt('SESSION_MAX_AGE', 2_592_000);
 }
