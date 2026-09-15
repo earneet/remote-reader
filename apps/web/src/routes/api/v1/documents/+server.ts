@@ -2,7 +2,7 @@ import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { authenticateApiToken } from '$server/apitoken-auth';
 import { checkRateLimit } from '$server/ratelimit';
-import { uploadDocument } from '$server/documents';
+import { uploadDocument, NameConflictError } from '$server/documents';
 import { parsePath } from '@remote-reader/shared/paths';
 import { envInt } from '$server/env';
 
@@ -50,6 +50,13 @@ export const POST: RequestHandler = async ({ request, getClientAddress }) => {
     const fileName = parts[parts.length - 1];
     const segments = parts.slice(0, -1);
 
-    const result = await uploadDocument(auth.userId, fileName, content, segments);
+    let result: { id: string; url: string };
+    try {
+        result = await uploadDocument(auth.userId, fileName, content, segments);
+    } catch (e) {
+        // P1-4：跨类型同名冲突 → 409（此前是 EISDIR/EEXIST 裸 500）
+        if (e instanceof NameConflictError) error(409, e.message);
+        throw e;
+    }
     return json(result);
 };

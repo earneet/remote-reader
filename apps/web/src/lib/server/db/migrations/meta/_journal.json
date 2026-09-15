@@ -50,6 +50,13 @@
       "when": 1789373567201,
       "tag": "0006_dapper_zzzax",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1789444351367,
+      "tag": "0007_handy_violations",
+      "breakpoints": true
     }
   ]
 }

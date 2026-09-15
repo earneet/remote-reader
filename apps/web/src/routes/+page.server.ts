@@ -57,20 +57,21 @@ export const actions: Actions = {
         } catch (e) {
             error(400, (e as Error).message);
         }
+        // 同 parent 同名即冲突——不区分 type（file/folder 同名在磁盘上必然冲突，防陷阱目录）
         const dup = db.select().from(schema.documents).where(and(
             eq(schema.documents.ownerId, locals.user.id),
             parentId === null ? isNull(schema.documents.parentId) : eq(schema.documents.parentId, parentId),
-            eq(schema.documents.name, name),
-            eq(schema.documents.type, 'folder')
+            eq(schema.documents.name, name)
         )).get();
-        if (!dup) {
-            const now = Date.now();
-            db.insert(schema.documents).values({
-                id: generateId(), ownerId: locals.user.id, parentId, name,
-                type: 'folder', storagePath: null, contentHash: null, sizeBytes: null,
-                createdAt: now, updatedAt: now
-            }).run();
+        if (dup) {
+            error(409, dup.type === 'folder' ? '同名文件夹已存在' : '同名文件已存在（文件与文件夹不能同名）');
         }
+        const now = Date.now();
+        db.insert(schema.documents).values({
+            id: generateId(), ownerId: locals.user.id, parentId, name,
+            type: 'folder', storagePath: null, contentHash: null, sizeBytes: null,
+            createdAt: now, updatedAt: now
+        }).run();
         return { ok: true };
     },
     rename: async ({ request, locals }) => {

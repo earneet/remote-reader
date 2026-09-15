@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { sqliteTable, text, integer, index, unique, primaryKey } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, index, unique, uniqueIndex, primaryKey } from 'drizzle-orm/sqlite-core';
 
 export const users = sqliteTable('users', {
     id: text('id').primaryKey(),
@@ -55,6 +55,9 @@ export const documents = sqliteTable('documents', {
 }, (t) => ({
     ownerParentIdx: index('documents_owner_parent_idx').on(t.ownerId, t.parentId),
     ownerParentNameTypeIdx: index('documents_owner_parent_name_type_idx').on(t.ownerId, t.parentId, t.name, t.type),
+    // P1-1：同位置同类型唯一（NULL parent_id 需 COALESCE 才参与唯一性）——拦截并发首传双插
+    ownerParentNameTypeUniq: uniqueIndex('documents_owner_parent_name_type_uniq')
+        .on(t.ownerId, sql`COALESCE(${t.parentId}, '')`, t.name, t.type),
     ownerTypeUpdatedIdx: index('documents_owner_type_updated_idx')
         .on(t.ownerId, t.type, sql`${t.updatedAt} DESC`, sql`${t.id} DESC`),
     ownerTypeViewedIdx: index('documents_owner_type_viewed_idx')

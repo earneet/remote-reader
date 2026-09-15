@@ -16,6 +16,15 @@ type DocumentRow = typeof schema.documents.$inferSelect;
 
 const MAX_TREE_DEPTH = 1000;
 
+// P1-4：DB 层允许同 parent 下 file 与 folder 同名（type 区分），但磁盘是同一命名空间——
+// 文件名撞实体目录 rename 必 EISDIR、路径段撞文件 mkdir 必 EEXIST。统一提前为可解释的冲突错误
+export class NameConflictError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = 'NameConflictError';
+    }
+}
+
 function findNode(
     ownerId: string,
     parentId: string | null,
@@ -38,6 +47,9 @@ function ensureFolder(ownerId: string, segments: string[]): string | null {
     let parentId: string | null = null;
     const now = Date.now();
     for (const seg of segments) {
+        if (findNode(ownerId, parentId, seg, 'file')) {
+            throw new NameConflictError(`路径段 "${seg}" 已被同名文件占用，无法作为目录`);
+        }
         const existing = findNode(ownerId, parentId, seg, 'folder');
         if (existing) {
             parentId = existing.id;
@@ -79,6 +91,9 @@ export async function uploadDocument(
     pathSegments: string[]
 ): Promise<{ id: string; url: string }> {
     const parentId = ensureFolder(ownerId, pathSegments);
+    if (findNode(ownerId, parentId, name, 'folder')) {
+        throw new NameConflictError(`"${name}" 与同名文件夹冲突`);
+    }
     const contentHash = sha256Hex(content);
     const now = Date.now();
     const diskPath = join(
@@ -88,76 +103,93 @@ export async function uploadDocument(
         name
     );
 
-    const existing = findNode(ownerId, parentId, name, 'file');
+    // 外壳重试：锁内检测到目标被并发删/改名（P2-3）、或 insert 撞唯一索引（P1-1 并发首传）时，
+    // 回到壳层重新定位——绝不在 doc 锁回调内再次 withDocLock 同一 id（链式锁自死锁）
+    for (let attempt = 0; ; attempt++) {
+        const existing = findNode(ownerId, parentId, name, 'file');
 
-    if (existing && existing.contentHash === contentHash) {
-        const url = await ensureShareUrl(existing.id);
-        return { id: existing.id, url };
-    }
+        if (existing && existing.contentHash === contentHash) {
+            const url = await ensureShareUrl(existing.id);
+            return { id: existing.id, url };
+        }
 
-    if (existing) {
-        // §4.2：覆盖上传写段持 doc 锁（与归档/回热串行，防竞态丢内容）；锁内重取行拿最新状态
-        return withDocLock(existing.id, async () => {
-            const row = db.select().from(schema.documents).where(eq(schema.documents.id, existing.id)).get();
-            // 锁等待期间行被删：重取与递归之间无 await（原子窗口），递归走全新插入、不会重入本锁
-            if (!row) return uploadDocument(ownerId, name, content, pathSegments);
-            // 锁内复查幂等：等锁期间内容可能已被并发上传改为相同内容
-            if (row.contentHash === contentHash) {
+        if (existing) {
+            // §4.2：覆盖上传写段持 doc 锁（与归档/回热串行，防竞态丢内容）；锁内重取行拿最新状态
+            const outcome = await withDocLock(existing.id, async (): Promise<
+                { result: { id: string; url: string } } | { retry: true }
+            > => {
+                const row = db.select().from(schema.documents).where(eq(schema.documents.id, existing.id)).get();
+                if (!row) return { retry: true };
+                // 锁内复查幂等：等锁期间内容可能已被并发上传改为相同内容
+                if (row.contentHash === contentHash) {
+                    const url = await ensureShareUrl(row.id);
+                    return { result: { id: row.id, url } };
+                }
+                await writeFile(diskPath, content);
+                // P2-3 翻转守卫：WHERE 带 eq(name)——写盘让出窗口内行被改名（防 storagePath 错位回退）
+                // 或被删（防孤儿 FTS 行 + share_links FK 500）则 0 行落库，跳过后续写、交回壳层重试
+                const flipped = db.update(schema.documents).set({
+                    storagePath: diskPath,
+                    contentHash,
+                    sizeBytes: Buffer.byteLength(content),
+                    updatedAt: now,
+                    // 覆盖上传即回热：内容已重新落盘
+                    storageTier: 'hot',
+                    lastViewedAt: now,
+                    archivedAt: null
+                }).where(and(eq(schema.documents.id, row.id), eq(schema.documents.name, name))).run().changes > 0;
+                if (!flipped) return { retry: true };
+                // move 只改 parentId 不动磁盘：覆盖写按当前逻辑路径落新位置后，清理旧位置物理文件
+                if (row.storagePath && row.storagePath !== diskPath) {
+                    try { await unlink(row.storagePath); } catch { /* 旧位置无文件（如冷档）——无害 */ }
+                }
+                indexDoc(row.id, name, content);
+                // 旧态为 cold：清理旧远端对象（旧 key 含旧 hash；失败仅留孤儿对象，无害）
+                if (row.storageTier === 'cold') {
+                    const store = getObjectStore();
+                    if (store) {
+                        void store.delete(objectKeyFor(row)).catch((e) => {
+                            console.warn('[upload] 删除旧归档对象失败（孤儿对象，无害）', row.id, e);
+                        });
+                    }
+                }
                 const url = await ensureShareUrl(row.id);
-                return { id: row.id, url };
-            }
-            await writeFile(diskPath, content);
-            db.update(schema.documents).set({
+                return { result: { id: row.id, url } };
+            });
+            if ('result' in outcome) return outcome.result;
+            if (attempt >= 2) throw new Error('上传目标被并发修改，请重试');
+            continue;
+        }
+
+        const id = generateId();
+        // H2: 先写盘后落库——崩溃窗口只留孤儿磁盘文件（可清理），不留孤儿 DB 行（会让查看/管理页 500）。
+        // writeFile 已原子（tmp→rename），不会损坏已有内容。
+        await writeFile(diskPath, content);
+        try {
+            db.insert(schema.documents).values({
+                id,
+                ownerId,
+                parentId,
+                name,
+                type: 'file',
                 storagePath: diskPath,
                 contentHash,
                 sizeBytes: Buffer.byteLength(content),
-                updatedAt: now,
-                // 覆盖上传即回热：内容已重新落盘
-                storageTier: 'hot',
-                lastViewedAt: now,
-                archivedAt: null
-            }).where(eq(schema.documents.id, row.id)).run();
-            indexDoc(row.id, name, content);
-            // 旧态为 cold：清理旧远端对象（旧 key 含旧 hash；失败仅留孤儿对象，无害）
-            if (row.storageTier === 'cold') {
-                const store = getObjectStore();
-                if (store) {
-                    void store.delete(objectKeyFor(row)).catch((e) => {
-                        console.warn('[upload] 删除旧归档对象失败（孤儿对象，无害）', row.id, e);
-                    });
-                }
-            }
-            const url = await ensureShareUrl(row.id);
-            return { id: row.id, url };
-        });
+                createdAt: now,
+                updatedAt: now
+            }).run();
+        } catch (e) {
+            // P1-1：并发首传同位置撞唯一索引 → 回壳层重查（已写盘文件由下轮幂等/覆盖分支复用）
+            if (e instanceof Error && (e as { code?: string }).code === 'SQLITE_CONSTRAINT_UNIQUE' && attempt < 2) continue;
+            try {
+                await unlink(diskPath);
+            } catch {}
+            throw e;
+        }
+        indexDoc(id, name, content);
+        const url = await ensureShareUrl(id);
+        return { id, url };
     }
-
-    const id = generateId();
-    // H2: 先写盘后落库——崩溃窗口只留孤儿磁盘文件（可清理），不留孤儿 DB 行（会让查看/管理页 500）。
-    // writeFile 已原子（tmp→rename），不会损坏已有内容。
-    await writeFile(diskPath, content);
-    try {
-        db.insert(schema.documents).values({
-            id,
-            ownerId,
-            parentId,
-            name,
-            type: 'file',
-            storagePath: diskPath,
-            contentHash,
-            sizeBytes: Buffer.byteLength(content),
-            createdAt: now,
-            updatedAt: now
-        }).run();
-    } catch (e) {
-        try {
-            await unlink(diskPath);
-        } catch {}
-        throw e;
-    }
-    indexDoc(id, name, content);
-    const url = await ensureShareUrl(id);
-    return { id, url };
 }
 
 export function listChildren(ownerId: string, parentId: string | null): DocumentRow[] {
@@ -254,13 +286,12 @@ export function renameNode(
         .get();
     if (!node) return { ok: false, reason: '节点不存在或无权操作', code: 'not_found' };
     if (node.name === newName) return { ok: true };
-    // M9: 拒绝同父同名同类型，避免 findNode 幂等失效与覆盖混淆
+    // M9: 拒绝同父同名（不区分 type——file/folder 同名在磁盘上必然冲突），避免 findNode 幂等失效与覆盖混淆
     const dup = db.select().from(schema.documents)
         .where(and(
             eq(schema.documents.ownerId, ownerId),
             node.parentId === null ? isNull(schema.documents.parentId) : eq(schema.documents.parentId, node.parentId),
             eq(schema.documents.name, newName),
-            eq(schema.documents.type, node.type),
             ne(schema.documents.id, id)
         ))
         .get();
@@ -284,6 +315,8 @@ export function renameNode(
             .where(and(eq(schema.documents.id, id), eq(schema.documents.ownerId, ownerId)))
             .run();
     }
+    // FTS name 列与 documents 同步（folder 无 FTS 行，UPDATE 落空无害）——否则改名后旧名仍可搜中
+    sqlite.prepare('UPDATE docs_fts SET name = ? WHERE doc_id = ?').run(newName, id);
     return { ok: true };
 }
 
@@ -321,13 +354,12 @@ export function moveNode(
         }
     }
 
-    // M9: 目标位置已有同名同类型节点则拒绝（避免 findNode 幂等失效）
+    // M9: 目标位置已有同名节点则拒绝——不区分 type（file/folder 同名在磁盘上必然冲突）
     const dup = db.select().from(schema.documents)
         .where(and(
             eq(schema.documents.ownerId, ownerId),
             newParentId === null ? isNull(schema.documents.parentId) : eq(schema.documents.parentId, newParentId),
             eq(schema.documents.name, node.name),
-            eq(schema.documents.type, node.type),
             ne(schema.documents.id, id)
         ))
         .get();

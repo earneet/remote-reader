@@ -75,14 +75,32 @@ test('createFolder：name 含路径分隔符 → 400（sanitizeSingleName）', a
     await expect(invoke(mod.actions.createFolder, ownerId, { name: 'a/b' })).rejects.toMatchObject({ status: 400 });
 });
 
-test('createFolder：重名不重复建', async () => {
+test('createFolder：文件夹重名 → 409（不再静默成功）', async () => {
     const ownerId = generateId();
     insertUser(ownerId);
     await invoke(mod.actions.createFolder, ownerId, { name: 'dup' });
-    await invoke(mod.actions.createFolder, ownerId, { name: 'dup' });
+    await expect(invoke(mod.actions.createFolder, ownerId, { name: 'dup' })).rejects.toMatchObject({ status: 409 });
     const folders = db.select().from(schema.documents)
         .where(and(eq(schema.documents.ownerId, ownerId), eq(schema.documents.name, 'dup'), eq(schema.documents.type, 'folder'))).all();
     expect(folders.length).toBe(1);
+});
+
+test('createFolder：与同名 file 冲突 → 409（防陷阱目录，P1-4）', async () => {
+    const ownerId = generateId();
+    insertUser(ownerId);
+    await uploadDocument(ownerId, 'q2.md', 'x', []);
+    await expect(invoke(mod.actions.createFolder, ownerId, { name: 'q2.md' })).rejects.toMatchObject({ status: 409 });
+    const folders = db.select().from(schema.documents)
+        .where(and(eq(schema.documents.ownerId, ownerId), eq(schema.documents.type, 'folder'))).all();
+    expect(folders.length).toBe(0);
+});
+
+test('rename：改成与 folder 同名 → 409（跨类型互斥，P1-4）', async () => {
+    const ownerId = generateId();
+    insertUser(ownerId);
+    await invoke(mod.actions.createFolder, ownerId, { name: 'target' });
+    const r = await uploadDocument(ownerId, 'a.md', 'x', []);
+    await expect(invoke(mod.actions.rename, ownerId, { id: r.id, name: 'target' })).rejects.toMatchObject({ status: 409 });
 });
 
 // ===== rename =====

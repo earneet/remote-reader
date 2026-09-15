@@ -12,9 +12,12 @@ import {
     getOwnedDocument,
     renameNode,
     moveNode,
-    deleteNode
+    deleteNode,
+    NameConflictError
 } from '../src/lib/server/documents';
 import { indexDoc } from '../src/lib/server/fts';
+import { searchDocuments } from '../src/lib/server/search';
+import { readFile } from '../src/lib/server/storage';
 import { setDocTags } from '../src/lib/server/tags';
 import { runArchiveCycle } from '../src/lib/server/tiering';
 import { MemoryObjectStore, __setObjectStoreForTest, objectKeyFor } from '../src/lib/server/object-store';
@@ -151,6 +154,14 @@ test('renameNode 修改名称', async () => {
     expect(renameNode(ownerId, r.id, 'renamed.md').ok).toBe(true);
     const row = db.select().from(schema.documents).where(eq(schema.documents.id, r.id)).get();
     expect(row?.name).toBe('renamed.md');
+});
+
+test('renameNode 同步 docs_fts.name：旧名不再命中、新名可命中', async () => {
+    await uploadDocument(ownerId, 'draft.md', '正文内容与查询词完全无关', []);
+    const doc = db.select().from(schema.documents).where(eq(schema.documents.name, 'draft.md')).get()!;
+    expect(renameNode(ownerId, doc.id, 'final.md').ok).toBe(true);
+    expect(searchDocuments(ownerId, 'draft', []).length).toBe(0);
+    expect(searchDocuments(ownerId, 'final', []).length).toBe(1);
 });
 
 test('renameNode 非 owner 返回 not_found 不生效', async () => {
@@ -566,4 +577,83 @@ test('recentFiles sort=viewed：仅文件，排除手工置了 owner_viewed_at �
     setOwnerViewedAt(folder.id, T + 1); // 生产路径 folder 不可能拿到该值；手工置上仍不应入序
     const rows = recentFiles(ownerId, 'viewed', null, 50);
     expect(rows.map((r) => r.name)).toEqual(['a.md']);
+});
+
+// ===== P1-1：并发首次上传同位置 =====
+
+test('并发首次上传同位置：唯一索引拦截 + 冲突重试 → 单行、双方同 id（P1-1 回归）', async () => {
+    const [a, b] = await Promise.all([
+        uploadDocument(ownerId, 'race.md', 'content-A', []),
+        uploadDocument(ownerId, 'race.md', 'content-B', [])
+    ]);
+    const rows = db.select().from(schema.documents)
+        .where(and(eq(schema.documents.ownerId, ownerId), eq(schema.documents.name, 'race.md'))).all();
+    expect(rows.length).toBe(1);
+    expect(a.id).toBe(rows[0].id);
+    expect(b.id).toBe(rows[0].id);
+    // 谁最后落盘不确定，但行内容、DB hash、磁盘文件三者必须一致
+    const final = await readFile(rows[0].storagePath!);
+    expect(['content-A', 'content-B']).toContain(final);
+    expect(rows[0].contentHash).toBe(sha256Hex(final));
+});
+
+// ===== P1-4：跨类型同名冲突 =====
+
+test('上传文件名撞同名 folder（盘上实体目录）→ NameConflictError 而非 EISDIR 500（P1-4 回归）', async () => {
+    await uploadDocument(ownerId, 'inner.md', 'x', ['reports']);
+    await expect(uploadDocument(ownerId, 'reports', 'y', [])).rejects.toBeInstanceOf(NameConflictError);
+});
+
+test('路径段被同名 file 占位（陷阱目录）→ NameConflictError 而非 EEXIST 500（P1-4 回归）', async () => {
+    await uploadDocument(ownerId, 'q2.md', 'x', []);
+    const now = Date.now();
+    db.insert(schema.documents).values({
+        id: 'trapfold', ownerId, parentId: null, name: 'q2.md', type: 'folder',
+        storagePath: null, contentHash: null, sizeBytes: null, createdAt: now, updatedAt: now
+    }).run();
+    await expect(uploadDocument(ownerId, 'child.md', 'y', ['q2.md'])).rejects.toBeInstanceOf(NameConflictError);
+});
+
+// ===== P2-3：覆盖上传写窗口内的同步交错 =====
+
+test('覆盖上传写窗口内 deleteNode → 干净重建而非孤儿 FTS/FK 500（P2-3 回归）', async () => {
+    const r = await uploadDocument(ownerId, 'a.md', 'v1', []);
+    const up = uploadDocument(ownerId, 'a.md', 'v2', []);
+    // uploadDocument 到 writeFile 之间只有微任务——setImmediate 必落其窗口内
+    await new Promise((res) => setImmediate(res));
+    deleteNode(ownerId, r.id);
+    const r2 = await up;
+    const rows = db.select().from(schema.documents)
+        .where(and(eq(schema.documents.ownerId, ownerId), eq(schema.documents.name, 'a.md'))).all();
+    expect(rows.length).toBe(1);
+    expect(rows[0].id).toBe(r2.id);
+    expect((sqlite.prepare('SELECT COUNT(*) AS c FROM docs_fts').get() as { c: number }).c).toBe(1);
+});
+
+test('覆盖上传写窗口内 renameNode → 走全新插入，两行各得其所（P2-3 回归）', async () => {
+    const r = await uploadDocument(ownerId, 'a.md', 'v1', []);
+    const up = uploadDocument(ownerId, 'a.md', 'v2', []);
+    await new Promise((res) => setImmediate(res));
+    expect(renameNode(ownerId, r.id, 'renamed.md').ok).toBe(true);
+    await up;
+    const renamed = db.select().from(schema.documents).where(eq(schema.documents.id, r.id)).get()!;
+    const fresh = db.select().from(schema.documents)
+        .where(and(eq(schema.documents.ownerId, ownerId), eq(schema.documents.name, 'a.md'))).get()!;
+    expect(renamed.name).toBe('renamed.md');
+    expect(await readFile(renamed.storagePath!)).toBe('v1');
+    expect(fresh.id).not.toBe(r.id);
+    expect(await readFile(fresh.storagePath!)).toBe('v2');
+});
+
+test('move 后覆盖上传清理旧位置物理文件（备忘：正常流程不留孤儿）', async () => {
+    const r = await uploadDocument(ownerId, 'a.md', 'v1', []);
+    const target = await uploadDocument(ownerId, 'b.md', 'x', ['fold']);
+    const foldRow = db.select().from(schema.documents)
+        .where(and(eq(schema.documents.ownerId, ownerId), eq(schema.documents.type, 'folder'))).get()!;
+    expect(moveNode(ownerId, r.id, foldRow.id).ok).toBe(true);
+    const oldPath = db.select().from(schema.documents).where(eq(schema.documents.id, r.id)).get()!.storagePath!;
+    await uploadDocument(ownerId, 'a.md', 'v2', ['fold']);
+    const row = db.select().from(schema.documents).where(eq(schema.documents.id, r.id)).get()!;
+    expect(await readFile(row.storagePath!)).toBe('v2');
+    await expect(readFile(oldPath)).rejects.toMatchObject({ code: 'FILE_NOT_FOUND' });
 });

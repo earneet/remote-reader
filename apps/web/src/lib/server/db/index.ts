@@ -129,10 +129,34 @@ export function ensureOwnerViewedColumn(target: SqliteDb): void {
     target.exec('CREATE INDEX IF NOT EXISTS documents_owner_type_viewed_idx ON documents (owner_id, type, owner_viewed_at DESC, id DESC)');
 }
 
-export function ensureSchema(): void {
-    sqlite.exec(SCHEMA_SQL);
-    ensureTierColumns(sqlite);
-    ensureOwnerViewedColumn(sqlite);
+// P1-1 唯一索引前的存量清洗：清除并发首传竞态产生的同 (owner, parent, name, type) 重复行
+// （保留 rowid 最小者 = findNode().get() 实际命中的行；share_links/docs_fts 无级联须先清，
+// document_tags 有 ON DELETE cascade 随行删除）。仅在索引尚不存在时执行一次
+function dedupeDuplicateNames(target: SqliteDb): void {
+    const DUP_IDS = `
+        SELECT d.id FROM documents d JOIN (
+            SELECT owner_id, IFNULL(parent_id, '') AS pid, name, type, MIN(rowid) AS keep_rowid
+            FROM documents GROUP BY owner_id, IFNULL(parent_id, ''), name, type HAVING COUNT(*) > 1
+        ) g ON d.owner_id = g.owner_id AND IFNULL(d.parent_id, '') = g.pid
+          AND d.name = g.name AND d.type = g.type AND d.rowid > g.keep_rowid`;
+    target.exec(`
+        DELETE FROM share_links WHERE document_id IN (${DUP_IDS});
+        DELETE FROM docs_fts WHERE doc_id IN (${DUP_IDS});
+        DELETE FROM documents WHERE id IN (${DUP_IDS});
+    `);
+}
+
+export function ensureSchema(target: SqliteDb = sqlite): void {
+    target.exec(SCHEMA_SQL);
+    ensureTierColumns(target);
+    ensureOwnerViewedColumn(target);
+    // P1-1 唯一索引不进 SCHEMA_SQL：存量库可能带竞态重复行，CREATE UNIQUE 会启动即崩——先清洗再建
+    const hasUnique = target.prepare(
+        "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'documents_owner_parent_name_type_uniq'"
+    ).get();
+    if (!hasUnique) dedupeDuplicateNames(target);
+    target.exec(`CREATE UNIQUE INDEX IF NOT EXISTS documents_owner_parent_name_type_uniq
+        ON documents (owner_id, COALESCE(parent_id, ''), name, type)`);
 }
 ensureSchema();
 void import('../fts').then((m) => m.backfillFts()).catch((e) => console.warn('[backfillFts] failed', e));
