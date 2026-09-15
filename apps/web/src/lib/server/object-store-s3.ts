@@ -55,7 +55,13 @@ export class S3ObjectStore implements ObjectStore {
             throw mapGetError(key, e);
         }
         if (!body) throw new ObjectNotFoundError(key);
-        return body.transformToString('utf-8');
+        try {
+            return await body.transformToString('utf-8');
+        } catch (e) {
+            // header 阶段之外的 body 流中断（慢网络/传输截断）同样属于“对象存储不可达”，
+            // 归入 503 语义而非裸抛降级 500
+            throw new ArchiveUnavailableError(`get ${key} body 失败`, { cause: e });
+        }
     }
 
     async delete(key: string): Promise<void> {

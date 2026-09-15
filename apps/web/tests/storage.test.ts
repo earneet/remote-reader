@@ -44,3 +44,11 @@ test('writeFile 覆盖后旧文件完整替换、无 tmp 残留（H1）', async 
 test('readFile 不存在的文件抛 FileNotFoundError（M11）', async () => {
     await expect(readFile(`${TMP}/nope.md`)).rejects.toBeInstanceOf(FileNotFoundError);
 });
+
+test('接近 NAME_MAX 的长文件名可正常写入（tmp 固定短名不叠加原名）', async () => {
+    const longName = 'a'.repeat(250) + '.md'; // 254B ≤ 255B 合法
+    await writeFile(`${TMP}/${longName}`, 'content');
+    expect(await readFile(`${TMP}/${longName}`)).toBe('content');
+    const files = readdirSync(TMP);
+    expect(files.some((f) => f.startsWith('.tmp.'))).toBe(false);
+});

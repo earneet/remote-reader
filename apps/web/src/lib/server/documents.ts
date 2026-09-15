@@ -204,6 +204,44 @@ async function ensureShareUrl(documentId: string): Promise<string> {
     return url;
 }
 
+// S1 自愈：目标盘路径被其他 file 行的陈旧 storagePath 占用时的处理。
+// 必须在占位行的 doc 锁内进行——该行可能有在途的归档（flip 后 await unlink）或回热（await writeFile），
+// 无锁迁移会与它们在线程池上交错（rewarm 旧内容后落覆盖新内容 → hash 永久错位；unlink 误删刚上传文件）。
+// 锁内重取行并复核仍占位：等锁期间行可能已被并发处理。锁单独持有（调用方不得持有其他 doc 锁），
+// 防双向互踩死锁。
+async function evictStoragePathSquatter(
+    ownerId: string,
+    squatterId: string,
+    diskPath: string
+): Promise<'cleared' | 'conflict'> {
+    return withDocLock(squatterId, async () => {
+        const row = db.select().from(schema.documents).where(eq(schema.documents.id, squatterId)).get();
+        if (!row || row.storagePath !== diskPath) return 'cleared';
+        if (!parentChainIntact(ownerId, row)) {
+            // 父链断裂的孤儿行（delete-race 遗留，树中不可见）：清掉它腾出路径，
+            // 否则迁移目标不可达、后续同路径上传会 409 死锁（P2-2）。
+            // 先删行后删文件（同 deleteNode 先例）：崩溃窗口只留无害孤儿文件，不留会让查看页 500 的孤儿行
+            console.warn('[upload] 清理父链断裂的孤儿占位行', row.id, row.storagePath);
+            unindexDocs([row.id]);
+            db.delete(schema.shareLinks).where(eq(schema.shareLinks.documentId, row.id)).run();
+            db.delete(schema.documents).where(eq(schema.documents.id, row.id)).run();
+            if (row.storagePath) {
+                try { await unlink(row.storagePath); } catch { /* 无物理文件——无害 */ }
+            }
+            return 'cleared';
+        }
+        const squatterPhys = join(getDataDir(), ownerId, ...logicalSegmentsOf(ownerId, row));
+        if (squatterPhys === diskPath) {
+            // 防御：行就在该逻辑位置却未被 findNode 命中（DB 被手工改坏时兜底）
+            return 'conflict';
+        }
+        console.warn('[upload] 自愈：目标路径被陈旧 storagePath 占用，先迁移该行',
+            row.id, row.storagePath, '->', squatterPhys);
+        migrateFileRow(row, squatterPhys);
+        return 'cleared';
+    });
+}
+
 export async function uploadDocument(
     ownerId: string,
     name: string,
@@ -222,6 +260,23 @@ export async function uploadDocument(
     // 回到壳层重新定位——绝不在 doc 锁回调内再次 withDocLock 同一 id（链式锁自死锁）
     for (let attempt = 0; ; attempt++) {
         const existing = findNode(ownerId, parentId, name, 'file');
+
+        // S1 自愈（覆盖/新建分支统一入口）：目标盘路径若被其他 file 行的陈旧 storagePath 占用
+        // （历史 move 未迁移磁盘的遗留——含 pre-fix 双陈旧行互相占位的形态），
+        // 先迁走/清掉占位行再落盘——否则 writeFile（无论覆盖写还是新建写）会静默覆盖其内容。
+        // 在取 existing 的锁之前单独进行（防双向占位时的嵌套锁死锁）。
+        const squatter = db.select().from(schema.documents).where(and(
+            eq(schema.documents.ownerId, ownerId),
+            eq(schema.documents.storagePath, diskPath),
+            eq(schema.documents.type, 'file'),
+            existing ? ne(schema.documents.id, existing.id) : undefined
+        )).get();
+        if (squatter) {
+            const r = await evictStoragePathSquatter(ownerId, squatter.id, diskPath);
+            if (r === 'conflict') {
+                throw new NameConflictError(`"${name}" 已被其他文档（${squatter.id}）占用`);
+            }
+        }
 
         if (existing && existing.contentHash === contentHash) {
             const url = await ensureShareUrl(existing.id);
@@ -284,36 +339,6 @@ export async function uploadDocument(
         }
 
         const id = generateId();
-        // S1 自愈：目标盘路径若被其他 file 行的陈旧 storagePath 占用（历史 move 未迁移磁盘的遗留），
-        // 先把该行迁回它自己的逻辑位置再写盘——否则 writeFile 会静默覆盖其内容，两行共享一文件
-        const squatter = db.select().from(schema.documents).where(and(
-            eq(schema.documents.ownerId, ownerId),
-            eq(schema.documents.storagePath, diskPath),
-            eq(schema.documents.type, 'file'),
-            ne(schema.documents.id, id)
-        )).get();
-        if (squatter) {
-            if (!parentChainIntact(ownerId, squatter)) {
-                // 父链断裂的孤儿行（delete-race 遗留，树中不可见）：清掉它腾出路径，
-                // 否则迁移目标不可达、后续同路径上传会 409 死锁（P2-2）
-                console.warn('[upload] 清理父链断裂的孤儿占位行', squatter.id, squatter.storagePath);
-                unindexDocs([squatter.id]);
-                db.delete(schema.shareLinks).where(eq(schema.shareLinks.documentId, squatter.id)).run();
-                db.delete(schema.documents).where(eq(schema.documents.id, squatter.id)).run();
-                if (squatter.storagePath) {
-                    try { await unlink(squatter.storagePath); } catch { /* 无物理文件——无害 */ }
-                }
-            } else {
-                const squatterPhys = join(getDataDir(), ownerId, ...logicalSegmentsOf(ownerId, squatter));
-                if (squatterPhys === diskPath) {
-                    // 防御：行就在该逻辑位置却未被 findNode 命中（DB 被手工改坏时兜底）——按冲突拒绝，绝不覆盖
-                    throw new NameConflictError(`"${name}" 已被其他文档（${squatter.id}）占用`);
-                }
-                console.warn('[upload] 自愈：目标路径被陈旧 storagePath 占用，先迁移该行',
-                    squatter.id, squatter.storagePath, '->', squatterPhys);
-                migrateFileRow(squatter, squatterPhys);
-            }
-        }
         // H2: 先写盘后落库——崩溃窗口只留孤儿磁盘文件（可清理），不留孤儿 DB 行（会让查看/管理页 500）。
         // writeFile 已原子（tmp→rename），不会损坏已有内容。
         await writeFile(diskPath, content);

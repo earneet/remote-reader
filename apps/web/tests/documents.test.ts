@@ -751,3 +751,25 @@ test('上传写窗口内目标文件夹被删 → 重建父链落库，不产生
     const parent = db.select().from(schema.documents).where(eq(schema.documents.id, rows[0].parentId!)).get();
     expect(parent?.name).toBe('a');
 });
+
+test('覆盖上传分支同样自愈陈旧占位行——pre-fix 双陈旧行互踩（S1 对称回归）', async () => {
+    // M 逻辑在 fold/、storagePath 指根 q.md（pre-fix move 遗留）；R 在根 q.md（逻辑正确）
+    const m = await uploadDocument(ownerId, 'q.md', 'm-content', []);
+    const target = await uploadDocument(ownerId, 'anchor.md', 'x', ['fold']);
+    const foldRow = db.select().from(schema.documents)
+        .where(and(eq(schema.documents.ownerId, ownerId), eq(schema.documents.name, 'fold'), eq(schema.documents.type, 'folder'))).get()!;
+    // 模拟 pre-fix move：只改 parentId 不动 storagePath
+    db.update(schema.documents).set({ parentId: foldRow.id })
+        .where(eq(schema.documents.id, m.id)).run();
+    // 向根上传 q.md 新内容 → findNode 未命中（M 已移走）→ 新建分支曾自愈；
+    // 再构造覆盖分支场景：R 逻辑位置 = 根 q.md（storagePath 一致）
+    const r = await uploadDocument(ownerId, 'q.md', 'r-content', []);
+    expect(r.id).not.toBe(m.id);
+    const mRow = db.select().from(schema.documents).where(eq(schema.documents.id, m.id)).get()!;
+    // M 被迁回自己的逻辑位置 fold/q.md，内容完好
+    expect(mRow.storagePath!.endsWith(join('fold', 'q.md'))).toBe(true);
+    expect(await readFile(mRow.storagePath!)).toBe('m-content');
+    // R 在根，内容正确
+    const rRow = db.select().from(schema.documents).where(eq(schema.documents.id, r.id)).get()!;
+    expect(await readFile(rRow.storagePath!)).toBe('r-content');
+});

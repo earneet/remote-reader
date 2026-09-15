@@ -30,6 +30,12 @@ export async function backfillFts(): Promise<void> {
         if (indexed.has(f.id) || !f.storagePath) continue;
         try {
             const content = await readFile(f.storagePath);
+            // 读盘让出窗口内该行可能刚被归档（FTS content 已清空、本地文件已删）——
+            // 灌入前重验热态，防全文重灌泄漏冷文档内容（归档后内容词须不可搜）。
+            // select 与 indexDoc 之间无让出点，此处复核即封死窗口
+            const fresh = db.select({ storageTier: schema.documents.storageTier })
+                .from(schema.documents).where(eq(schema.documents.id, f.id)).get();
+            if (!fresh || fresh.storageTier !== 'hot') continue;
             indexDoc(f.id, f.name, content);
         } catch (e) {
             console.warn('[backfillFts] skip unreadable doc', f.id, e);
