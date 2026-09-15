@@ -10,9 +10,27 @@ import { getObjectStore, objectKeyFor, ObjectNotFoundError, ArchiveUnavailableEr
 import { createShareLink } from './shares';
 import { getBaseUrl } from './env';
 import { indexDoc } from './fts';
-import type { RecentSort } from '../shared/recent';
+import type { RecentSort, RecentDoc } from '../shared/recent';
 
 type DocumentRow = typeof schema.documents.$inferSelect;
+
+// 跨网络边界（页面 load / /api/recent）的文档 DTO：显式字段映射，
+// storagePath/contentHash 等服务器内部实现不进载荷（P2-7）
+export type DocDTO = Omit<RecentDoc, 'tags'>;
+
+export function toDocDTO(r: DocumentRow): DocDTO {
+    return {
+        id: r.id,
+        parentId: r.parentId,
+        name: r.name,
+        type: r.type,
+        sizeBytes: r.sizeBytes,
+        createdAt: r.createdAt,
+        updatedAt: r.updatedAt,
+        ownerViewedAt: r.ownerViewedAt,
+        storageTier: r.storageTier
+    };
+}
 
 const MAX_TREE_DEPTH = 1000;
 

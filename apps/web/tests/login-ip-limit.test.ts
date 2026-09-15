@@ -32,7 +32,7 @@ async function tryLogin(email: string, address: string, password = 'wrong-passwo
             request: new Request('http://localhost/x', { method: 'POST', body: fd }),
             cookies: { set() {}, get: () => undefined, delete() {} },
             getClientAddress: () => address
-        } as Parameters<typeof loginMod.actions.default>[0]);
+        } as unknown as Parameters<typeof loginMod.actions.default>[0]);
         return (r as { status?: number })?.status ?? 200;
     } catch (e) {
         return (e as { status?: number })?.status ?? 500;

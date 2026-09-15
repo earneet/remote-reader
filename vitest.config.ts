@@ -8,7 +8,8 @@ export default defineConfig({
         alias: {
             $server: r('./apps/web/src/lib/server'),
             $shared: r('./packages/shared/src'),
-            $components: r('./apps/web/src/lib/components')
+            $components: r('./apps/web/src/lib/components'),
+            $lib: r('./apps/web/src/lib')
         }
     },
     test: {

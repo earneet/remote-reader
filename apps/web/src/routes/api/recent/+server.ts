@@ -1,8 +1,8 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { recentFiles } from '$server/documents';
+import { recentFiles, toDocDTO } from '$server/documents';
 import { listTagsForDocs } from '$server/tags';
-import { RECENT_PAGE_SIZE, type RecentSort } from '../../../lib/shared/recent';
+import { RECENT_PAGE_SIZE, type RecentSort } from '$lib/shared/recent';
 
 const MAX_LIMIT = 2000; // re-sync 深度上限（spec §5.3，与 §7 性能论证对齐）
 
@@ -35,5 +35,5 @@ export const GET: RequestHandler = async ({ locals, url }) => {
 
     const rows = recentFiles(locals.user.id, sort, cursor, limit);
     const tagsByDoc = listTagsForDocs(rows.map((r) => r.id), locals.user.id);
-    return json({ items: rows.map((r) => ({ ...r, tags: tagsByDoc.get(r.id) ?? [] })) });
+    return json({ items: rows.map((r) => ({ ...toDocDTO(r), tags: tagsByDoc.get(r.id) ?? [] })) });
 };

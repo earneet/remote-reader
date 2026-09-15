@@ -55,9 +55,13 @@ test('返回 updated_at DESC 列表且内嵌 tags', async () => {
     await setDocTags(ownerId, a.id, ['周报']);
     const r = await call(ownerId);
     expect(r.status).toBe(200);
-    const body = await r.json() as { items: { name: string; tags: { name: string }[] }[] };
+    const body = await r.json() as { items: { name: string; tags: { name: string }[] }[] & Record<string, unknown>[] };
     expect(body.items.map((i) => i.name)).toEqual(['b.md', 'a.md']);
     expect(body.items.find((i) => i.name === 'a.md')!.tags.map((t) => t.name)).toEqual(['周报']);
+    // P2-7：DTO 边界——服务器内部字段不进载荷
+    for (const key of ['storagePath', 'contentHash', 'lastViewedAt', 'archivedAt']) {
+        expect(body.items.every((i) => !(key in i))).toBe(true);
+    }
 });
 
 test('before cursor：返回 cursor 之后（更旧）的行', async () => {

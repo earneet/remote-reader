@@ -2,14 +2,15 @@ import { sqlite, db, schema } from './db';
 import { eq, and } from 'drizzle-orm';
 import { listTagsForDoc } from './tags';
 import type { Tag } from './tags';
+import { toDocDTO, type DocDTO } from './documents';
 
 type DocumentRow = typeof schema.documents.$inferSelect;
 const MAX_TREE_DEPTH = 1000;
 export const SEARCH_LIMIT = 50;
 
 export type SearchResult = {
-    doc: DocumentRow;
-    path: DocumentRow[];
+    doc: DocDTO;
+    path: DocDTO[];
     tags: Tag[];
     snippet: string;
 };
@@ -130,13 +131,14 @@ export function searchDocuments(ownerId: string, query: string, tagNames: string
         SELECT d.id, d.owner_id AS "ownerId", d.parent_id AS "parentId", d.name, d.type,
                d.storage_path AS "storagePath", d.content_hash AS "contentHash",
                d.size_bytes AS "sizeBytes", d.created_at AS "createdAt", d.updated_at AS "updatedAt",
-               d.storage_tier AS "storageTier", d.last_viewed_at AS "lastViewedAt", d.archived_at AS "archivedAt"
+               d.storage_tier AS "storageTier", d.last_viewed_at AS "lastViewedAt", d.archived_at AS "archivedAt",
+               d.owner_viewed_at AS "ownerViewedAt"
         FROM documents d WHERE d.owner_id = ? AND d.id IN (${ph})
     `).all(ownerId, ...ids) as DocumentRow[];
 
     return docs.map(doc => ({
-        doc,
-        path: getDocPath(ownerId, doc.id),
+        doc: toDocDTO(doc),
+        path: getDocPath(ownerId, doc.id).map(toDocDTO),
         tags: listTagsForDoc(doc.id, ownerId),
         snippet: snippetById.get(doc.id) ?? ''
     })).slice(0, SEARCH_LIMIT);
