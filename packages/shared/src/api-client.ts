@@ -12,8 +12,14 @@ export interface ApiClient {
 interface UploadResponse {
     id?: string;
     url?: string;
+    // SvelteKit error() 的真实 wire 形状是扁平 {"message":...}（Accept: */* 协商走 JSON 分支）；
+    // error:{message} 为历史兼容形状
+    message?: string;
     error?: { message?: string };
 }
+
+// 5MB 内容在慢链路（~700kbps）上需 ~60s；无显式超时则在服务端半开连接下无限期挂起工具调用
+const UPLOAD_TIMEOUT_MS = 60_000;
 
 function mapMessage(status: number, msg: string | undefined): string {
     switch (status) {
@@ -42,9 +48,14 @@ export function createApiClient(opts: { baseUrl: string; token: string }): ApiCl
                         Authorization: `Bearer ${opts.token}`,
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify(path ? { name, content, path } : { name, content })
+                    body: JSON.stringify(path ? { name, content, path } : { name, content }),
+                    signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS)
                 });
             } catch (e) {
+                const name = (e as Error)?.name;
+                if (name === 'TimeoutError' || name === 'AbortError') {
+                    throw new ApiError(0, `上传超时（${UPLOAD_TIMEOUT_MS / 1000}s），请检查网络后重试`);
+                }
                 throw new ApiError(0, `无法连接服务器：${(e as Error).message}`);
             }
             const text = await res.text();
@@ -55,7 +66,7 @@ export function createApiClient(opts: { baseUrl: string; token: string }): ApiCl
                 body = {};
             }
             if (!res.ok) {
-                throw new ApiError(res.status, mapMessage(res.status, body.error?.message));
+                throw new ApiError(res.status, mapMessage(res.status, body.message ?? body.error?.message));
             }
             if (typeof body.id !== 'string' || typeof body.url !== 'string') {
                 throw new ApiError(res.status, '上传成功但响应格式异常');

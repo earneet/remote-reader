@@ -47,11 +47,18 @@ test('baseUrl 去尾斜杠', async () => {
     expect(url).toBe('http://x/api/v1/documents');
 });
 
-test('400 映射为 ApiError(400)', async () => {
-    mockFetch(400, { type: 'error', error: { message: 'invalid path' } });
+test('400 携带服务端 message（SvelteKit error() 真实 wire 形状 {"message":...}）', async () => {
+    mockFetch(400, { message: 'path contains illegal characters' });
     await expect(
         createApiClient({ baseUrl: 'http://x', token: 't' }).uploadDocument({ name: '../x', content: 'c' })
-    ).rejects.toMatchObject({ status: 400 });
+    ).rejects.toMatchObject({ status: 400, message: expect.stringContaining('path contains illegal characters') });
+});
+
+test('400 兼容历史 error:{message} 形状', async () => {
+    mockFetch(400, { error: { message: 'invalid path' } });
+    await expect(
+        createApiClient({ baseUrl: 'http://x', token: 't' }).uploadDocument({ name: '../x', content: 'c' })
+    ).rejects.toMatchObject({ status: 400, message: expect.stringContaining('invalid path') });
 });
 
 test('401 / 413 / 429 映射', async () => {
@@ -70,6 +77,26 @@ test('网络错误映射为 ApiError(status=0)', async () => {
     await expect(
         createApiClient({ baseUrl: 'http://x', token: 't' }).uploadDocument({ name: 'n', content: 'c' })
     ).rejects.toMatchObject({ status: 0 });
+});
+
+test('请求携带 AbortSignal 超时信号', async () => {
+    let signal: AbortSignal | undefined;
+    vi.stubGlobal('fetch', vi.fn(async (_u: string, init: RequestInit) => {
+        signal = init.signal as AbortSignal;
+        return new Response(JSON.stringify({ id: 'd', url: 'u' }), { status: 200 });
+    }));
+    await createApiClient({ baseUrl: 'http://x', token: 't' }).uploadDocument({ name: 'n', content: 'c' });
+    expect(signal).toBeInstanceOf(AbortSignal);
+    expect(signal!.aborted).toBe(false);
+});
+
+test('超时中断（TimeoutError）映射为 ApiError(0, 上传超时)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => {
+        throw Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' });
+    }));
+    await expect(
+        createApiClient({ baseUrl: 'http://x', token: 't' }).uploadDocument({ name: 'n', content: 'c' })
+    ).rejects.toMatchObject({ status: 0, message: expect.stringContaining('上传超时') });
 });
 
 test('200 但缺 url → ApiError 响应格式异常（#34）', async () => {

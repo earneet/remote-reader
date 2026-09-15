@@ -9,6 +9,7 @@ export const uploadDocumentSchema = z.object({
 export const uploadDocumentDescription = [
     '幂等上传一份 Markdown 文档到 Remote Reader，返回一个免登录、点开即见渲染结果的查看链接。',
     '同 path+name+内容重复上传不产生重复，链接长期稳定；内容变化则原地覆盖、链接不变。',
+    'content 上限默认 5MB（服务端 MAX_UPLOAD_BYTES 可调），超限会得到 413——超大文档请拆分。',
     '上传成功后，请把返回的 url 通过当前对话/IM 发给用户，并简述文档内容。'
 ].join(' ');
 
