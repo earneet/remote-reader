@@ -1,5 +1,6 @@
 <script lang="ts">
     import { clampZoom, nextZoom, formatZoom, ZOOM_STEP } from '$lib/shared/mermaid-zoom';
+    import { trapTabKey } from '$lib/shared/focus-trap';
 
     let { container, html }: { container: HTMLDivElement | undefined; html: string } = $props();
 
@@ -44,8 +45,15 @@
     function toggleFs() {
         browserFs = !browserFs;
         const el = overlayEl;
-        if (browserFs) el?.requestFullscreen?.().catch(() => {});
-        else if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+        // 旧 WebKit（<16.4）requestFullscreen 存在但返回 undefined——变量中转再 ?.catch 防 TypeError
+        if (browserFs) {
+            const p = el?.requestFullscreen?.();
+            p?.catch(() => {});
+        }
+        else if (document.fullscreenElement) {
+            const p2 = document.exitFullscreen?.();
+            p2?.catch(() => {});
+        }
     }
 
     function onFsChange() {
@@ -248,7 +256,10 @@
         tabindex="-1"
         use:focusOnMount
         onclick={(e) => { if (e.target === e.currentTarget) closeOverlay(); }}
-        onkeydown={(e) => { if (e.key === 'Escape') closeOverlay(); }}
+        onkeydown={(e) => {
+            if (e.key === 'Escape') closeOverlay();
+            trapTabKey(e, e.currentTarget);
+        }}
     >
         <div class="rr-tbl-bar">
             <span class="rr-tbl-label">表格 · {formatZoom(zoom)}</span>

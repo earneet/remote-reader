@@ -51,6 +51,18 @@ async function invoke(
     });
 }
 
+
+// fail() 返回 ActionFailure（带 .status 不抛出）——断言其状态码
+async function expectStatus(
+    fn: (evt: any) => unknown,
+    userId: string,
+    form: Record<string, string>,
+    status: number
+): Promise<void> {
+    const r = await invoke(fn, userId, form);
+    expect((r as { status?: number })?.status).toBe(status);
+}
+
 // ===== createFolder =====
 
 test('createFolder：正常创建文件夹', async () => {
@@ -66,20 +78,20 @@ test('createFolder：正常创建文件夹', async () => {
 test('createFolder：空 name → 400', async () => {
     const ownerId = generateId();
     insertUser(ownerId);
-    await expect(invoke(mod.actions.createFolder, ownerId, { name: '' })).rejects.toMatchObject({ status: 400 });
+    await expectStatus(mod.actions.createFolder, ownerId, { name: '' }, 400);
 });
 
 test('createFolder：name 含路径分隔符 → 400（sanitizeSingleName）', async () => {
     const ownerId = generateId();
     insertUser(ownerId);
-    await expect(invoke(mod.actions.createFolder, ownerId, { name: 'a/b' })).rejects.toMatchObject({ status: 400 });
+    await expectStatus(mod.actions.createFolder, ownerId, { name: 'a/b' }, 400);
 });
 
 test('createFolder：文件夹重名 → 409（不再静默成功）', async () => {
     const ownerId = generateId();
     insertUser(ownerId);
     await invoke(mod.actions.createFolder, ownerId, { name: 'dup' });
-    await expect(invoke(mod.actions.createFolder, ownerId, { name: 'dup' })).rejects.toMatchObject({ status: 409 });
+    await expectStatus(mod.actions.createFolder, ownerId, { name: 'dup' }, 409);
     const folders = db.select().from(schema.documents)
         .where(and(eq(schema.documents.ownerId, ownerId), eq(schema.documents.name, 'dup'), eq(schema.documents.type, 'folder'))).all();
     expect(folders.length).toBe(1);
@@ -89,7 +101,7 @@ test('createFolder：与同名 file 冲突 → 409（防陷阱目录，P1-4）',
     const ownerId = generateId();
     insertUser(ownerId);
     await uploadDocument(ownerId, 'q2.md', 'x', []);
-    await expect(invoke(mod.actions.createFolder, ownerId, { name: 'q2.md' })).rejects.toMatchObject({ status: 409 });
+    await expectStatus(mod.actions.createFolder, ownerId, { name: 'q2.md' }, 409);
     const folders = db.select().from(schema.documents)
         .where(and(eq(schema.documents.ownerId, ownerId), eq(schema.documents.type, 'folder'))).all();
     expect(folders.length).toBe(0);
@@ -100,7 +112,7 @@ test('rename：改成与 folder 同名 → 409（跨类型互斥，P1-4）', asy
     insertUser(ownerId);
     await invoke(mod.actions.createFolder, ownerId, { name: 'target' });
     const r = await uploadDocument(ownerId, 'a.md', 'x', []);
-    await expect(invoke(mod.actions.rename, ownerId, { id: r.id, name: 'target' })).rejects.toMatchObject({ status: 409 });
+    await expectStatus(mod.actions.rename, ownerId, { id: r.id, name: 'target' }, 409);
 });
 
 // ===== rename =====
@@ -116,20 +128,20 @@ test('rename：正常重命名', async () => {
 test('rename：空 id/name → 400', async () => {
     const ownerId = generateId();
     insertUser(ownerId);
-    await expect(invoke(mod.actions.rename, ownerId, { id: '', name: 'x.md' })).rejects.toMatchObject({ status: 400 });
+    await expectStatus(mod.actions.rename, ownerId, { id: '', name: 'x.md' }, 400);
 });
 
 test('rename：name 含分隔符 → 400', async () => {
     const ownerId = generateId();
     insertUser(ownerId);
     const r = await uploadDocument(ownerId, 'a.md', 'x', []);
-    await expect(invoke(mod.actions.rename, ownerId, { id: r.id, name: 'b/c' })).rejects.toMatchObject({ status: 400 });
+    await expectStatus(mod.actions.rename, ownerId, { id: r.id, name: 'b/c' }, 400);
 });
 
 test('rename：节点不存在 → 404', async () => {
     const ownerId = generateId();
     insertUser(ownerId);
-    await expect(invoke(mod.actions.rename, ownerId, { id: 'nonexistent', name: 'x.md' })).rejects.toMatchObject({ status: 404 });
+    await expectStatus(mod.actions.rename, ownerId, { id: 'nonexistent', name: 'x.md' }, 404);
 });
 
 test('rename：同父同名冲突 → 409', async () => {
@@ -137,7 +149,7 @@ test('rename：同父同名冲突 → 409', async () => {
     insertUser(ownerId);
     await uploadDocument(ownerId, 'a.md', 'x', []);
     const b = await uploadDocument(ownerId, 'b.md', 'y', []);
-    await expect(invoke(mod.actions.rename, ownerId, { id: b.id, name: 'a.md' })).rejects.toMatchObject({ status: 409 });
+    await expectStatus(mod.actions.rename, ownerId, { id: b.id, name: 'a.md' }, 409);
 });
 
 // ===== move / delete =====
@@ -145,13 +157,13 @@ test('rename：同父同名冲突 → 409', async () => {
 test('move：空 id → 400', async () => {
     const ownerId = generateId();
     insertUser(ownerId);
-    await expect(invoke(mod.actions.move, ownerId, { id: '', target: 'root' })).rejects.toMatchObject({ status: 400 });
+    await expectStatus(mod.actions.move, ownerId, { id: '', target: 'root' }, 400);
 });
 
 test('delete：空 id → 400', async () => {
     const ownerId = generateId();
     insertUser(ownerId);
-    await expect(invoke(mod.actions.delete, ownerId, { id: '' })).rejects.toMatchObject({ status: 400 });
+    await expectStatus(mod.actions.delete, ownerId, { id: '' }, 400);
 });
 
 test('delete：正常删除文档', async () => {
@@ -183,7 +195,7 @@ test('setTags：非法标签名 → 400', async () => {
     const ownerId = generateId();
     insertUser(ownerId);
     const r = await uploadDocument(ownerId, 'a.md', 'x', []);
-    await expect(invoke(mod.actions.setTags, ownerId, { id: r.id, tags: 'a/b' })).rejects.toMatchObject({ status: 400 });
+    await expectStatus(mod.actions.setTags, ownerId, { id: r.id, tags: 'a/b' }, 400);
 });
 
 test('setTags：非 owner 文档 → 404', async () => {
@@ -191,7 +203,7 @@ test('setTags：非 owner 文档 → 404', async () => {
     const other = generateId();
     insertUser(ownerId); insertUser(other);
     const r = await uploadDocument(ownerId, 'a.md', 'x', []);
-    await expect(invoke(mod.actions.setTags, other, { id: r.id, tags: 'x' })).rejects.toMatchObject({ status: 404 });
+    await expectStatus(mod.actions.setTags, other, { id: r.id, tags: 'x' }, 404);
 });
 
 // ===== load 视图分支（recent，spec §6.1） =====

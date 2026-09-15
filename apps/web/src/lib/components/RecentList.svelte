@@ -39,6 +39,11 @@
     let sentinel = $state<HTMLElement | null>(null);
     let sheet = $state<ActionSheet | null>(null);
     let sheetId = $state<string | null>(null);
+    // P2-10：失败反馈 + 防重复提交（fetch 版与目录视图 enhance 版同语义）
+    let renameError = $state<string | null>(null);
+    let tagError = $state<string | null>(null);
+    let deleteError = $state<string | null>(null);
+    let busyId = $state<string | null>(null);
 
     const pathOf = (item: RecentDoc): string => folderNamesOf(folderById, item.parentId).join(' / ');
 
@@ -48,12 +53,19 @@
         node.select();
     }
 
-    // SvelteKit form action 直调（与页面 pickTarget 的 move 同款做法）：成功返回 true
-    async function submitAction(action: string, fields: Record<string, string>): Promise<boolean> {
+    // SvelteKit form action 直调（与页面 pickTarget 的 move 同款做法）：返回状态码供失败反馈
+    async function submitAction(action: string, fields: Record<string, string>): Promise<number> {
         const fd = new FormData();
         for (const [k, v] of Object.entries(fields)) fd.append(k, v);
         const r = await fetch(`?/${action}`, { method: 'POST', body: fd });
-        return r.ok;
+        return r.status;
+    }
+
+    function actionErrorMessage(status: number): string {
+        if (status === 409) return '同名节点已存在';
+        if (status === 400) return '名称非法';
+        if (status === 404) return '文档不存在（可能已被删除）';
+        return '操作失败，请重试';
     }
 
     function cursorOfLast(): string | null {
@@ -108,6 +120,7 @@
     function startRename(item: RecentDoc): void {
         editingId = item.id;
         renameValue = item.name;
+        renameError = null;
     }
 
     function openSheet(id: string): void {
@@ -121,7 +134,7 @@
         sheetId = null;
         if (!item) return;
         if (key === 'rename') startRename(item);
-        else if (key === 'tags') { taggingId = item.id; tagInput = item.tags.map((t) => t.name).join(', '); }
+        else if (key === 'tags') { taggingId = item.id; tagInput = item.tags.map((t) => t.name).join(', '); tagError = null; }
         else if (key === 'move') onStartMove(item.id);
         else if (key === 'delete') void doDelete(item);
     }
@@ -129,27 +142,44 @@
     async function doRename(id: string): Promise<void> {
         const name = renameValue.trim();
         if (!name) return;
-        if (await submitAction('rename', { id, name })) {
+        busyId = id;
+        const status = await submitAction('rename', { id, name });
+        busyId = null;
+        if (status === 200) {
             editingId = null;
+            renameError = null;
             await reSync();
+        } else {
+            renameError = actionErrorMessage(status); // 失败保持编辑态 + 展示原因，可改可取消
         }
-        // 失败保持编辑态：与目录视图 enhance 失败同样不强制反馈，用户可重试或取消
     }
 
     async function doSetTags(id: string): Promise<void> {
-        if (await submitAction('setTags', { id, tags: tagInput })) {
+        busyId = id;
+        const status = await submitAction('setTags', { id, tags: tagInput });
+        busyId = null;
+        if (status === 200) {
             taggingId = null;
             tagInput = '';
+            tagError = null;
             await reSync();
+        } else {
+            tagError = actionErrorMessage(status);
         }
     }
 
     async function doDelete(item: RecentDoc): Promise<void> {
         if (!confirm('确认删除该文件？此操作不可恢复。')) return;
-        if (await submitAction('delete', { id: item.id })) {
+        busyId = item.id;
+        const status = await submitAction('delete', { id: item.id });
+        busyId = null;
+        if (status === 200 || status === 404) {
+            deleteError = null;
             rows = rows.filter((x) => x.id !== item.id); // 乐观移除：reSync 失败也不残留已删行（终审跟进）
             await invalidateAll(); // 刷左树计数（rows 本地态不被重置，零代价——Task 6 审查跟进）
             await reSync();
+        } else {
+            deleteError = actionErrorMessage(status);
         }
     }
 
@@ -175,11 +205,12 @@
             <li class="item" class:editing={editingId === item.id}>
                 {#if editingId === item.id}
                     <form class="rename-form" onsubmit={(e) => { e.preventDefault(); void doRename(item.id); }}>
-                        <input value={renameValue} required use:autofocus
+                        <input value={renameValue} required use:autofocus disabled={busyId === item.id}
                             oninput={(e) => (renameValue = e.currentTarget.value)}
                             onkeydown={(e) => { if (e.key === 'Escape') editingId = null; }}>
-                        <button type="submit" class="btn sm primary">保存</button>
+                        <button type="submit" class="btn sm primary" disabled={busyId === item.id}>保存</button>
                         <button type="button" class="btn sm" onclick={() => (editingId = null)}>取消</button>
+                        {#if renameError}<span class="form-error">{renameError}</span>{/if}
                     </form>
                 {:else}
                     <span class="name">
@@ -201,11 +232,12 @@
                         {/each}
                         {#if taggingId === item.id}
                             <form class="tag-form" onsubmit={(e) => { e.preventDefault(); void doSetTags(item.id); }}>
-                                <input value={tagInput} placeholder="逗号分隔，如 周报, api" use:autofocus
+                                <input value={tagInput} placeholder="逗号分隔，如 周报, api" use:autofocus disabled={busyId === item.id}
                                     oninput={(e) => (tagInput = e.currentTarget.value)}
                                     onkeydown={(e) => { if (e.key === 'Escape') taggingId = null; }}>
-                                <button type="submit" class="btn sm primary">保存</button>
+                                <button type="submit" class="btn sm primary" disabled={busyId === item.id}>保存</button>
                                 <button type="button" class="btn sm" onclick={() => (taggingId = null)}>取消</button>
+                                {#if tagError}<span class="form-error">{tagError}</span>{/if}
                             </form>
                         {:else}
                             <button class="icon-btn desktop-only" title="编辑标签"
@@ -238,6 +270,9 @@
     {#if loadingMore}<p class="muted">加载中…</p>{/if}
     {#if loadError}
         <p class="error">加载失败 <button class="link" onclick={() => void loadMore()}>点击重试</button></p>
+    {/if}
+    {#if deleteError}
+        <p class="error">{deleteError} <button class="link" onclick={() => (deleteError = null)}>关闭</button></p>
     {/if}
 {/if}
 
@@ -311,6 +346,7 @@
     .sentinel { height: 1px; }
     .muted { color: var(--rr-text-muted); }
     .error { color: var(--rr-danger); font-size: 0.9em; }
+    .form-error { color: var(--rr-danger); font-size: 0.8em; white-space: nowrap; }
     .hint { color: var(--rr-success); font-size: 0.85em; }
     .link { border: none; background: none; color: var(--rr-link); cursor: pointer; padding: 0; }
 

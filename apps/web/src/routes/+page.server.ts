@@ -1,4 +1,4 @@
-import { error, redirect } from '@sveltejs/kit';
+import { fail, redirect } from '@sveltejs/kit';
 import { and, eq, isNull } from 'drizzle-orm';
 import type { Actions, PageServerLoad } from './$types';
 import { generateId } from '$server/auth';
@@ -50,12 +50,12 @@ export const actions: Actions = {
         const rawName = String(form.get('name') ?? '').trim();
         const dir = url.searchParams.get('dir');
         const parentId = dir && dir.length > 0 ? dir : null;
-        if (!rawName) error(400, '名称必填');
+        if (!rawName) return fail(400, { error: '名称必填' });
         let name: string;
         try {
             name = sanitizeSingleName(rawName);
         } catch (e) {
-            error(400, (e as Error).message);
+            return fail(400, { error: (e as Error).message });
         }
         // 同 parent 同名即冲突——不区分 type（file/folder 同名在磁盘上必然冲突，防陷阱目录）
         const dup = db.select().from(schema.documents).where(and(
@@ -64,7 +64,7 @@ export const actions: Actions = {
             eq(schema.documents.name, name)
         )).get();
         if (dup) {
-            error(409, dup.type === 'folder' ? '同名文件夹已存在' : '同名文件已存在（文件与文件夹不能同名）');
+            return fail(409, { error: dup.type === 'folder' ? '同名文件夹已存在' : '同名文件已存在（文件与文件夹不能同名）' });
         }
         const now = Date.now();
         db.insert(schema.documents).values({
@@ -79,17 +79,17 @@ export const actions: Actions = {
         const form = await request.formData();
         const id = String(form.get('id') ?? '');
         const rawName = String(form.get('name') ?? '').trim();
-        if (!id || !rawName) error(400, '参数缺失');
+        if (!id || !rawName) return fail(400, { error: '参数缺失' });
         let name: string;
         try {
             name = sanitizeSingleName(rawName);
         } catch (e) {
-            error(400, (e as Error).message);
+            return fail(400, { error: (e as Error).message });
         }
         const r = renameNode(locals.user.id, id, name);
         if (!r.ok) {
-            if (r.code === 'conflict') error(409, r.reason ?? '重名');
-            error(404, r.reason ?? '文档不存在');
+            if (r.code === 'conflict') return fail(409, { error: r.reason ?? '重名' });
+            return fail(404, { error: r.reason ?? '文档不存在' });
         }
         return { ok: true };
     },
@@ -98,12 +98,12 @@ export const actions: Actions = {
         const form = await request.formData();
         const id = String(form.get('id') ?? '');
         const target = String(form.get('target') ?? '');
-        if (!id) error(400, '参数缺失');
+        if (!id) return fail(400, { error: '参数缺失' });
         const newParentId = target === 'root' || !target ? null : target;
         const r = moveNode(locals.user.id, id, newParentId);
         if (!r.ok) {
-            if (r.code === 'conflict') error(409, r.reason ?? '目标存在同名');
-            error(400, r.reason ?? '移动失败');
+            if (r.code === 'conflict') return fail(409, { error: r.reason ?? '目标存在同名' });
+            return fail(400, { error: r.reason ?? '移动失败' });
         }
         return { ok: true };
     },
@@ -111,7 +111,7 @@ export const actions: Actions = {
         if (!locals.user) redirect(302, '/login');
         const form = await request.formData();
         const id = String(form.get('id') ?? '');
-        if (!id) error(400, '参数缺失');
+        if (!id) return fail(400, { error: '参数缺失' });
         deleteNode(locals.user.id, id);
         return { ok: true };
     },
@@ -120,15 +120,15 @@ export const actions: Actions = {
         const form = await request.formData();
         const id = String(form.get('id') ?? '');
         const raw = String(form.get('tags') ?? '');
-        if (!id) error(400, '参数缺失');
+        if (!id) return fail(400, { error: '参数缺失' });
         const names = raw.split(',').map(s => s.trim()).filter(Boolean);
         for (const n of names) {
-            if (!n || n.length > 32 || n.includes('/')) error(400, `标签名非法：${n}`);
+            if (!n || n.length > 32 || n.includes('/')) return fail(400, { error: `标签名非法：${n}` });
         }
         try {
             setDocTags(locals.user.id, id, names);
         } catch (e) {
-            if (e instanceof SetTagsError) error(404, '文档不存在或无权操作');
+            if (e instanceof SetTagsError) return fail(404, { error: '文档不存在或无权操作' });
             throw e;
         }
         return { ok: true };

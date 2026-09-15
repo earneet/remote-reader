@@ -1,6 +1,12 @@
 <script lang="ts">
     // 底部 action sheet（spec 2026-09-14 §7.1）：<dialog> 原生 top-layer/Esc/焦点归还。
-    // show()/hide() 经 bind:this 调用；选项回调 onSelect(key)。打开时锁 body 滚动。
+    // show()/hide() 经 bind:this 调用；选项回调 onSelect(key)。打开时锁 body 滚动（引用计数）、
+    // 推浅路由条目兜 Android 返回键（P2-11 + 备忘 D-9，与移动抽屉同款编排）。
+    // pick 先 await 消费完条目再 onSelect——onSelect 可能立刻开抽屉（再推新条目），
+    // 乱序会把抽屉的条目弹掉
+    import { lockBodyScroll, unlockBodyScroll } from '$lib/shared/body-scroll';
+    import { createOverlayHistory } from '$lib/shared/overlay-history';
+
     let {
         label = '操作',
         actions,
@@ -12,23 +18,42 @@
     } = $props();
 
     let dialog = $state<HTMLDialogElement | null>(null);
+    const overlayHistory = createOverlayHistory();
 
     export function show(): void {
         dialog?.showModal();
-        document.body.style.overflow = 'hidden';
+        lockBodyScroll();
+        overlayHistory.push();
     }
+
     export function hide(): void {
         dialog?.close();
     }
 
-    function onDialogClose(): void {
-        document.body.style.overflow = '';
+    // dialog.close() 的 close 事件异步派发（HTML 规范排队任务）——解锁与条目消费统一收口在此
+    async function onDialogClose(): Promise<void> {
+        unlockBodyScroll();
+        await overlayHistory.consume();
     }
 
-    function pick(key: string): void {
+    async function pick(key: string): Promise<void> {
+        await overlayHistory.consume();
         hide();
         onSelect(key);
     }
+
+    // 系统返回键 = 关 sheet 而非真实后退：popstate 先标记条目已消费，再关 dialog
+    //（close 事件里 consume 因标记而为 no-op，不重复 back）
+    $effect(() => {
+        const onPop = () => {
+            if (dialog?.open) {
+                overlayHistory.markConsumedByPop();
+                dialog.close();
+            }
+        };
+        window.addEventListener('popstate', onPop);
+        return () => window.removeEventListener('popstate', onPop);
+    });
 </script>
 
 <dialog
@@ -40,7 +65,7 @@
     <ul class="sheet-list">
         {#each actions as a (a.key)}
             <li>
-                <button type="button" class="action" class:danger={a.danger} onclick={() => pick(a.key)}>
+                <button type="button" class="action" class:danger={a.danger} onclick={() => void pick(a.key)}>
                     {a.label}
                 </button>
             </li>

@@ -3,9 +3,10 @@
     import RecentList from '$components/RecentList.svelte';
     import ActionSheet from '$components/ActionSheet.svelte';
     import { ancestorChainOf, type TreeFolder } from '$lib/shared/folder-tree';
+    import { lockBodyScroll, unlockBodyScroll } from '$lib/shared/body-scroll';
+    import { createOverlayHistory } from '$lib/shared/overlay-history';
     import { enhance } from '$app/forms';
-    import { goto, invalidateAll, pushState } from '$app/navigation';
-    import { page } from '$app/state';
+    import { goto, invalidateAll } from '$app/navigation';
     let { data } = $props();
     let currentDir = $derived(data.currentDir);
     let movingId = $state<string | null>(null);
@@ -21,9 +22,17 @@
     let drawerOpen = $state(false);
     let drawerRef = $state<HTMLDialogElement | null>(null);
     let menuBtn = $state<HTMLButtonElement | null>(null);
-    // 抽屉是否推过 history 条目（用内存标志而非 history.state——SvelteKit pushState 的
-    // state 存于内部命名空间，直接读结构无保证；刷新丢失=no-op，可接受）
-    let drawerPushed = false;
+    const drawerHistory = createOverlayHistory();
+    // D-4：同一 storageKey 的两份树实例状态互不同步（aside 移动端 display:none 但仍挂载）。
+    // 改为断点互斥挂载——任意时刻仅一实例存活，折叠状态经 localStorage（每次变更即持久化）跨断点承接
+    let isMobile = $state(false);
+    $effect(() => {
+        const mq = window.matchMedia('(max-width: 768px)');
+        const sync = () => { isMobile = mq.matches; };
+        sync();
+        mq.addEventListener('change', sync);
+        return () => mq.removeEventListener('change', sync);
+    });
 
     // 组装目录树入参：folder 行 + 直接子项计数合成 TreeFolder（组件不感知后端结构，spec §5.1）
     const treeFolders = $derived<TreeFolder[]>(
@@ -57,29 +66,21 @@
         drawerOpen = true;
         // SvelteKit pushState（同 URL 浅路由条目）：返回键可关抽屉且不与 SvelteKit 路由的
         // 内部 history 跟踪冲突（原生 history.pushState 会触发 dev warning 并丢内部 state）
-        pushState(page.url, { rrDrawer: true });
-        drawerPushed = true;
+        drawerHistory.push();
         drawerRef?.showModal();
-        document.body.style.overflow = 'hidden';
+        lockBodyScroll();
     }
 
-    // 非返回键关闭须 await popstate 消费完 pushState 的那条 state 再做后续导航：
+    // 非返回键关闭须 await popstate 消费完浅路由条目再做后续导航：
     // SvelteKit goto 也 pushState，乱序会把刚推的导航条目弹掉（spec §6.4）。
-    function popOnce(): Promise<void> {
-        return new Promise((resolve) => {
-            const once = () => { window.removeEventListener('popstate', once); resolve(); };
-            window.addEventListener('popstate', once);
-            history.back();
-        });
-    }
-
-    async function closeDrawer(viaPopstate = false): Promise<void> {
+    // 返回键路径先 markConsumedByPop，此处 consume 为 no-op
+    async function closeDrawer(): Promise<void> {
         if (!drawerOpen) return;
         drawerOpen = false;
         drawerRef?.close();
-        document.body.style.overflow = '';
+        unlockBodyScroll();
         menuBtn?.focus();
-        if (!viaPopstate && drawerPushed) { drawerPushed = false; await popOnce(); }
+        await drawerHistory.consume();
     }
 
     // dialog 原生 Esc 关闭不经 closeDrawer，onclose 兜底同步状态
@@ -87,15 +88,20 @@
         if (drawerOpen) void closeDrawer();
     }
 
-    // 抽屉内选目录：先消费完 history 再 goto（见 popOnce 注释）
+    // 抽屉内选目录：先消费完 history 再 goto（见 consume 注释）
     async function selectFromDrawer(id: string | null): Promise<void> {
         await closeDrawer();
         await selectDir(id);
     }
 
-    // 系统返回键 = 关抽屉而非退出整页（spec §6.4）
+    // 系统返回键 = 关抽屉而非退出整页（spec §6.4）；popstate 已弹掉条目，标记已消费
     $effect(() => {
-        const onPop = () => { if (drawerOpen) void closeDrawer(true); };
+        const onPop = () => {
+            if (drawerOpen) {
+                drawerHistory.markConsumedByPop();
+                void closeDrawer();
+            }
+        };
         window.addEventListener('popstate', onPop);
         return () => window.removeEventListener('popstate', onPop);
     });
@@ -103,7 +109,7 @@
     function startMove(id: string) {
         movingId = id; moveError = null;
         // 移动端树在抽屉里：选择模式自动打开抽屉；桌面常驻左树无需弹层
-        if (typeof window !== 'undefined' && window.matchMedia('(max-width: 768px)').matches) openDrawer();
+        if (isMobile) openDrawer();
     }
     async function pickTarget(targetId: string | null) {
         if (!movingId) return;
@@ -121,8 +127,21 @@
         else { moveError = '移动失败（目标无效或会造成环路），请重选目标或取消'; }
     }
 
-    function startRename(id: string) { editingId = id; }
-    function cancelRename() { editingId = null; }
+    function startRename(id: string) { editingId = id; renameError = null; }
+    function cancelRename() { editingId = null; renameError = null; }
+
+    // P2-10：动作失败给出可见反馈（此前 enhance 只处理 success，409 冲突静默无感）
+    let actionError = $state<string | null>(null);
+    let renameError = $state<string | null>(null);
+    let tagError = $state<string | null>(null);
+    let createError = $state<string | null>(null);
+    // 行内表单防重复提交（SvelteKit 2.x enhance 无自动禁用，已核实 forms.js）
+    let busyId = $state<string | null>(null);
+
+    function failureMessage(result: { type: string; status?: number; data?: { error?: string } }): string {
+        if (result.type === 'failure' && result.data?.error) return String(result.data.error);
+        return result.status === 409 ? '名称冲突' : '操作失败，请重试';
+    }
 
     function openSheet(id: string, type: string): void {
         sheetItem = { id, type };
@@ -134,7 +153,7 @@
         if (!it) return;
         sheetItem = null;
         if (key === 'rename') startRename(it.id);
-        else if (key === 'tags') { taggingId = it.id; tagInput = ''; }
+        else if (key === 'tags') { taggingId = it.id; tagInput = ''; tagError = null; }
         else if (key === 'move') startMove(it.id);
         else if (key === 'delete') void doDelete(it.id, it.type);
     }
@@ -148,7 +167,8 @@
         const fd = new FormData();
         fd.set('id', id);
         const r = await fetch('?/delete', { method: 'POST', body: fd });
-        if (r.ok) { await invalidateAll(); await recentRef?.reSync(); }
+        if (r.ok) { actionError = null; await invalidateAll(); await recentRef?.reSync(); }
+        else actionError = r.status === 404 ? '文档已不存在，请刷新' : '删除失败，请重试';
     }
 
     // use: action 仅客户端挂载时执行（SSR 无真实 DOM），安全聚焦+全选
@@ -159,19 +179,21 @@
 </script>
 
 <div class="fm">
-    <aside class="fm-left">
-        <FolderTree
-            folders={treeFolders}
-            currentId={view === 'dir' ? currentDir : undefined}
-            selecting={movingId !== null}
-            onSelect={movingId !== null ? pickTarget : selectDir}
-            storageKey="rr:tree-expanded:{data.user?.id ?? 'anon'}"
-        />
-        {#if movingId !== null}
-            <p class="hint">移动模式：点左树选目标，或<button class="link" onclick={() => (movingId = null)}>取消</button></p>
-            {#if moveError}<p class="error">{moveError}</p>{/if}
-        {/if}
-    </aside>
+    {#if !isMobile}
+        <aside class="fm-left">
+            <FolderTree
+                folders={treeFolders}
+                currentId={view === 'dir' ? currentDir : undefined}
+                selecting={movingId !== null}
+                onSelect={movingId !== null ? pickTarget : selectDir}
+                storageKey="rr:tree-expanded:{data.user?.id ?? 'anon'}"
+            />
+            {#if movingId !== null}
+                <p class="hint">移动模式：点左树选目标，或<button class="link" onclick={() => (movingId = null)}>取消</button></p>
+                {#if moveError}<p class="error">{moveError}</p>{/if}
+            {/if}
+        </aside>
+    {/if}
     <section class="fm-right" bind:this={rightPane}>
         <div class="fm-head">
             <div class="fm-title">
@@ -211,20 +233,33 @@
             </div>
             {#if view === 'dir'}
                 <form class="create-folder desktop-only" method="POST" action="?/createFolder"
-                    use:enhance={() => async ({ result }) => { if (result.type === 'success') await invalidateAll(); }}>
+                    use:enhance={() => async ({ formElement, result }) => {
+                        if (result.type === 'success') { createError = null; formElement.reset(); await invalidateAll(); }
+                        else if (result.type === 'failure') createError = failureMessage(result);
+                    }}>
                     <input name="name" placeholder="新文件夹名" required>
                     <button class="btn primary" type="submit">+ 新建文件夹</button>
                 </form>
             {/if}
+            {#if createError && view === 'dir'}<p class="error create-error">{createError}</p>{/if}
             {#if showCreate && view === 'dir'}
                 <form class="create-folder mobile-only" method="POST" action="?/createFolder"
-                    use:enhance={() => async ({ result }) => { if (result.type === 'success') { showCreate = false; await invalidateAll(); } }}>
+                    use:enhance={() => async ({ formElement, result }) => {
+                        if (result.type === 'success') { showCreate = false; createError = null; formElement.reset(); await invalidateAll(); }
+                        else if (result.type === 'failure') createError = failureMessage(result);
+                    }}>
                     <input name="name" placeholder="新文件夹名" required>
                     <button class="btn primary" type="submit">新建</button>
                     <button type="button" class="btn" onclick={() => (showCreate = false)}>收起</button>
                 </form>
             {/if}
         </div>
+        {#if actionError}
+            <div class="action-error-banner" role="alert">
+                {actionError}
+                <button type="button" class="link" aria-label="关闭提示" onclick={() => (actionError = null)}>×</button>
+            </div>
+        {/if}
         {#if view === 'recent'}
             <RecentList
                 bind:this={recentRef}
@@ -256,15 +291,21 @@
                         <li class="item" class:editing={editingId === item.id}>
                             {#if editingId === item.id}
                                 <form class="rename-form" method="POST" action="?/rename"
-                                    use:enhance={() => async ({ result }) => {
-                                        if (result.type === 'success') { editingId = null; await invalidateAll(); }
+                                    use:enhance={() => {
+                                        busyId = item.id; renameError = null;
+                                        return async ({ result }) => {
+                                            busyId = null;
+                                            if (result.type === 'success') { editingId = null; await invalidateAll(); }
+                                            else if (result.type === 'failure') renameError = failureMessage(result);
+                                        };
                                     }}
                                 >
                                     <input type="hidden" name="id" value={item.id}>
-                                    <input name="name" value={item.name} required use:autofocus
+                                    <input name="name" value={item.name} required use:autofocus disabled={busyId === item.id}
                                         onkeydown={(e) => { if (e.key === 'Escape') cancelRename(); }}>
-                                    <button type="submit" class="btn sm primary">保存</button>
+                                    <button type="submit" class="btn sm primary" disabled={busyId === item.id}>保存</button>
                                     <button type="button" class="btn sm" onclick={cancelRename}>取消</button>
+                                    {#if renameError}<span class="form-error">{renameError}</span>{/if}
                                 </form>
                             {:else}
                                 <span class="name">
@@ -285,13 +326,21 @@
                                         {/each}
                                         {#if taggingId === item.id}
                                             <form class="tag-form" method="POST" action="?/setTags"
-                                                use:enhance={() => async ({ result }) => { if (result.type === 'success') { taggingId = null; tagInput = ''; await invalidateAll(); } }}>
+                                                use:enhance={() => {
+                                                    busyId = item.id; tagError = null;
+                                                    return async ({ result }) => {
+                                                        busyId = null;
+                                                        if (result.type === 'success') { taggingId = null; tagInput = ''; await invalidateAll(); }
+                                                        else if (result.type === 'failure') tagError = failureMessage(result);
+                                                    };
+                                                }}>
                                                 <input type="hidden" name="id" value={item.id}>
                                                 <input name="tags" value={tagInput || (data.tagsByDoc.get(item.id) ?? []).map(t => t.name).join(', ')}
-                                                    placeholder="逗号分隔，如 周报, api" use:autofocus
+                                                    placeholder="逗号分隔，如 周报, api" use:autofocus disabled={busyId === item.id}
                                                     onkeydown={(e) => { if (e.key === 'Escape') { taggingId = null; } }}>
-                                                <button type="submit" class="btn sm primary">保存</button>
+                                                <button type="submit" class="btn sm primary" disabled={busyId === item.id}>保存</button>
                                                 <button type="button" class="btn sm" onclick={() => (taggingId = null)}>取消</button>
+                                                {#if tagError}<span class="form-error">{tagError}</span>{/if}
                                             </form>
                                         {:else}
                                             <button class="icon-btn desktop-only" title="编辑标签" onclick={() => { taggingId = item.id; tagInput = ''; }}>🏷</button>
@@ -317,11 +366,16 @@
                                                     ? '确认删除该文件夹？将级联删除其全部内容，且不可恢复。'
                                                     : '确认删除该文件？此操作不可恢复。';
                                                 if (!confirm(msg)) { cancel(); return; }
-                                                return async ({ result }) => { if (result.type === 'success') await invalidateAll(); };
+                                                busyId = item.id;
+                                                return async ({ result }) => {
+                                                    busyId = null;
+                                                    if (result.type === 'success') { actionError = null; await invalidateAll(); }
+                                                    else if (result.type === 'failure') actionError = failureMessage(result);
+                                                };
                                             }}
                                         >
                                             <input type="hidden" name="id" value={item.id}>
-                                            <button class="icon-btn danger" title="删除">🗑</button>
+                                            <button class="icon-btn danger" title="删除" disabled={busyId === item.id}>🗑</button>
                                         </form>
                                     </span>
                                 </span>
@@ -351,13 +405,15 @@
         <p class="hint">选择移动目标，或<button class="link" onclick={() => (movingId = null)}>取消</button></p>
         {#if moveError}<p class="error">{moveError}</p>{/if}
     {/if}
-    <FolderTree
-        folders={treeFolders}
-        currentId={view === 'dir' ? currentDir : undefined}
-        selecting={movingId !== null}
-        onSelect={movingId !== null ? pickTarget : selectFromDrawer}
-        storageKey="rr:tree-expanded:{data.user?.id ?? 'anon'}"
-    />
+    {#if isMobile}
+        <FolderTree
+            folders={treeFolders}
+            currentId={view === 'dir' ? currentDir : undefined}
+            selecting={movingId !== null}
+            onSelect={movingId !== null ? pickTarget : selectFromDrawer}
+            storageKey="rr:tree-expanded:{data.user?.id ?? 'anon'}"
+        />
+    {/if}
 </dialog>
 
 <style>
@@ -418,6 +474,15 @@
     .create-folder input:focus { outline: none; border-color: var(--rr-accent); box-shadow: 0 0 0 2px var(--rr-focus-ring); }
 
     .empty { padding: 2rem 0; }
+
+    .action-error-banner {
+        display: flex; align-items: center; justify-content: space-between; gap: 0.75rem;
+        margin: 0.75rem 0 0; padding: 0.45rem 0.75rem;
+        border: 1px solid var(--rr-danger); border-radius: 6px;
+        color: var(--rr-danger); font-size: 0.9rem; background: var(--rr-card-bg);
+    }
+    .form-error { color: var(--rr-danger); font-size: 0.8em; white-space: nowrap; }
+    .create-error { margin: 0.25rem 0 0; }
 
     .items { list-style: none; padding: 0; margin: 1rem 0; }
     .item {

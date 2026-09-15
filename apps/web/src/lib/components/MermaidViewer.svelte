@@ -1,13 +1,13 @@
 <script lang="ts">
     import { onMount } from 'svelte';
     import { nextZoom, formatZoom, ZOOM_STEP, clampZoom } from '$lib/shared/mermaid-zoom';
+    import { trapTabKey } from '$lib/shared/focus-trap';
 
     let { container, html }: { container: HTMLDivElement | undefined; html: string } = $props();
 
     let fullscreen = $state<{ svg: string; zoom: number; x: number; y: number } | null>(null);
     let browserFs = $state(false);
     let themeObserver: MutationObserver | null = null;
-    let cleanups: Array<() => void> = [];
 
     function currentTheme(): 'light' | 'dark' {
         return document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
@@ -99,15 +99,19 @@
 
     function fsToggleBrowserFullscreen(): void {
         // 用 class 驱动视觉全屏（跨平台，iOS 无 Fullscreen API 也生效）；
-        // 同时尝试 requestFullscreen 让桌面/Android 隐藏浏览器 UI
+        // 同时尝试 requestFullscreen 让桌面/Android 隐藏浏览器 UI。
+        // 返回值经变量中转再 ?.catch：旧 WebKit（<16.4）方法存在但返回 undefined，
+        // 直接链 .catch 会抛 TypeError
         browserFs = !browserFs;
         const el = document.querySelector('.rr-mermaid-overlay');
         if (browserFs) {
-            el?.requestFullscreen?.().catch(() => {
+            const p = el?.requestFullscreen?.();
+            p?.catch(() => {
                 // 不支持（iOS 等）：browserFs 已 true，靠 CSS class 模拟全屏布局
             });
         } else if (document.fullscreenElement) {
-            document.exitFullscreen?.().catch(() => {});
+            const p2 = document.exitFullscreen?.();
+            p2?.catch(() => {});
         }
     }
 
@@ -189,14 +193,17 @@
         node.addEventListener('pointerup', onPointerUp);
         node.addEventListener('pointercancel', onPointerUp);
         node.addEventListener('wheel', onWheel, { passive: false });
-        cleanups.push(() => {
-            node.removeEventListener('pointerdown', onPointerDown);
-            node.removeEventListener('pointermove', onPointerMove);
-            node.removeEventListener('pointerup', onPointerUp);
-            node.removeEventListener('pointercancel', onPointerUp);
-            node.removeEventListener('wheel', onWheel);
-        });
-        return {};
+        // use:gestures 在 {#if fullscreen} 内，浮层每次开关都会重跑 action——
+        // 必须返回 destroy 逐次拆监听，否则 detached DOM 与处理器随开关累积（P2-12）
+        return {
+            destroy() {
+                node.removeEventListener('pointerdown', onPointerDown);
+                node.removeEventListener('pointermove', onPointerMove);
+                node.removeEventListener('pointerup', onPointerUp);
+                node.removeEventListener('pointercancel', onPointerUp);
+                node.removeEventListener('wheel', onWheel);
+            }
+        };
     }
 
     onMount(() => {
@@ -213,8 +220,6 @@
             themeObserver?.disconnect();
             window.removeEventListener('keydown', onKey);
             document.removeEventListener('fullscreenchange', onFsChange);
-            cleanups.forEach((fn) => fn());
-            cleanups = [];
         };
     });
 </script>
@@ -231,7 +236,9 @@
             if (e.target === e.currentTarget) fullscreen = null;
         }}
         onkeydown={(e) => {
-            if (e.key === 'Escape' || e.key === 'Enter') fullscreen = null;
+            // Enter 仅在浮层自身聚焦时作为快捷关闭——不判 target 会吞掉按钮的键盘激活（P2-12）
+            if ((e.key === 'Escape' || e.key === 'Enter') && e.target === e.currentTarget) fullscreen = null;
+            trapTabKey(e, e.currentTarget);
         }}
     >
         <div class="rr-mermaid-overlay-inner">

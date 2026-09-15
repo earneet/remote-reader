@@ -68,9 +68,10 @@ async function archiveDocument(doc: DocumentRow, store: ObjectStore, days: numbe
         }
         // 锁内复查冷判定：扫描快照到锁内执行期间可能刚被访问，刚看过的不归档（spec §6）
         if (!isColdCandidate(fresh, Date.now(), days)) return 'skipped';
+        const diskPath = fresh.storagePath; // 已守卫非空；抽出局部常量便于后续窄化
         let content: string;
         try {
-            content = await readFile(fresh.storagePath);
+            content = await readFile(diskPath);
         } catch (e) {
             console.warn('[tiering] 本地文件不可读，跳过归档（保持 hot 不造"两边皆空"）', fresh.id, e);
             archiveSkipUntil.set(fresh.id, Date.now() + ARCHIVE_SKIP_RETRY_MS);
@@ -92,7 +93,7 @@ async function archiveDocument(doc: DocumentRow, store: ObjectStore, days: numbe
                     eq(schema.documents.storageTier, 'hot'),
                     // 与 rewarm 对称的竞态加固：PUT 的长 await 窗口内 renameNode 可能已把行
                     // 指向新路径——路径不符即不翻转，保持 hot 由下轮按新状态收敛，防"行 cold 指旧路径"
-                    eq(schema.documents.storagePath, fresh.storagePath)
+                    eq(schema.documents.storagePath, diskPath)
                 ))
                 .run();
             // §4.2 状态翻转验证：未翻转（被不可上锁的同步路径如 deleteNode 改变状态）则跳过 FTS 清空
@@ -105,9 +106,9 @@ async function archiveDocument(doc: DocumentRow, store: ObjectStore, days: numbe
             return 'skipped';
         }
         try {
-            await unlink(fresh.storagePath);
+            await unlink(diskPath);
         } catch (e) {
-            console.warn('[tiering] 归档后删本地失败（孤儿文件，无害）', fresh.storagePath, e);
+            console.warn('[tiering] 归档后删本地失败（孤儿文件，无害）', diskPath, e);
         }
         return 'archived';
     });
