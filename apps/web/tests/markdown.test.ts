@@ -111,3 +111,26 @@ test('未闭合 $$ 按普通文本回落，不吞后续内容', async () => {
     expect(html).not.toContain('class="math block"');
     expect(html).toContain('后面段落');
 });
+
+test('连续单行 $$..$$ 公式各自独立渲染（同行自闭合，不吞相邻公式）', async () => {
+    const html = await renderMarkdown('$$ a^2+b^2=c^2 $$\n$$ d^2+e^2=f^2 $$');
+    const blocks = html.match(/class="math block"/g) ?? [];
+    expect(blocks.length).toBe(2);
+    expect(html).toContain('a^2+b^2=c^2');
+    expect(html).toContain('d^2+e^2=f^2');
+    // 公式体不得混入尾随 $$ 定界符
+    expect(html).not.toContain('c^2 $$');
+});
+
+test('单个单行 $$ 公式渲染为 block 而非裸 $ 剥壳的 inline', async () => {
+    const html = await renderMarkdown('$$\\alpha$$');
+    expect(html).toContain('class="math block"');
+    expect(html).toContain('\\alpha');
+    expect(html).not.toContain('class="math inline"');
+});
+
+test('行尾带尾随文本的 $$..$$ 按字面回落，不被 inline 剥壳成 $公式$', async () => {
+    const html = await renderMarkdown('$$\\alpha$$ 后续段落');
+    expect(html).not.toContain('class="math inline"');
+    expect(html).toContain('$$'); // 定界符字面保留（display 公式不支持同行尾随文本）
+});

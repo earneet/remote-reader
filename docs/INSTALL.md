@@ -341,7 +341,11 @@ bun --filter remote-reader-web db:migrate    # 应用（生产在停服/维护�
 | `MAX_UPLOAD_BYTES` | `5242880`（5MB） | 单文档大小上限 |
 | `BODY_SIZE_LIMIT` | adapter-node 默认 512K | **字节数（数字）**，网关层 body 上限，须 > `MAX_UPLOAD_BYTES` |
 | `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW_MS` | `60` / `60000` | 每 token 上传速率 |
-| `LOGIN_RATE_LIMIT_MAX` | `10` | 每邮箱登录尝试次数（同窗口） |
+| `LOGIN_RATE_LIMIT_MAX` | `10` | 每 (IP,邮箱) 精确桶登录尝试次数（同窗口） |
+| `LOGIN_IP_RATE_LIMIT_MAX` | `30` | 每 IP 聚合登录桶（防密码喷洒；反代部署须配 `ADDRESS_HEADER` 才按真实 IP 分桶） |
+| `REGISTER_RATE_LIMIT_MAX` | `5` | 每 IP 注册次数（同窗口） |
+| `AUTH_FAIL_RATE_LIMIT_MAX` | `30` | 上传 API 认证失败按 IP 限流（防无效 token 枚举） |
+| `ADDRESS_HEADER` / `XFF_DEPTH` | 空 / `1` | 反代部署必设 `x-forwarded-for`（详见 §6）；`XFF_DEPTH` 取 XFF 链倒数第 N 段 |
 | `SESSION_MAX_AGE` | `2592000`（30 天，秒） | session 有效期 |
 | `PORT` / `HOST` | `3000` / `0.0.0.0` | adapter-node 监听 |
 | `NODE_ENV` | — | 设 `production` 启用安全 cookie + 强制 SESSION_SECRET |

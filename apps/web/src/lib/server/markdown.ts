@@ -98,7 +98,8 @@ async function getMarkdown(): Promise<MarkdownIt> {
     });
     md.inline.ruler.before('escape', 'math_inline', (state: any, silent: boolean) => {
         if (state.src[state.pos] !== '$') return false;
-        if (state.src[state.pos - 1] === '\\') return false;
+        // 前一字符是 \（转义）或 $（$$ 序列的内侧——display 定界，行内规则不剥壳，按字面回落）
+        if (state.src[state.pos - 1] === '\\' || state.src[state.pos - 1] === '$') return false;
         const close = state.src.indexOf('$', state.pos + 1);
         if (close === -1 || close === state.pos + 1) return false;
         const content = state.src.slice(state.pos + 1, close);
@@ -120,6 +121,20 @@ async function getMarkdown(): Promise<MarkdownIt> {
             const start = state.bMarks[startLine] + state.tShift[startLine];
             if (start + 2 > state.eMarks[startLine]) return false;
             if (state.src.slice(start, start + 2) !== '$$') return false;
+            // 同行自闭合 `$$ ... $$`（KaTeX/pandoc 惯例单行 display 公式）：必须在跨行闭合扫描前
+            // 判定——否则相邻单行公式的行首 $$ 会被误当闭合定界（吞掉该公式、且公式体混入尾随 $$）
+            const selfClosed = state.src.slice(start + 2, state.eMarks[startLine]).match(/^\s*([\s\S]*?)\s*\$\$$/);
+            if (selfClosed && selfClosed[1].trim()) {
+                if (!silent) {
+                    const tok = state.push('math_block', 'div', 0);
+                    tok.block = true;
+                    tok.markup = '$$';
+                    tok.content = selfClosed[1].trim();
+                    tok.map = [startLine, startLine + 1];
+                    state.line = startLine + 1;
+                }
+                return true;
+            }
             let nextLine = startLine;
             let closed = false;
             while (nextLine < endLine) {

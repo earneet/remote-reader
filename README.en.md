@@ -10,7 +10,7 @@ Remote Reader is the "document delivery window" for agents — MCP on the write 
 
 - **Native MCP upload** —— The agent uploads by calling a single `upload_document` tool; the local bridge holds the API token and never exposes it to the agent
 - **Login-free one-step viewing** —— `/s/<token>` renders on click; readers need no account or sign-in
-- **Complete Markdown rendering** —— GFM tables, [Shiki](https://shiki.style) code highlighting (~15 languages), Mermaid flowcharts, KaTeX math (lazy-loaded on demand; zero downloads for plain text)
+- **Complete Markdown rendering** —— GFM tables, [Shiki](https://shiki.style) code highlighting (39 languages), Mermaid flowcharts, KaTeX math (lazy-loaded on demand; zero downloads for plain text)
 - **Idempotent uploads** —— Same path + same content never duplicates; on content update the **link stays the same** and auto-points to the latest version
 - **Management UI** —— File manager (directory tree / move / rename / delete), API token management (create / revoke / one-time reveal), share link revocation
 - **Multi-user isolation** —— Documents live in per-owner directory trees; SQLite foreign-key constraints enforce integrity
