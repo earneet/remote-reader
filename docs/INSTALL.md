@@ -198,6 +198,14 @@ sudo DATABASE_PATH=/var/lib/remote-reader/app.db \
 
 生产**必须 HTTPS**（session cookie 的 `secure` 标志依赖它）。前置 nginx / caddy。
 
+**⚠️ 反代必须配置 `ADDRESS_HEADER`（否则全部按 IP 限流失效为全站共享单桶）**：应用默认取 TCP 对端地址——反代后所有请求的对端都是 nginx/caddy（如 127.0.0.1），登录/注册/认证失败的按 IP 限流会退化为**全站共享一个桶**：任何人每分钟发 30 次失败登录即可让全站登录持续 429。在 env（方式一的 `/etc/remote-reader/env`、方式二的 `.env`）加：
+
+```bash
+ADDRESS_HEADER=x-forwarded-for
+# XFF_DEPTH 默认 1：取 X-Forwarded-For 链的最后一段 = 反代追加的真实客户端 IP（不可伪造）。
+# 配置后必须防火墙限制 3000 端口仅反代可达——直连请求无该头时应用会直接报错拒绝。
+```
+
 **nginx 示例**：
 
 ```nginx
@@ -218,7 +226,7 @@ server {
 }
 ```
 
-**caddy 示例**（自动 HTTPS）：
+**caddy 示例**（自动 HTTPS，`reverse_proxy` 默认同样在 X-Forwarded-For 末尾追加真实 IP）：
 
 ```
 your-domain {
