@@ -151,3 +151,15 @@ test('login 成功：设 session cookie 并 redirect 302', async () => {
     expect(r.status).toBe(302);
     expect(r.cookies._store['session']).toBeTruthy();
 });
+
+test('register 409（已注册邮箱）不再烧核销计数（P2-5）', async () => {
+    const first = await register({ email: 'dup@x.com', password: 'password1', invite_code: 'testinvite' });
+    expect(first.status).toBe(302);
+    const admin = db.select().from(schema.users).all()[0];
+    const { plaintext } = await createInviteCode(admin.id, 'once', 1);
+    const r = await register({ email: 'dup@x.com', password: 'password2', invite_code: plaintext });
+    expect(r.status).toBe(409);
+    const row = db.select().from(schema.inviteCodes).all().find((i) => i.note === 'once')!;
+    expect(row.usedCount).toBe(0);
+    expect(row.lastUsedAt).toBeNull();
+});

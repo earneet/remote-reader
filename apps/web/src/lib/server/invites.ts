@@ -61,19 +61,32 @@ export function revokeInvite(id: string): boolean {
     return result.changes > 0;
 }
 
-// 核销：哈希匹配 + 未撤销 + 未过期 → 同步事务内原子 used_count+1 / last_used_at。
+// 核销（事务内版本）：哈希匹配 + 未撤销 + 未过期 → 原子 used_count+1 / last_used_at。
 // better-sqlite3 同步执行，事务内不被事件循环中断（与首注册 admin 判定同一原子性理由）。
-export function redeemInviteCode(plaintext: string): boolean {
+// 供需要在更大事务里核销的调用方（注册：核销与建用户同事务，失败注册不烧计数）
+type InviteTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+export function redeemInviteCodeTx(tx: InviteTx, plaintext: string): boolean {
     const now = Date.now();
-    return db.transaction((tx) => {
-        const row = tx.select().from(schema.inviteCodes)
-            .where(eq(schema.inviteCodes.codeHash, hashToken(plaintext)))
-            .get();
-        if (!row || row.revokedAt !== null || row.expiresAt <= now) return false;
-        tx.update(schema.inviteCodes)
-            .set({ usedCount: row.usedCount + 1, lastUsedAt: now })
-            .where(eq(schema.inviteCodes.id, row.id))
-            .run();
-        return true;
-    });
+    const row = tx.select().from(schema.inviteCodes)
+        .where(eq(schema.inviteCodes.codeHash, hashToken(plaintext)))
+        .get();
+    if (!row || row.revokedAt !== null || row.expiresAt <= now) return false;
+    tx.update(schema.inviteCodes)
+        .set({ usedCount: row.usedCount + 1, lastUsedAt: now })
+        .where(eq(schema.inviteCodes.id, row.id))
+        .run();
+    return true;
+}
+
+export function redeemInviteCode(plaintext: string): boolean {
+    return db.transaction((tx) => redeemInviteCodeTx(tx, plaintext));
+}
+
+// 只验有效性不核销（注册流程的预检）：与 redeemInviteCodeTx 同一判定语义
+export function isInviteCodeValid(plaintext: string): boolean {
+    const row = db.select().from(schema.inviteCodes)
+        .where(eq(schema.inviteCodes.codeHash, hashToken(plaintext)))
+        .get();
+    return !!row && row.revokedAt === null && row.expiresAt > Date.now();
 }

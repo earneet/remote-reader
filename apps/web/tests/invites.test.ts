@@ -2,7 +2,7 @@ import { test, expect, beforeEach } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { db, schema, sqlite } from '../src/lib/server/db';
 import { generateId, hashPassword, hashToken } from '../src/lib/server/auth';
-import { listInvites, createInviteCode, revokeInvite, redeemInviteCode } from '../src/lib/server/invites';
+import { listInvites, createInviteCode, revokeInvite, redeemInviteCode, isInviteCodeValid } from '../src/lib/server/invites';
 
 let adminId: string;
 
@@ -80,5 +80,13 @@ test('redeemInviteCode 已撤销 → false 且不核销', async () => {
     const { id, plaintext } = await createInviteCode(adminId, 'a', 7);
     revokeInvite(id);
     expect(redeemInviteCode(plaintext)).toBe(false);
+    expect(db.select().from(schema.inviteCodes).all()[0].usedCount).toBe(0);
+});
+
+test('isInviteCodeValid 预检不核销（P2-5）', async () => {
+    const admin = db.select().from(schema.users).all()[0];
+    const { plaintext } = await createInviteCode(admin.id, 'peek', 1);
+    expect(isInviteCodeValid(plaintext)).toBe(true);
+    expect(isInviteCodeValid(plaintext)).toBe(true);
     expect(db.select().from(schema.inviteCodes).all()[0].usedCount).toBe(0);
 });
