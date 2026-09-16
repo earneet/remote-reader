@@ -7,7 +7,7 @@ import { generateId, sha256Hex } from './auth';
 import { writeFile, readFile, FileNotFoundError } from './storage';
 import { rewarmDocument, withDocLock } from './tiering';
 import { getObjectStore, objectKeyFor, ObjectNotFoundError, ArchiveUnavailableError } from './object-store';
-import { createShareLink } from './shares';
+import { createShareLink, activeShareOf } from './shares';
 import { getBaseUrl, getDataDir } from './env';
 import { indexDoc, unindexDocs } from './fts';
 import type { RecentSort, RecentDoc } from '../shared/recent';
@@ -194,12 +194,9 @@ function collectSubtreeFiles(ownerId: string, rootId: string): DocumentRow[] {
 }
 
 async function ensureShareUrl(documentId: string): Promise<string> {
-    const existing = db.select().from(schema.shareLinks)
-        .where(eq(schema.shareLinks.documentId, documentId))
-        .get();
-    if (existing) {
-        return `${getBaseUrl()}/s/${existing.token}`;
-    }
+    // 活跃过滤（spec 2026-09-16 §3.1）：过期链接不返回，走新建
+    const active = activeShareOf(documentId);
+    if (active) return `${getBaseUrl()}/s/${active.token}`;
     const { url } = await createShareLink(documentId);
     return url;
 }

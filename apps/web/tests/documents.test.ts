@@ -68,6 +68,13 @@ test('相同内容重复上传：id 不变、url 仍有效', async () => {
     expect(b.url).toMatch(/\/s\//);
 });
 
+test('同内容重传若唯一链接已过期 → 返回新链接（ensureShareUrl 过期过滤，spec 2026-09-16 §3.1）', async () => {
+    const r1 = await uploadDocument(ownerId, 'a.md', '# x', []);
+    db.update(schema.shareLinks).set({ expiresAt: Date.now() - 1000 }).run();
+    const r2 = await uploadDocument(ownerId, 'a.md', '# x', []);
+    expect(r2.url).not.toBe(r1.url);
+});
+
 test('相同内容重复上传不新建文档行（幂等）', async () => {
     await uploadDocument(ownerId, 'd.md', 'same', []);
     await uploadDocument(ownerId, 'd.md', 'same', []);
