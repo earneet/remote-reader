@@ -5,6 +5,9 @@
     import { formatRelative } from '$lib/shared/time';
     import { submitAction, actionErrorMessage } from '$lib/shared/form-action';
     import ActionSheet from '$components/ActionSheet.svelte';
+    import ActionMenu from '$components/ActionMenu.svelte';
+    import ShareDialog from '$components/ShareDialog.svelte';
+    import FileStateIcon from '$components/FileStateIcon.svelte';
     import InlineNameForm from '$components/InlineNameForm.svelte';
     import InlineTagForm from '$components/InlineTagForm.svelte';
     import RowActions from '$components/RowActions.svelte';
@@ -15,6 +18,7 @@
         folderById,
         scrollRoot,
         movingId,
+        isMobile,
         onStartMove,
         onCancelMove
     }: {
@@ -23,6 +27,7 @@
         folderById: Map<string, TreeFolder>;
         scrollRoot: HTMLElement | null;
         movingId: string | null;
+        isMobile: boolean;
         onStartMove: (id: string) => void;
         onCancelMove: () => void;
     } = $props();
@@ -42,7 +47,10 @@
     let tagInput = $state('');
     let sentinel = $state<HTMLElement | null>(null);
     let sheet = $state<ActionSheet | null>(null);
-    let sheetId = $state<string | null>(null);
+    let actionMenu = $state<ActionMenu | null>(null);
+    let shareDialog = $state<ShareDialog | null>(null);
+    // 菜单上下文（移动 sheet 与桌面下拉共用）：构造条件菜单项（转私有仅 shared 时出）
+    let menuCtx = $state<RecentDoc | null>(null);
     // P2-10：失败反馈 + 防重复提交（fetch 版与目录视图 enhance 版同语义）
     let renameError = $state<string | null>(null);
     let tagError = $state<string | null>(null);
@@ -106,20 +114,72 @@
         renameError = null;
     }
 
-    function openSheet(id: string): void {
-        sheetId = id;
-        sheet?.show();
+    // 菜单项构造（spec 2026-09-16 §5.6，两端同构；与目录视图同逻辑）
+    function rowActions(item: RecentDoc): { key: string; label: string; danger?: boolean }[] {
+        return [
+            { key: 'rename', label: '重命名' },
+            ...(item.type === 'file' ? [{ key: 'tags', label: '编辑标签' }] : []),
+            { key: 'move', label: '移动到…' },
+            ...(item.type === 'file' ? [
+                { key: 'share', label: '复制分享链接' },
+                ...(item.shared ? [{ key: 'unshare', label: '转为私有', danger: true }] : [])
+            ] : []),
+            { key: 'delete', label: '删除', danger: true }
+        ];
     }
 
-    function onSheetAction(key: string): void {
-        const id = sheetId;
+    // ⋯ 入口路由：移动端底部 sheet，桌面锚定下拉
+    function openRowMenu(anchor: HTMLElement, item: RecentDoc): void {
+        menuCtx = item;
+        if (isMobile) sheet?.show();
+        else actionMenu?.toggle(anchor);
+    }
+
+    function onRowAction(key: string): void {
+        const id = menuCtx?.id;
         const item = rows.find((x) => x.id === id);
-        sheetId = null;
+        menuCtx = null;
         if (!item) return;
         if (key === 'rename') startRename(item);
         else if (key === 'tags') { taggingId = item.id; tagInput = item.tags.map((t) => t.name).join(', '); tagError = null; }
         else if (key === 'move') onStartMove(item.id);
+        else if (key === 'share') void doShare(item);
+        else if (key === 'unshare') void doUnshare(item);
         else if (key === 'delete') void doDelete(item);
+    }
+
+    // 复制分享链接（get-or-create）：成功后刷新（私有→共享图标翻转）再弹浮层
+    async function doShare(item: RecentDoc): Promise<void> {
+        busyId = item.id;
+        try {
+            const r = await fetch(`/api/share/${encodeURIComponent(item.id)}`, { method: 'POST' });
+            if (!r.ok) throw new Error(String(r.status));
+            const data = await r.json() as { url: string };
+            await invalidateAll();
+            await reSync();
+            shareDialog?.show(data.url);
+        } catch {
+            deleteError = '获取分享链接失败，请重试';
+        } finally {
+            busyId = null;
+        }
+    }
+
+    // 转为私有：撤销该文档全部分享链接（404=文档已不在也算完成，幂等）
+    async function doUnshare(item: RecentDoc): Promise<void> {
+        if (!confirm('转为私有后，该文档的所有分享链接立即失效（已发出的链接将无法再打开），且不可恢复。继续？')) return;
+        busyId = item.id;
+        try {
+            const r = await fetch(`/api/share/${encodeURIComponent(item.id)}`, { method: 'DELETE' });
+            if (!r.ok && r.status !== 404) throw new Error(String(r.status));
+            deleteError = null;
+            await invalidateAll();
+            await reSync();
+        } catch {
+            deleteError = '转为私有失败，请重试';
+        } finally {
+            busyId = null;
+        }
     }
 
     async function doRename(id: string, name: string): Promise<void> {
@@ -196,7 +256,7 @@
                     />
                 {:else}
                     <span class="name">
-                        <a href="/d/{item.id}">📄 {item.name}</a>
+                        <a href="/d/{item.id}"><FileStateIcon type={item.type} shared={item.shared} /> {item.name}</a>
                         {#if item.storageTier === 'cold'}<span class="chip-static cold-chip">☁️ 已归档</span>{/if}
                         {#if item.sizeBytes != null}<span class="size">{item.sizeBytes} B</span>{/if}
                     </span>
@@ -220,19 +280,12 @@
                                 onSave={(tags) => void doSetTags(item.id, tags)}
                                 onCancel={() => (taggingId = null)}
                             />
-                        {:else}
-                            <button class="icon-btn desktop-only" title="编辑标签"
-                                onclick={() => { taggingId = item.id; tagInput = item.tags.map((t) => t.name).join(', '); }}>🏷</button>
                         {/if}
                     </span>
                     <RowActions
                         moving={movingId === item.id}
-                        busy={busyId === item.id}
-                        onMore={() => openSheet(item.id)}
-                        onRename={() => startRename(item)}
-                        onMove={() => onStartMove(item.id)}
+                        onMore={(btn) => openRowMenu(btn, item)}
                         onCancelMove={onCancelMove}
-                        onDelete={() => void doDelete(item)}
                     />
                 {/if}
             </li>
@@ -253,14 +306,16 @@
 <ActionSheet
     bind:this={sheet}
     label="文档操作"
-    actions={[
-        { key: 'rename', label: '重命名' },
-        { key: 'tags', label: '编辑标签' },
-        { key: 'move', label: '移动到…' },
-        { key: 'delete', label: '删除', danger: true }
-    ]}
-    onSelect={onSheetAction}
+    actions={menuCtx ? rowActions(menuCtx) : []}
+    onSelect={onRowAction}
 />
+<ActionMenu
+    bind:this={actionMenu}
+    label="文档操作"
+    actions={menuCtx ? rowActions(menuCtx) : []}
+    onSelect={onRowAction}
+/>
+<ShareDialog bind:this={shareDialog} />
 
 <style>
     .empty { padding: 2rem 0; }

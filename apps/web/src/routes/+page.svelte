@@ -2,6 +2,9 @@
     import FolderTree from '$components/FolderTree.svelte';
     import RecentList from '$components/RecentList.svelte';
     import ActionSheet from '$components/ActionSheet.svelte';
+    import ActionMenu from '$components/ActionMenu.svelte';
+    import ShareDialog from '$components/ShareDialog.svelte';
+    import FileStateIcon from '$components/FileStateIcon.svelte';
     import InlineNameForm from '$components/InlineNameForm.svelte';
     import InlineTagForm from '$components/InlineTagForm.svelte';
     import RowActions from '$components/RowActions.svelte';
@@ -22,7 +25,10 @@
     let recentRef = $state<{ reSync: () => Promise<void> } | null>(null);
     let showCreate = $state(false);
     let sheet = $state<ActionSheet | null>(null);
-    let sheetItem = $state<{ id: string; type: string } | null>(null);
+    let actionMenu = $state<ActionMenu | null>(null);
+    let shareDialog = $state<ShareDialog | null>(null);
+    // 菜单上下文（移动 sheet 与桌面下拉共用）：构造条件菜单项（转私有仅 shared 时出）
+    let menuCtx = $state<{ id: string; type: string; shared: boolean } | null>(null);
     let drawerOpen = $state(false);
     let drawerRef = $state<HTMLDialogElement | null>(null);
     let menuBtn = $state<HTMLButtonElement | null>(null);
@@ -160,19 +166,71 @@
         else tagError = actionErrorMessage(status);
     }
 
-    function openSheet(id: string, type: string): void {
-        sheetItem = { id, type };
-        sheet?.show();
+    // 菜单项构造（spec 2026-09-16 §5.6，两端同构）：file 多出 标签/分享/转私有（仅 shared 时）
+    function rowActions(item: { type: string; shared: boolean }): { key: string; label: string; danger?: boolean }[] {
+        return [
+            { key: 'rename', label: '重命名' },
+            ...(item.type === 'file' ? [{ key: 'tags', label: '编辑标签' }] : []),
+            { key: 'move', label: '移动到…' },
+            ...(item.type === 'file' ? [
+                { key: 'share', label: '复制分享链接' },
+                ...(item.shared ? [{ key: 'unshare', label: '转为私有', danger: true }] : [])
+            ] : []),
+            { key: 'delete', label: '删除', danger: true }
+        ];
     }
 
-    function onSheetAction(key: string): void {
-        const it = sheetItem;
+    // ⋯ 入口路由：移动端底部 sheet，桌面锚定下拉
+    function openRowMenu(anchor: HTMLElement, id: string, type: string, shared: boolean): void {
+        menuCtx = { id, type, shared };
+        if (isMobile) sheet?.show();
+        else actionMenu?.toggle(anchor);
+    }
+
+    function onRowAction(key: string): void {
+        const it = menuCtx;
         if (!it) return;
-        sheetItem = null;
+        menuCtx = null;
         if (key === 'rename') startRename(it.id);
         else if (key === 'tags') { taggingId = it.id; tagInput = ''; tagError = null; }
         else if (key === 'move') startMove(it.id);
+        else if (key === 'share') void doShare(it.id);
+        else if (key === 'unshare') void doUnshare(it.id);
         else if (key === 'delete') void doDelete(it.id, it.type);
+    }
+
+    // 复制分享链接（get-or-create）：成功后刷新（私有→共享图标翻转）再弹浮层
+    async function doShare(id: string): Promise<void> {
+        busyId = id;
+        try {
+            const r = await fetch(`/api/share/${encodeURIComponent(id)}`, { method: 'POST' });
+            if (!r.ok) throw new Error(String(r.status));
+            const data = await r.json() as { url: string };
+            await invalidateAll();
+            await recentRef?.reSync();
+            shareDialog?.show(data.url);
+        } catch {
+            actionError = '获取分享链接失败，请重试';
+        } finally {
+            busyId = null;
+        }
+    }
+
+    // 转为私有：撤销该文档全部分享链接（404=文档已不在也算完成，幂等）
+    async function doUnshare(id: string): Promise<void> {
+        if (!confirm('转为私有后，该文档的所有分享链接立即失效（已发出的链接将无法再打开），且不可恢复。继续？')) return;
+        busyId = id;
+        try {
+            const r = await fetch(`/api/share/${encodeURIComponent(id)}`, { method: 'DELETE' });
+            if (!r.ok && r.status !== 404) throw new Error(String(r.status));
+            actionError = null;
+            await invalidateAll();
+            await recentRef?.reSync();
+        } catch {
+            actionError = '转为私有失败，请重试';
+        } finally {
+            busyId = null;
+        }
     }
 
     // 移动端 ⋯ 菜单与桌面行内删除的统一入口：确认后 fetch 直调 form action
@@ -235,6 +293,21 @@
                 {/if}
             </div>
             <div class="fm-title">
+                {#if view === 'dir'}
+                    <!-- 页签恒末位（spec 2026-09-16 §5.8）：新建入口在页签左侧，三视图页签位置一致；
+                         action 必须编入 dir：WHATWG 相对解析 "?/createFolder" 会替换整个 query，
+                         子目录下丢 dir 参数会把文件夹建到根目录（F1） -->
+                    <form class="create-folder desktop-only" method="POST"
+                        action={currentDir ? `?dir=${encodeURIComponent(currentDir)}&/createFolder` : '?/createFolder'}
+                        use:enhance={() => async ({ formElement, result }) => {
+                            if (result.type === 'success') { createError = null; formElement.reset(); await invalidateAll(); }
+                            else if (result.type === 'failure') createError = failureMessage(result);
+                        }}>
+                        <input name="name" placeholder="新文件夹名" required>
+                        <button class="btn primary" type="submit">+ 新建文件夹</button>
+                    </form>
+                    <button type="button" class="btn sm mobile-only" onclick={() => (showCreate = !showCreate)}>＋ 文件夹</button>
+                {/if}
                 <div class="segmented" role="group" aria-label="视图切换">
                     <button type="button" class="seg-btn" class:active={view === 'dir'}
                         aria-pressed={view === 'dir'} onclick={() => switchView('/')}>目录内容</button>
@@ -243,23 +316,7 @@
                     <button type="button" class="seg-btn" class:active={view === 'viewed'}
                         aria-pressed={view === 'viewed'} onclick={() => switchView('/?view=viewed')}>最近浏览</button>
                 </div>
-                {#if view === 'dir'}
-                    <button type="button" class="btn sm mobile-only" onclick={() => (showCreate = !showCreate)}>＋ 文件夹</button>
-                {/if}
             </div>
-            {#if view === 'dir'}
-                <!-- action 必须编入 dir：WHATWG 相对解析 "?/createFolder" 会替换整个 query，
-                     子目录下丢 dir 参数会把文件夹建到根目录（F1） -->
-                <form class="create-folder desktop-only" method="POST"
-                    action={currentDir ? `?dir=${encodeURIComponent(currentDir)}&/createFolder` : '?/createFolder'}
-                    use:enhance={() => async ({ formElement, result }) => {
-                        if (result.type === 'success') { createError = null; formElement.reset(); await invalidateAll(); }
-                        else if (result.type === 'failure') createError = failureMessage(result);
-                    }}>
-                    <input name="name" placeholder="新文件夹名" required>
-                    <button class="btn primary" type="submit">+ 新建文件夹</button>
-                </form>
-            {/if}
             {#if createError && view === 'dir'}<p class="error create-error">{createError}</p>{/if}
             {#if showCreate && view === 'dir'}
                 <form class="create-folder mobile-only" method="POST"
@@ -283,6 +340,7 @@
         {#if view === 'recent'}
             <RecentList
                 bind:this={recentRef}
+                isMobile={isMobile}
                 initialRows={data.recent}
                 sort="updated"
                 folderById={folderById}
@@ -294,6 +352,7 @@
         {:else if view === 'viewed'}
             <RecentList
                 bind:this={recentRef}
+                isMobile={isMobile}
                 initialRows={data.viewed}
                 sort="viewed"
                 folderById={folderById}
@@ -320,9 +379,9 @@
                             {:else}
                                 <span class="name">
                                     {#if item.type === 'folder'}
-                                        <a href="/?dir={item.id}">📁 {item.name}</a>
+                                        <a href="/?dir={item.id}"><FileStateIcon type="folder" /> {item.name}</a>
                                     {:else}
-                                        <a href="/d/{item.id}">📄 {item.name}</a>
+                                        <a href="/d/{item.id}"><FileStateIcon type="file" shared={item.shared} /> {item.name}</a>
                                         {#if item.storageTier === 'cold'}<span class="chip-static cold-chip">☁️ 已归档</span>{/if}
                                     {/if}
                                     {#if item.type !== 'folder' && item.sizeBytes != null}
@@ -342,19 +401,13 @@
                                                 onSave={(tags) => void doSetTags(item.id, tags)}
                                                 onCancel={() => (taggingId = null)}
                                             />
-                                        {:else}
-                                            <button class="icon-btn desktop-only" title="编辑标签" onclick={() => { taggingId = item.id; tagInput = ''; }}>🏷</button>
                                         {/if}
                                     </span>
                                 {/if}
                                 <RowActions
                                     moving={movingId === item.id}
-                                    busy={busyId === item.id}
-                                    onMore={() => openSheet(item.id, item.type)}
-                                    onRename={() => startRename(item.id)}
-                                    onMove={() => startMove(item.id)}
+                                    onMore={(btn) => openRowMenu(btn, item.id, item.type, item.shared)}
                                     onCancelMove={() => (movingId = null)}
-                                    onDelete={() => void doDelete(item.id, item.type)}
                                 />
                             {/if}
                         </li>
@@ -368,16 +421,19 @@
 <ActionSheet
     bind:this={sheet}
     label="文档操作"
-    actions={[
-        { key: 'rename', label: '重命名' },
-        ...(sheetItem?.type === 'file' ? [{ key: 'tags', label: '编辑标签' }] : []),
-        { key: 'move', label: '移动到…' },
-        { key: 'delete', label: '删除', danger: true }
-    ]}
-    onSelect={onSheetAction}
+    actions={menuCtx ? rowActions(menuCtx) : []}
+    onSelect={onRowAction}
 />
+<ActionMenu
+    bind:this={actionMenu}
+    label="文档操作"
+    actions={menuCtx ? rowActions(menuCtx) : []}
+    onSelect={onRowAction}
+/>
+<ShareDialog bind:this={shareDialog} />
 
-<dialog class="drawer" bind:this={drawerRef} onclose={onDrawerClose} aria-label="目录导航">
+<dialog class="drawer" bind:this={drawerRef} onclose={onDrawerClose} aria-label="目录导航"
+    onclick={(e) => { if (e.target === drawerRef) void closeDrawer(); }}>
     {#if movingId !== null}
         <p class="hint">选择移动目标，或<button class="link" onclick={() => (movingId = null)}>取消</button></p>
         {#if moveError}<p class="error">{moveError}</p>{/if}

@@ -61,6 +61,7 @@
     aria-label={label}
     bind:this={dialog}
     onclose={onDialogClose}
+    onclick={(e) => { if (e.target === dialog) hide(); }}
 >
     <ul class="sheet-list">
         {#each actions as a (a.key)}
