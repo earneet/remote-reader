@@ -12,6 +12,8 @@
     import { lockBodyScroll, unlockBodyScroll } from '$lib/shared/body-scroll';
     import { createOverlayHistory } from '$lib/shared/overlay-history';
     import { submitAction, actionErrorMessage } from '$lib/shared/form-action';
+    import { rowActions } from '$lib/shared/row-menu';
+    import { fetchShareUrl, revokeDocShares } from '$lib/shared/share-api';
     import { enhance } from '$app/forms';
     import { goto, invalidateAll } from '$app/navigation';
     let { data } = $props();
@@ -166,20 +168,7 @@
         else tagError = actionErrorMessage(status);
     }
 
-    // 菜单项构造（spec 2026-09-16 §5.6，两端同构）：file 多出 标签/分享/转私有（仅 shared 时）
-    function rowActions(item: { type: string; shared: boolean }): { key: string; label: string; danger?: boolean }[] {
-        return [
-            { key: 'rename', label: '重命名' },
-            ...(item.type === 'file' ? [{ key: 'tags', label: '编辑标签' }] : []),
-            { key: 'move', label: '移动到…' },
-            ...(item.type === 'file' ? [
-                { key: 'share', label: '复制分享链接' },
-                ...(item.shared ? [{ key: 'unshare', label: '转为私有', danger: true }] : [])
-            ] : []),
-            { key: 'delete', label: '删除', danger: true }
-        ];
-    }
-
+    // 菜单项来自 lib/shared/row-menu 单源（评审跟进：与 RecentList 收敛，防两份漂移）
     // ⋯ 入口路由：移动端底部 sheet，桌面锚定下拉
     function openRowMenu(anchor: HTMLElement, id: string, type: string, shared: boolean): void {
         menuCtx = { id, type, shared };
@@ -203,12 +192,11 @@
     async function doShare(id: string): Promise<void> {
         busyId = id;
         try {
-            const r = await fetch(`/api/share/${encodeURIComponent(id)}`, { method: 'POST' });
-            if (!r.ok) throw new Error(String(r.status));
-            const data = await r.json() as { url: string };
+            const url = await fetchShareUrl(id);
+            if (!url) throw new Error('share failed');
             await invalidateAll();
             await recentRef?.reSync();
-            shareDialog?.show(data.url);
+            shareDialog?.show(url);
         } catch {
             actionError = '获取分享链接失败，请重试';
         } finally {
@@ -221,8 +209,7 @@
         if (!confirm('转为私有后，该文档的所有分享链接立即失效（已发出的链接将无法再打开），且不可恢复。继续？')) return;
         busyId = id;
         try {
-            const r = await fetch(`/api/share/${encodeURIComponent(id)}`, { method: 'DELETE' });
-            if (!r.ok && r.status !== 404) throw new Error(String(r.status));
+            if (!(await revokeDocShares(id))) throw new Error('unshare failed');
             actionError = null;
             await invalidateAll();
             await recentRef?.reSync();

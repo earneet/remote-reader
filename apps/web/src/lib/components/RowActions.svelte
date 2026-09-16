@@ -18,7 +18,7 @@
         <span class="hint desktop-only">← 左树选目标</span>
         <button type="button" class="btn sm desktop-only" onclick={onCancelMove}>取消</button>
     {/if}
-    <button type="button" class="icon-btn more-btn" aria-label="更多操作" aria-haspopup="menu"
+    <button type="button" class="icon-btn more-btn" aria-label="更多操作"
         onclick={(e) => onMore(e.currentTarget)}>
         <svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M8 9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3ZM1.5 9a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Zm13 0a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3Z"></path></svg>
     </button>

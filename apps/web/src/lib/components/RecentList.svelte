@@ -4,6 +4,8 @@
     import { folderNamesOf, type TreeFolder } from '$lib/shared/folder-tree';
     import { formatRelative } from '$lib/shared/time';
     import { submitAction, actionErrorMessage } from '$lib/shared/form-action';
+    import { rowActions } from '$lib/shared/row-menu';
+    import { fetchShareUrl, revokeDocShares } from '$lib/shared/share-api';
     import ActionSheet from '$components/ActionSheet.svelte';
     import ActionMenu from '$components/ActionMenu.svelte';
     import ShareDialog from '$components/ShareDialog.svelte';
@@ -54,7 +56,7 @@
     // P2-10：失败反馈 + 防重复提交（fetch 版与目录视图 enhance 版同语义）
     let renameError = $state<string | null>(null);
     let tagError = $state<string | null>(null);
-    let deleteError = $state<string | null>(null);
+    let actionError = $state<string | null>(null);
     let busyId = $state<string | null>(null);
 
     const pathOf = (item: RecentDoc): string => folderNamesOf(folderById, item.parentId).join(' / ');
@@ -114,20 +116,7 @@
         renameError = null;
     }
 
-    // 菜单项构造（spec 2026-09-16 §5.6，两端同构；与目录视图同逻辑）
-    function rowActions(item: RecentDoc): { key: string; label: string; danger?: boolean }[] {
-        return [
-            { key: 'rename', label: '重命名' },
-            ...(item.type === 'file' ? [{ key: 'tags', label: '编辑标签' }] : []),
-            { key: 'move', label: '移动到…' },
-            ...(item.type === 'file' ? [
-                { key: 'share', label: '复制分享链接' },
-                ...(item.shared ? [{ key: 'unshare', label: '转为私有', danger: true }] : [])
-            ] : []),
-            { key: 'delete', label: '删除', danger: true }
-        ];
-    }
-
+    // 菜单项来自 lib/shared/row-menu 单源（评审跟进：与目录视图收敛，防两份漂移）
     // ⋯ 入口路由：移动端底部 sheet，桌面锚定下拉
     function openRowMenu(anchor: HTMLElement, item: RecentDoc): void {
         menuCtx = item;
@@ -152,14 +141,13 @@
     async function doShare(item: RecentDoc): Promise<void> {
         busyId = item.id;
         try {
-            const r = await fetch(`/api/share/${encodeURIComponent(item.id)}`, { method: 'POST' });
-            if (!r.ok) throw new Error(String(r.status));
-            const data = await r.json() as { url: string };
+            const url = await fetchShareUrl(item.id);
+            if (!url) throw new Error('share failed');
             await invalidateAll();
             await reSync();
-            shareDialog?.show(data.url);
+            shareDialog?.show(url);
         } catch {
-            deleteError = '获取分享链接失败，请重试';
+            actionError = '获取分享链接失败，请重试';
         } finally {
             busyId = null;
         }
@@ -170,13 +158,12 @@
         if (!confirm('转为私有后，该文档的所有分享链接立即失效（已发出的链接将无法再打开），且不可恢复。继续？')) return;
         busyId = item.id;
         try {
-            const r = await fetch(`/api/share/${encodeURIComponent(item.id)}`, { method: 'DELETE' });
-            if (!r.ok && r.status !== 404) throw new Error(String(r.status));
-            deleteError = null;
+            if (!(await revokeDocShares(item.id))) throw new Error('unshare failed');
+            actionError = null;
             await invalidateAll();
             await reSync();
         } catch {
-            deleteError = '转为私有失败，请重试';
+            actionError = '转为私有失败，请重试';
         } finally {
             busyId = null;
         }
@@ -216,12 +203,12 @@
         const status = await submitAction('delete', { id: item.id });
         busyId = null;
         if (status === 200 || status === 404) {
-            deleteError = null;
+            actionError = null;
             rows = rows.filter((x) => x.id !== item.id); // 乐观移除：reSync 失败也不残留已删行（终审跟进）
             await invalidateAll(); // 刷左树计数（rows 本地态不被重置，零代价——Task 6 审查跟进）
             await reSync();
         } else {
-            deleteError = actionErrorMessage(status);
+            actionError = actionErrorMessage(status);
         }
     }
 
@@ -298,8 +285,8 @@
     {#if loadError}
         <p class="error">加载失败 <button class="link" onclick={() => void loadMore()}>点击重试</button></p>
     {/if}
-    {#if deleteError}
-        <p class="error">{deleteError} <button class="link" onclick={() => (deleteError = null)}>关闭</button></p>
+    {#if actionError}
+        <p class="error">{actionError} <button class="link" onclick={() => (actionError = null)}>关闭</button></p>
     {/if}
 {/if}
 
