@@ -18,7 +18,7 @@ type DocumentRow = typeof schema.documents.$inferSelect;
 // storagePath/contentHash 等服务器内部实现不进载荷（P2-7）
 export type DocDTO = Omit<RecentDoc, 'tags'>;
 
-export function toDocDTO(r: DocumentRow): DocDTO {
+export function toDocDTO(r: DocumentRow, shared = false): DocDTO {
     return {
         id: r.id,
         parentId: r.parentId,
@@ -28,7 +28,8 @@ export function toDocDTO(r: DocumentRow): DocDTO {
         createdAt: r.createdAt,
         updatedAt: r.updatedAt,
         ownerViewedAt: r.ownerViewedAt,
-        storageTier: r.storageTier
+        storageTier: r.storageTier,
+        shared
     };
 }
 

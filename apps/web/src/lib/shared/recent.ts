@@ -15,5 +15,7 @@ export type RecentDoc = {
     updatedAt: number;
     ownerViewedAt: number | null;
     storageTier: 'hot' | 'cold';
+    /** 是否存在活跃分享链接（spec 2026-09-16 §3.2）；folder 恒 false，由 load/api 批量派生填充 */
+    shared: boolean;
     tags: { id: string; name: string }[];
 };

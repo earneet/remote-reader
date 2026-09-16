@@ -5,6 +5,7 @@ import { db, schema, sqlite } from '../src/lib/server/db';
 import { generateId } from '../src/lib/server/auth';
 import { uploadDocument } from '../src/lib/server/documents';
 import { setDocTags } from '../src/lib/server/tags';
+import { revokeAllShares } from '../src/lib/server/shares';
 
 import { resetDb } from './helpers';
 const { GET } = await import('../src/routes/api/recent/+server');
@@ -150,4 +151,14 @@ test('缺省 sort 默认 updated（回归锁）', async () => {
     const r = await call(ownerId);
     const body = await r.json() as { items: { name: string }[] };
     expect(body.items.map((i) => i.name)).toEqual(['b.md', 'a.md']);
+});
+
+test('shared 派生：有活跃链接 true，撤销后 false（spec 2026-09-16 §3.2）', async () => {
+    await uploadDocument(ownerId, 'a.md', 'x', []);
+    const b = await uploadDocument(ownerId, 'b.md', 'y', []);
+    revokeAllShares(ownerId, b.id);
+    const r = await call(ownerId);
+    const body = await r.json() as { items: { name: string; shared: boolean }[] };
+    expect(body.items.find((i) => i.name === 'a.md')!.shared).toBe(true);
+    expect(body.items.find((i) => i.name === 'b.md')!.shared).toBe(false);
 });

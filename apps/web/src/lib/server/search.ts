@@ -139,7 +139,7 @@ export function searchDocuments(ownerId: string, query: string, tagNames: string
 
     return docs.map(doc => ({
         doc: toDocDTO(doc),
-        path: getDocPath(ownerId, doc.id).map(toDocDTO),
+        path: getDocPath(ownerId, doc.id).map((r) => toDocDTO(r)),
         tags: listTagsForDoc(doc.id, ownerId),
         snippet: snippetById.get(doc.id) ?? ''
     })).slice(0, SEARCH_LIMIT);

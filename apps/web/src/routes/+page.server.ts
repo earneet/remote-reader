@@ -4,6 +4,7 @@ import {
     createFolder, deleteNode, listChildren, listFolders, folderChildCounts,
     moveNode, recentFiles, renameNode, toDocDTO
 } from '$server/documents';
+import { sharedDocIds } from '$server/shares';
 import { listTags, listTagsForDocs, setDocTags, SetTagsError } from '$server/tags';
 import { parsePath } from '@remote-reader/shared/paths';
 import { RECENT_PAGE_SIZE } from '$lib/shared/recent';
@@ -22,13 +23,14 @@ export const load: PageServerLoad = async ({ locals, url }) => {
         : rawView === 'viewed' ? 'viewed' as const
         : 'dir' as const;
     // 公共数据：左树（folders/计数）+ 标签编辑（allTags）所有视图都要（spec §6.1）
-    const folders = listFolders(locals.user.id).map(toDocDTO);
+    const folders = listFolders(locals.user.id).map((r) => toDocDTO(r));
     const folderCounts = folderChildCounts(locals.user.id);
     const allTags = listTags(locals.user.id);
     if (view === 'recent' || view === 'viewed') {
         const rows = recentFiles(locals.user.id, view === 'viewed' ? 'viewed' : 'updated', null, RECENT_PAGE_SIZE);
         const tagsByDoc = listTagsForDocs(rows.map((r) => r.id), locals.user.id);
-        const list = rows.map((r) => ({ ...toDocDTO(r), tags: tagsByDoc.get(r.id) ?? [] }));
+        const sharedIds = sharedDocIds(locals.user.id, rows.filter((r) => r.type === 'file').map((r) => r.id));
+        const list = rows.map((r) => ({ ...toDocDTO(r, sharedIds.has(r.id)), tags: tagsByDoc.get(r.id) ?? [] }));
         return {
             view, children: [], folders, currentDir: null, tagsByDoc, allTags, folderCounts,
             recent: view === 'recent' ? list : [],
@@ -37,9 +39,11 @@ export const load: PageServerLoad = async ({ locals, url }) => {
     }
     const dir = url.searchParams.get('dir');
     const parentId = dir && dir.length > 0 ? dir : null;
-    const children = listChildren(locals.user.id, parentId).map(toDocDTO);
-    const fileIds = children.filter((c) => c.type === 'file').map((c) => c.id);
+    const rows = listChildren(locals.user.id, parentId);
+    const fileIds = rows.filter((r) => r.type === 'file').map((r) => r.id);
     const tagsByDoc = listTagsForDocs(fileIds, locals.user.id);
+    const sharedIds = sharedDocIds(locals.user.id, fileIds);
+    const children = rows.map((r) => toDocDTO(r, sharedIds.has(r.id)));
     return { view, children, folders, currentDir: parentId, tagsByDoc, allTags, folderCounts, recent: [], viewed: [] };
 };
 

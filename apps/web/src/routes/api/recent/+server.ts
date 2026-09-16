@@ -1,6 +1,7 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { recentFiles, toDocDTO } from '$server/documents';
+import { sharedDocIds } from '$server/shares';
 import { listTagsForDocs } from '$server/tags';
 import { RECENT_PAGE_SIZE, type RecentSort } from '$lib/shared/recent';
 
@@ -35,5 +36,6 @@ export const GET: RequestHandler = async ({ locals, url }) => {
 
     const rows = recentFiles(locals.user.id, sort, cursor, limit);
     const tagsByDoc = listTagsForDocs(rows.map((r) => r.id), locals.user.id);
-    return json({ items: rows.map((r) => ({ ...toDocDTO(r), tags: tagsByDoc.get(r.id) ?? [] })) });
+    const sharedIds = sharedDocIds(locals.user.id, rows.filter((r) => r.type === 'file').map((r) => r.id));
+    return json({ items: rows.map((r) => ({ ...toDocDTO(r, sharedIds.has(r.id)), tags: tagsByDoc.get(r.id) ?? [] })) });
 };
