@@ -12,7 +12,7 @@ Remote Reader is the "document delivery window" for agents — MCP on the write 
 - **Login-free one-step viewing** —— `/s/<token>` renders on click; readers need no account or sign-in
 - **Complete Markdown rendering** —— GFM tables, [Shiki](https://shiki.style) code highlighting (39 languages), Mermaid flowcharts, KaTeX math (lazy-loaded on demand; zero downloads for plain text)
 - **Idempotent uploads** —— Same path + same content never duplicates; on content update the **link stays the same** and auto-points to the latest version
-- **Management UI** —— File manager (directory tree / move / rename / delete), API token management (create / revoke / one-time reveal), share link revocation
+- **Management UI** —— File manager (directory tree / move / rename / delete; private/shared state icons, copy share link, make private), API token management (create / revoke / one-time reveal), share link revocation
 - **Multi-user isolation** —— Documents live in per-owner directory trees; SQLite foreign-key constraints enforce integrity
 - **Secure by default** —— argon2id password hashing, HMAC sessions + constant-time comparison + expiry check, path-traversal protection, `html:false` for XSS defense, API tokens stored only as sha256 hashes
 - **Production-ready** —— Multi-stage Docker image, non-root runtime, HEALTHCHECK, one-command Docker Compose deployment

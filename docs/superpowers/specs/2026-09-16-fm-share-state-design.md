@@ -175,3 +175,13 @@ drawer dialog `click` 事件 `e.target === drawerRef` → `closeDrawer()`（既�
 - 仓库无已提交 Playwright 套件（历史验收均为会话内进行），本次沿用惯例，未新增套件文件
 - 顶栏设置菜单与 ActionMenu 同用 `.menu` class——自动化选择器需 `div.menu[role="group"]` 区分（ActionMenu 恒带 role）
 - ActionSheet 上滑动画 180ms 内测量/截图会得到中间态（QA 脚本须等 ≥300ms 再断言），非缺陷
+
+### 审查跟进（2026-09-16 上线后 5 线审查闭环）
+
+代码质量线 1 条 MAJOR（rowActions/doShare/doUnshare 双份维护、错误通道已分叉）与上下文线 1 条 IMPORTANT（USER_GUIDE 未同步）均已修复：
+
+- `rowActions` 提取 `lib/shared/row-menu.ts` 单源（+5 条单测锁定 6/5/3 项与 danger 标记）；分享 fetch 提取 `lib/shared/share-api.ts`（DELETE 404=完成 的状态语义单源）；RecentList `deleteError` 更名 `actionError` 与目录视图统一
+- `aria-haspopup="menu"` 移除——菜单实为 role="group" 按钮组（无方向键导航），保持 ARIA 诚实；升级完整 ARIA menu 模式（menuitem + 方向键）属后续可选
+- USER_GUIDE/README（中英）补 FM 分享操作说明；settings/shares 空态文案、theme.css 陈旧注释顺修
+- 安全线复核维持 §4 姿态（POST 理论 CSRF 需 122-bit 随机 doc id 且响应跨源不可读、无外泄路径，与 /api/view 同级；未加 Origin 校验，留作整体加固项）
+- 验证：浏览器冒烟 7/7（提取后行为不变——菜单 6/5/3、分享浮层 URL、转私有翻转、旧链接 404、移动端同构）；测试 458→463；svelte-check 0 错

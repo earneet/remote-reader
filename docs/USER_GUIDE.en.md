@@ -187,6 +187,7 @@ When you receive a link from an Agent (e.g. `https://<host>/s/<token>`), **just 
 To browse / delete / organize your own document library: visit the site home → log in → **File manager** (dual-pane: tree on the left, list on the right):
 
 - Browse the directory tree, create folders, move (with cycle detection), rename, delete (cascade deletes descendants + disk files + share links);
+- Row-start icons distinguish **private / shared** (shared = an active share link exists); the ⋯ menu at row end (desktop dropdown / mobile bottom sheet) hosts all row actions, including **Copy share link** (on a private doc this creates a link and flips it to shared) and **Make private** (revokes every link of that doc at once, irreversible after confirm);
 - Open the owner view page `/d/<id>` for any document;
 - Settings → **Share links**: view / revoke shares (once revoked, `/s/<token>` returns 404 immediately);
 - Settings → **API Token**: create / revoke.
@@ -236,7 +237,7 @@ To browse / delete / organize your own document library: visit the site home →
 ## 6. Security notes
 
 - **API tokens are upload credentials**. The plaintext is shown only once at generation — keep it safe; if you suspect a leak, revoke immediately (one-click in the UI or manually) and regenerate.
-- **Share links are public keys**: anyone with `/s/<token>` can read that document. Don't post them on public channels; the owner can revoke from the "Share links" page.
+- **Share links are public keys**: anyone with `/s/<token>` can read that document. Don't post them on public channels; the owner can revoke them all at once via "Make private" in the file manager row menu, or one by one from the "Share links" page.
 - **HTTPS is required in production** (the `secure` flag on session cookies depends on it).
 - `data/` contains the database and documents — **never commit it** (already gitignored); back up and protect it as confidential material.
 - Uploaded `name` / `path` already go through path-safety filtering, but Agents are still encouraged to send well-formed POSIX paths to avoid needless 400s.

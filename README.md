@@ -12,7 +12,7 @@ Remote Reader 是 Agent 的「文档交付窗口」——写入侧用 MCP，阅�
 - **免登录一步查看** —— `/s/<token>` 点开即渲染，阅读者无需注册登录
 - **完整 Markdown 渲染** —— GFM 表格、[Shiki](https://shiki.style) 代码高亮（39 种语言）、Mermaid 流程图、KaTeX 数学公式（按需懒加载，纯文本零下载）
 - **幂等上传** —— 同路径同内容不重复生成；内容更新时**链接不变**、自动指向最新版本
-- **管理 UI** —— 文件管理器（目录树 / 移动 / 重命名 / 删除）、API token 管理（创建 / 撤销 / 一次性 reveal）、分享链接撤销
+- **管理 UI** —— 文件管理器（目录树 / 移动 / 重命名 / 删除；行首私有/共享状态图标、复制分享链接、转为私有）、API token 管理（创建 / 撤销 / 一次性 reveal）、分享链接撤销
 - **多用户隔离** —— 文档按 owner 存于独立目录树，SQLite 外键约束保证完整
 - **安全默认** —— argon2id 密码哈希、HMAC session + 常量时间比较 + 过期校验、路径穿越防护、`html:false` 防 XSS、API token 仅存 sha256 哈希
 - **生产就绪** —— 多阶段 Docker 镜像、非 root 运行、HEALTHCHECK、Docker Compose 一键部署

@@ -13,7 +13,7 @@
     {#if actionError}<p class="form-error" role="alert">{actionError}</p>{/if}
 
     {#if data.shares.length === 0}
-    <p class="muted">暂无分享链接。Agent 上传文档时会自动生成。</p>
+    <p class="muted">暂无分享链接。Agent 上传文档或你在文件管理器点「复制分享链接」时会自动生成。</p>
     {:else}
     <table>
         <thead><tr><th>文档</th><th>token</th><th>创建时间</th><th></th></tr></thead>
