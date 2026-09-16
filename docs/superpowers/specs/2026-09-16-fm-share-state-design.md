@@ -1,7 +1,7 @@
 # FM 分享状态可视化与行操作收敛设计
 
 - 日期：2026-09-16
-- 状态：已定稿（待实现）
+- 状态：已实现（同日，见 §10 实现现状）
 - 关联：`2026-07-18-remote-reader-design.md`（§3 架构 / §6.4 权限）、`2026-09-14-mobile-fm-design.md`（§7.1 ActionSheet / 抽屉编排）、`2026-09-08-recent-documents-view-design.md`（RecentDoc 契约）
 
 ## 1. 背景与目标
@@ -158,3 +158,20 @@ drawer dialog `click` 事件 `e.target === drawerRef` → `closeDrawer()`（既�
 - [ ] ActionSheet 与目录树抽屉点击空白即关
 - [ ] 三视图页签位置一致（恒右贴边）
 - [ ] 全量测试 + svelte-check + build 通过
+
+## 10. 实现现状（2026-09-16）
+
+全部落地，与 §3-§8 设计一致，无偏差。要点：
+
+- **服务层**（`shares.ts`）：`activeShareOf`（活跃=未过期，取最新一条）为单源，`ensureShareUrl`（上传幂等路径）与 `getOrCreateShareUrl`（FM 路径，owner+file 校验）共用；`sharedDocIds` 批量派生（owner join 防御）；`revokeAllShares` 全删幂等。
+- **契约**：`RecentDoc.shared`（folder 恒 false）由 load（dir/recent/viewed）与 `/api/recent` 批量填充；`toDocDTO(r, shared=false)` 默认参兼容 search 等旧调用方，所有 `.map(toDocDTO)` 改箭头形式（防数组下标泄入 shared 参数）。
+- **端点**：`/api/share/[id]` POST（get-or-create → `{url}`）/ DELETE（转私有 → `{ok:true}`），session 认证 + 404 不泄漏存在性（同 `/api/view` 口径）。
+- **UI**：`FileStateIcon`（folder/私有/共享+链接角标 SVG，currentColor + `--rr-link`）；`RowActions` 收敛单一 ⋯（桌面 `ActionMenu` fixed 锚定下拉、移动 `ActionSheet` 底部菜单，菜单项同构：共享文件 6 项/私有文件 5 项/文件夹 3 项）；`ShareDialog`（居中 dialog + 只读 URL + clipboard/execCommand 双路复制 + ✓ 反馈）；ActionSheet 与目录树抽屉 backdrop 点击关闭（`e.target === dialog` 判定，走既有 close 编排）；页签右簇重排为 [新建入口][segmented 恒末位]。
+- **验证**：单测 442→458（shares +9 / ensureShareUrl 回归 +1 / recent-api 派生 +1 / share-actions 端点 +6）；svelte-check 0 错；build 冒烟过；Playwright 浏览器验收 16/16（桌面 1280×800 + 移动 375×667：图标双态/菜单项/分享浮层复制反馈/转私有翻转+旧链接 404/三视图页签 x 恒定/backdrop 关闭×3）。
+
+### 备案（未做/已知边界）
+
+- `e2e-check.sh` 未扩：新端点为 session 认证，curl 冒烟需登录态成本高；端点已有 6 条单测覆盖，集成链路由浏览器验收覆盖
+- 仓库无已提交 Playwright 套件（历史验收均为会话内进行），本次沿用惯例，未新增套件文件
+- 顶栏设置菜单与 ActionMenu 同用 `.menu` class——自动化选择器需 `div.menu[role="group"]` 区分（ActionMenu 恒带 role）
+- ActionSheet 上滑动画 180ms 内测量/截图会得到中间态（QA 脚本须等 ≥300ms 再断言），非缺陷
