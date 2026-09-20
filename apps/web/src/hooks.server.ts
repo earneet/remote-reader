@@ -29,7 +29,8 @@ export const handle: Handle = async ({ event, resolve }) => {
     }
     const response = await resolve(event);
     // 访问日志：排障（含 CSRF 403 场景的 Origin 头取证）走 stdout/stderr——systemd 部署
-    // 由 unit 重定向到 /var/log/remote-reader/app.log（见 scripts/install.sh）；静态资源不记
+    // 由 unit 重定向到 /var/log/remote-reader/app.log（见 scripts/install.sh）；静态资源不记。
+    // ISO 时间戳必须带（journald 自带时间，文件 append 没有）
     if (!event.url.pathname.startsWith('/_app/')) {
         const origin = event.request.headers.get('origin');
         let ip: string;
@@ -38,7 +39,7 @@ export const handle: Handle = async ({ event, resolve }) => {
         } catch {
             ip = '?';
         }
-        console.log(`[access] ${event.request.method} ${event.url.pathname} ${response.status} ip=${ip}${origin ? ` origin=${origin}` : ''}`);
+        console.log(`[access] ${new Date().toISOString()} ${event.request.method} ${event.url.pathname} ${response.status} ip=${ip}${origin ? ` origin=${origin}` : ''}`);
     }
     return response;
 };
