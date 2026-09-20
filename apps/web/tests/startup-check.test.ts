@@ -18,7 +18,8 @@ afterEach(() => {
 
 function prod(env: Record<string, string | undefined>) {
     process.env.NODE_ENV = 'production';
-    for (const [k, v] of Object.entries(env)) {
+    const merged = { ORIGIN: 'https://reader.example.com', ...env };
+    for (const [k, v] of Object.entries(merged)) {
         if (v === undefined) delete process.env[k];
         else (process.env as Record<string, string>)[k] = v;
     }
@@ -62,6 +63,28 @@ test('prod 强配置通过', () => {
         BODY_SIZE_LIMIT: '8M'
     });
     expect(() => validateStartupConfig()).not.toThrow();
+});
+
+test('prod 未设 ORIGIN → 抛（否则反代/直连下全部 form POST 被 CSRF 校验 403）', () => {
+    prod({
+        SESSION_SECRET: 'a'.repeat(64),
+        INITIAL_INVITE_CODE: 'goodcode123',
+        BASE_URL: 'https://reader.example.com',
+        BODY_SIZE_LIMIT: '8M',
+        ORIGIN: undefined
+    });
+    expect(() => validateStartupConfig()).toThrow(/ORIGIN/);
+});
+
+test('prod ORIGIN 与 BASE_URL 不同源 → 抛（占位值漂移防护）', () => {
+    prod({
+        SESSION_SECRET: 'a'.repeat(64),
+        INITIAL_INVITE_CODE: 'goodcode123',
+        BASE_URL: 'https://reader.example.com',
+        BODY_SIZE_LIMIT: '8M',
+        ORIGIN: 'https://your-host'
+    });
+    expect(() => validateStartupConfig()).toThrow(/ORIGIN/);
 });
 
 test('prod 未设 BODY_SIZE_LIMIT（adapter 默认 512K < MAX_UPLOAD_BYTES 默认 5M）→ 抛', () => {

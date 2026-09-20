@@ -206,6 +206,14 @@ ADDRESS_HEADER=x-forwarded-for
 # 配置后必须防火墙限制 3000 端口仅反代可达——直连请求无该头时应用会直接报错拒绝。
 ```
 
+**⚠️ 反代必须配置 `ORIGIN`（否则全部表单 POST 被 403 拒绝）**：SvelteKit 的 CSRF 防护要求 form POST 的 `Origin` 头与服务端认知的自身 origin 一致；未设 `ORIGIN` 时按「协议默认 https + 内部 Host 头」推断，反代后几乎必与浏览器 Origin 不匹配——登出/登录/注册/文件管理器等**所有表单提交**都会返回 `Cross-site POST form submissions are forbidden`。在 env 加一行（与 `BASE_URL` 同值）即可根治：
+
+```bash
+ORIGIN=https://your-domain   # 与 BASE_URL 同值；直连 IP 部署则为 http://<IP>:3000
+```
+
+> `install.sh` 2026-09-20 起已自动写入 `ORIGIN=${BASE_URL}`；更早部署的实例请手动补一行并 `systemctl restart remote-reader`（docker compose 在 `.env` 补一行后 `docker compose up -d`）。应用启动校验也会强制要求生产环境设置该值。
+
 **nginx 示例**：
 
 ```nginx
@@ -347,6 +355,7 @@ bun --filter remote-reader-web db:migrate    # 应用（生产在停服/维护�
 | `REGISTER_RATE_LIMIT_MAX` | `5` | 每 IP 注册次数（同窗口） |
 | `AUTH_FAIL_RATE_LIMIT_MAX` | `30` | 上传 API 认证失败按 IP 限流（防无效 token 枚举） |
 | `ADDRESS_HEADER` / `XFF_DEPTH` | 空 / `1` | 反代部署必设 `x-forwarded-for`（详见 §6）；`XFF_DEPTH` 取 XFF 链倒数第 N 段 |
+| `ORIGIN` | （无，生产必填） | adapter-node CSRF Origin 校验基准，与 `BASE_URL` 同值；漏设则全部表单 POST 被 403（详见 §6） |
 | `SESSION_MAX_AGE` | `2592000`（30 天，秒） | session 有效期 |
 | `PORT` / `HOST` | `3000` / `0.0.0.0` | adapter-node 监听 |
 | `NODE_ENV` | — | 设 `production` 启用安全 cookie + 强制 SESSION_SECRET |

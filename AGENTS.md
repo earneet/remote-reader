@@ -42,7 +42,7 @@ Remote Reader 让远程工作的 Agent 通过 MCP 上传 Markdown 文档，用�
 
 **Agent 自助接入（2026-09-20）**：登录页 `<details id="agent-guide">` 指引块（默认收起保持页面干净、内容始终在 SSR HTML 中供 Agent 抓取——baseUrl/repoUrl 由 load 注入，repoUrl 来自新 env `BRIDGE_REPO_URL` 默认上游仓库；指引含装桥 bunx/clone 二选一、注册/登录/建 token curl、桥配置、MCP 注册、错误形状说明）+ 认证 JSON API 三端点（`POST /api/v1/auth/register` / `auth/login` / `auth/api-token`）。注册/登录核心逻辑下沉 `lib/server/registration.ts`（`registerUser` result 对象 + `authenticateUser` 时序恒定，form action 同步改用、行为不变）；限流与 form 同键同桶（register 单桶 / login 双桶）；api-token 走 session（locals.user），token 明文一次性返回；错误形状 SvelteKit `error()` 扁平 `{message}`。新增 registration/auth-api/auth-api-ratelimit 测试 + e2e-check `agent-guide` 冒烟与 `E2E_INVITE_CODE` 全链路（真实 server register→token→upload 已验证）。已知坑：vitest 下 Vite 注入 `process.env.BASE_URL='/'`（归一化成 ''），涉 BaseURL 断言的测试须显式设值密闭化。spec：`docs/superpowers/specs/2026-09-20-agent-auto-onboarding-design.md`。**上线后审查跟进（5-Agent 并行审查 + 逐条复核，全项闭环）**：scripts/README e2e 节同步新检查项/`E2E_INVITE_CODE`/成功文案、USER_GUIDE §4 表补 `BRIDGE_REPO_URL`（中英）、api-token CSRF 注释三层防线精确化（SameSite=lax 主防线 + checkOrigin 拦 text/plain 跨站 + 无 ACAO）、form/JSON 跨入口同桶回归锁定（register 单桶 + login 精确/聚合双桶共 3 用例，防限流键漂移静默分桶）、卫生上限（email ≤254 / password ≤1024 / token name ≤100——`MAX_TOKEN_NAME` 服务层导出双入口共用，authenticateUser 超长密码跳过 argon2）、bootstrap 码改 sha256+`timingSafeEqual` 恒定时间比较（防前缀时序侧信道）。
 
-**桥运行时**：无原生依赖（纯 fetch + MCP SDK）→ `bun apps/mcp-bridge/src/index.ts` 直跑；`tsc --noEmit` 类型检查（`bun --filter remote-reader-mcp-bridge check`）。配置 = `~/.config/remote-reader/config.json`（XDG）默认 + `REMOTE_READER_URL`/`REMOTE_READER_TOKEN` env 覆盖。**注册进 MCP 客户端时入口必须用绝对路径**——客户端拉起 stdio 进程的 cwd 无保证（如 ZCode 设置页探针），相对路径会间歇性 Module not found（README/INSTALL/USER_GUIDE 的注册命令均已改为 `$(pwd)` 展开写法）。
+**桥运行时**：无原生依赖（纯 fetch + MCP SDK）→ `bun apps/mcp-bridge/src/index.ts` 直跑；`tsc --noEmit` 类型检查（`bun --filter remote-reader-bridge check`）。配置 = `~/.config/remote-reader/config.json`（XDG）默认 + `REMOTE_READER_URL`/`REMOTE_READER_TOKEN` env 覆盖。**注册进 MCP 客户端时入口必须用绝对路径**——客户端拉起 stdio 进程的 cwd 无保证（如 ZCode 设置页探针），相对路径会间歇性 Module not found（README/INSTALL/USER_GUIDE 的注册命令均已改为 `$(pwd)` 展开写法）。
 
 产品/使用/设计文档：`docs/PRODUCT.md`、`docs/USER_GUIDE.md`、`docs/superpowers/specs/`（含 §15 实现现状）。**改动架构前必读 spec。**
 
@@ -84,7 +84,7 @@ bun run build                                  # = bun --filter remote-reader-we
 bun --filter remote-reader-web check           # svelte-check 类型检查（src + .svelte）
 bun --filter remote-reader-web db:generate     # 生成 Drizzle migration
 bun --filter remote-reader-web db:migrate      # mkdir data + 执行 migration（含已生成 schema）
-bun --filter remote-reader-mcp-bridge check    # 桥 tsc --noEmit 类型检查
+bun --filter remote-reader-bridge check    # 桥 tsc --noEmit 类型检查
 bun run test                                   # 跑所有测试（vitest，node 运行时，fileParallelism:false）
 bun run test apps/web/tests/auth.test.ts       # 跑单个测试文件
 bun run test -t "测试名片段"                    # 按测试名过滤
@@ -115,7 +115,7 @@ env 助手为 `lib/server/env.ts`（共享 getter + DATA_DIR 等调用点就地�
 
 核心：`DATABASE_PATH`、`DATA_DIR`、`BASE_URL`（生产必填，缺失 fail-fast；尾斜杠自动归一化）、`SESSION_SECRET`（生产必填，缺失 fail-fast）、`INITIAL_INVITE_CODE`（注册首个管理员所需）、`MAX_UPLOAD_BYTES`、`BRIDGE_REPO_URL`（登录页 Agent 指引块展示的桥源码克隆地址，可选）。运行时数据在 `data/`（已 gitignore，**绝不入库**）。
 
-速率限制 / 会话 / 网关：`RATE_LIMIT_MAX` + `RATE_LIMIT_WINDOW_MS`（每 token 上传）、`LOGIN_RATE_LIMIT_MAX`（每 (IP,邮箱) 精确桶）+ `LOGIN_IP_RATE_LIMIT_MAX`（每 IP 聚合桶，默认 30，防密码喷洒）、`REGISTER_RATE_LIMIT_MAX`、`SESSION_MAX_AGE`（session 有效期秒，默认 30 天）、`BODY_SIZE_LIMIT`（adapter-node 请求体字节数，生产须 ≥ `MAX_UPLOAD_BYTES`×1.5，启动校验强制）、`PORT`（生产端口，默认 3000）。
+速率限制 / 会话 / 网关：`RATE_LIMIT_MAX` + `RATE_LIMIT_WINDOW_MS`（每 token 上传）、`LOGIN_RATE_LIMIT_MAX`（每 (IP,邮箱) 精确桶）+ `LOGIN_IP_RATE_LIMIT_MAX`（每 IP 聚合桶，默认 30，防密码喷洒）、`REGISTER_RATE_LIMIT_MAX`、`SESSION_MAX_AGE`（session 有效期秒，默认 30 天）、`BODY_SIZE_LIMIT`（adapter-node 请求体字节数，生产须 ≥ `MAX_UPLOAD_BYTES`×1.5，启动校验强制）、`ORIGIN`（生产必填且与 BASE_URL 同源，启动校验强制——adapter-node CSRF Origin 校验基准，漏设则全部表单 POST 被 403 Cross-site forbidden，install.sh 自动写 `ORIGIN=${BASE_URL}`）、`PORT`（生产端口，默认 3000）。
 
 冷热分层：`OBJECT_STORE_ENDPOINT/REGION/BUCKET/ACCESS_KEY_ID/SECRET_ACCESS_KEY`（S3 兼容，全部留空=关闭）、`OBJECT_STORE_FORCE_PATH_STYLE`、`COLD_TIER_AFTER_DAYS`（默认 30）。
 

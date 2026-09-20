@@ -57,6 +57,25 @@ export function validateStartupConfig(): void {
         throw new Error(`BASE_URL 生产环境不可指向本地地址 (${hostname})，请改为公网/反代地址`);
     }
 
+    // adapter-node 的 CSRF Origin 校验：form POST 的 Origin 头必须等于服务端认知的 url.origin。
+    // 未设 ORIGIN 时按「protocol 默认 https + Host 头」推断，反代/直连形态下几乎必与浏览器 Origin
+    // 不匹配 → 登出/登录/注册等全部表单 POST 被 403（Cross-site POST form submissions are forbidden）。
+    // 与 BASE_URL 几乎恒同值（install.sh 已同步写入），生产必填且须同源（防占位值漂移）。
+    const origin = process.env.ORIGIN;
+    if (!origin) {
+        throw new Error(
+            'ORIGIN 生产环境必填（adapter-node CSRF Origin 校验基准；漏设会导致全部表单 POST 被 403 Cross-site forbidden）——与 BASE_URL 同值即可，如 https://your-host'
+        );
+    }
+    let originUrl: URL;
+    try {
+        originUrl = new URL(origin);
+    } catch {
+        throw new Error(`ORIGIN "${origin}" 不是合法 URL`);
+    }
+    if (originUrl.origin !== new URL(baseUrl).origin) {
+        throw new Error(`ORIGIN "${origin}" 与 BASE_URL "${baseUrl}" 不同源，须一致（如均为 https://your-host）`);
+    }
     // adapter-node BODY_SIZE_LIMIT 默认仅 512K：不足 MAX_UPLOAD_BYTES×1.5 时超限上传在路由前
     // 就被 adapter 拦截，且错误会被误报为 400 invalid json（JSON 转义还会使 body 大于 content 本身）
     const rawLimit = process.env.BODY_SIZE_LIMIT;
