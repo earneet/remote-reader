@@ -159,6 +159,11 @@ test('api-token 400：空 name / 缺 name', async () => {
     expect(r2.status).toBe(400);
 });
 
+test('api-token 400：name 超长（>100 字符）', async () => {
+    const r = await call(tokenPOST, { name: 'x'.repeat(101) }, { userId: 'u1' });
+    expect(r.status).toBe(400);
+});
+
 // ── 登录页指引块数据 ──
 
 test('login load 返回 baseUrl/repoUrl（agent-guide SSR 注入）', async () => {

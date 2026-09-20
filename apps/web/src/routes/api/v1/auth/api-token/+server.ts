@@ -1,6 +1,6 @@
 import { json, error } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { createTokenForUser } from '$server/apitokens';
+import { createTokenForUser, MAX_TOKEN_NAME } from '$server/apitokens';
 
 // Agent 程序化创建 API token（spec §5.3）：session cookie 认证（hooks 已填充 locals.user）。
 // 明文仅本次响应返回（与 settings UI 一次性 reveal 同语义），不入日志。
@@ -15,6 +15,7 @@ export const POST: RequestHandler = async ({ request, locals }) => {
     const raw = (body ?? {}) as { name?: unknown };
     const name = typeof raw.name === 'string' ? raw.name.trim() : '';
     if (!name) error(400, '名称必填');
+    if (name.length > MAX_TOKEN_NAME) error(400, `名称过长（≤${MAX_TOKEN_NAME} 字符）`);
 
     const { plaintext } = await createTokenForUser(locals.user.id, name);
     return json({ token: plaintext });

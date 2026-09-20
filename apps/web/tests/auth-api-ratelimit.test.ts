@@ -72,7 +72,48 @@ test('register form 与 JSON 共享同一限流桶（跨入口不绕过）', asy
     // form 入口消耗 2 次（max=2），JSON 第 3 次应 429——证明同桶共享计数。
     // form 成功会抛 Redirect(302)，属预期成功信号，吞掉继续。
     for (const email of ['fa@x.com', 'fb@x.com']) {
-        await actions.default(formEvent(email)).catch(() => {});
+        await Promise.resolve(actions.default(formEvent(email))).catch(() => {});
     }
     expect(await statusOf(registerPOST, { email: 'fc@x.com', password: 'password123', invite_code: 'testinvite' }, address)).toBe(429);
+});
+
+// login 双桶键的跨入口锁定（与 register 同理）：form 与 JSON 共享 login-agg / login 两桶
+test('login 精确桶：form 与 JSON 共享同一限流桶', async () => {
+    const { actions } = await import('../src/routes/login/+page.server');
+    const address = 'ip-5';
+    const formEvent = (email: string) => {
+        const fd = new FormData();
+        fd.append('email', email);
+        fd.append('password', 'wrong');
+        return {
+            request: new Request('http://localhost/login', { method: 'POST', body: fd }),
+            cookies: { set: () => {}, get: () => undefined, delete: () => {} },
+            getClientAddress: () => address
+        } as any;
+    };
+    // form 错密码消耗精确桶 2 次（max=2），JSON 第 3 次同邮箱 → 429
+    for (let i = 0; i < 2; i++) {
+        await actions.default(formEvent('la@x.com'));
+    }
+    expect(await statusOf(loginPOST, { email: 'la@x.com', password: 'x' }, address)).toBe(429);
+});
+
+test('login 聚合桶：form 与 JSON 共享同一限流桶', async () => {
+    const { actions } = await import('../src/routes/login/+page.server');
+    const address = 'ip-6';
+    const formEvent = (email: string) => {
+        const fd = new FormData();
+        fd.append('email', email);
+        fd.append('password', 'wrong');
+        return {
+            request: new Request('http://localhost/login', { method: 'POST', body: fd }),
+            cookies: { set: () => {}, get: () => undefined, delete: () => {} },
+            getClientAddress: () => address
+        } as any;
+    };
+    // form 3 个不同邮箱消耗聚合桶 3 次（max=3，精确桶各 1 不触顶），JSON 第 4 个邮箱 → 429
+    for (const email of ['aa@x.com', 'ab@x.com', 'ac@x.com']) {
+        await actions.default(formEvent(email));
+    }
+    expect(await statusOf(loginPOST, { email: 'ad@x.com', password: 'x' }, address)).toBe(429);
 });

@@ -2,6 +2,9 @@ import { eq, and, desc } from 'drizzle-orm';
 import { db, schema } from './db';
 import { generateId, generateApiToken } from './auth';
 
+// token 名称长度上限（settings UI 与 /api/v1/auth/api-token 双入口共用，防 DB 膨胀）
+export const MAX_TOKEN_NAME = 100;
+
 export function listTokens(ownerId: string): Array<{
     id: string;
     name: string;

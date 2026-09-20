@@ -43,6 +43,23 @@ test('registerUser 403：邀请码无效', async () => {
         .toMatchObject({ ok: false, status: 403 });
 });
 
+test('registerUser 400：email 超 254 字符（格式合法的超长值）', async () => {
+    expect(await registerUser({ email: 'a'.repeat(250) + '@x.com', password: 'password123', inviteCode: 'testinvite' }))
+        .toMatchObject({ ok: false, status: 400 });
+});
+
+test('registerUser 400：password 超 1024 字符', async () => {
+    expect(await registerUser({ email: 'a@x.com', password: 'x'.repeat(1025), inviteCode: 'testinvite' }))
+        .toMatchObject({ ok: false, status: 400 });
+});
+
+test('authenticateUser 超长密码 → null 不抛（注册上限拦截，不可能为有效密码）', async () => {
+    expect(await authenticateUser('ghost@x.com', 'x'.repeat(2000))).toBeNull();
+    const reg = await registerUser({ email: 'a@x.com', password: 'password123', inviteCode: 'testinvite' });
+    if (!reg.ok) throw new Error('setup failed');
+    expect(await authenticateUser('a@x.com', 'x'.repeat(2000))).toBeNull();
+});
+
 test('registerUser 409：邮箱已注册，且 DB 码不烧核销计数', async () => {
     const first = await registerUser({ email: 'a@x.com', password: 'password123', inviteCode: 'testinvite' });
     if (!first.ok) throw new Error('setup failed');

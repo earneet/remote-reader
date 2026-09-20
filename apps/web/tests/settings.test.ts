@@ -66,6 +66,14 @@ test('tokens create 空 name → 400', async () => {
     } as never)).resolves.toMatchObject({ status: 400 });
 });
 
+test('tokens create name 超长（>100 字符）→ 400', async () => {
+    const ownerId = generateId();
+    insertUser(ownerId);
+    await expect(tokensMod.actions.create({
+        locals: { user: { id: ownerId } }, request: formRequest({ name: 'x'.repeat(101) })
+    } as never)).resolves.toMatchObject({ status: 400 });
+});
+
 test('tokens revoke 删除自己的 token', async () => {
     const ownerId = generateId();
     insertUser(ownerId);

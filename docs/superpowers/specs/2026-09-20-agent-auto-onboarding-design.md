@@ -139,3 +139,19 @@ flowchart LR
 - 桥代码改动（本特性纯 Web 侧）
 - 注册页指引块（用户只要求登录页）
 - 密码重置 / 忘记密码流程
+
+## 11. 实现现状与审查跟进
+
+**实现**：按本 spec 全量落地（提交 76c9b5a..7fa3765，测试 463→486），登录页指引块 + 三端点 + 服务层下沉 + `BRIDGE_REPO_URL` env + 中英文档 + e2e 冒烟（`E2E_INVITE_CODE` 可选全链路）。
+
+**上线后审查（5-Agent 并行 + 逐条复核，发现全闭环）**：
+
+1. 文档同步（IMPORTANT）：`scripts/README.md` e2e 节补齐检查项清单（agent-guide、`E2E_INVITE_CODE` 链路及两项历史遗留）、新成功文案与用法；USER_GUIDE 中英 §4 配置表补 `BRIDGE_REPO_URL` 行；AGENTS.md 环境变量段补列。
+2. CSRF 注释精确化：`request.json()` 不校验 Content-Type，"form 不能发 application/json" 单独不构成防线；实际三层——SameSite=lax（主）+ SvelteKit `checkOrigin` 拦 text/plain 跨站 POST + 无 ACAO 头。
+3. 跨入口同桶回归锁定：form 与 JSON 双入口共享限流桶的不变量原无测试锁定（限流常量/键字符串双份复制系 §6 有意决策，但键格式漂移会静默分桶、配额翻倍）——补 register 单桶 + login 精确/聚合双桶共 3 个跨入口用例。
+4. 卫生上限（LOW→已加固）：email ≤254、password ≤1024（registerUser 400 校验；authenticateUser 对超长密码跳过 argon2 早退 null——注册上限保证不可能为有效密码）、token name ≤100（`MAX_TOKEN_NAME` 服务层导出，settings UI 与 api-token 端点双入口共用）。
+5. bootstrap 码恒定时间比较：明文 `===` 改 sha256 后 `timingSafeEqual`（防前缀时序侧信道；存量搬移顺手加固）。
+
+**遗留备案（未做，低优先）**：npm 包 `remote-reader-bridge` 未发布（指引文案已用「如已发布」对冲，Agent 试 bunx 失败一次后回落 clone）；「伪造 session → 401」由 crypto/session 既有篡改测试组合覆盖（端点侧与无 session 同代码路径）。
+
+**已知坑**：vitest 下 Vite 注入 `process.env.BASE_URL='/'`（getBaseUrl 归一化成 `''`）——涉 BaseURL 断言的测试必须显式设值密闭化（auth-api.test.ts 已处理）。

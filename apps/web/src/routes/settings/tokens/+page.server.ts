@@ -1,6 +1,6 @@
 import { fail, redirect } from '@sveltejs/kit';
 import type { PageServerLoad, Actions } from './$types';
-import { listTokens, createTokenForUser, revokeToken } from '$server/apitokens';
+import { listTokens, createTokenForUser, revokeToken, MAX_TOKEN_NAME } from '$server/apitokens';
 
 export const load: PageServerLoad = async ({ locals }) => {
     if (!locals.user) redirect(302, '/login');
@@ -13,6 +13,7 @@ export const actions: Actions = {
         const form = await request.formData();
         const name = String(form.get('name') ?? '').trim();
         if (!name) return fail(400, { error: '名称必填' });
+        if (name.length > MAX_TOKEN_NAME) return fail(400, { error: `名称过长（≤${MAX_TOKEN_NAME} 字符）` });
         const { plaintext } = await createTokenForUser(locals.user.id, name);
         return { plaintext };
     },
