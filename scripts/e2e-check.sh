@@ -65,4 +65,27 @@ S_BODY=$(echo "$S" | head -1)
 [ "$S_CODE" = "409" ] || { echo "FAIL: 路径段撞同名文件应 409，实际 $S_CODE"; exit 1; }
 echo "$S_BODY" | grep -q "已被同名文件占用" || { echo "FAIL: 409 响应应携带冲突原因 message，实际 $S_BODY"; exit 1; }
 
-echo "✓ 子计划 1 端到端通过（上传→免登录查看→401/413/404/400 穿越防护→400 段长→409 冲突透传）"
+echo "→ 验证登录页 Agent 指引块在 SSR HTML 中"
+curl -sf "$BASE/login" | grep -q 'id="agent-guide"' || { echo "FAIL: 登录页缺少 agent-guide 指引块"; exit 1; }
+
+# 可选全链路：提供 E2E_INVITE_CODE 时验证 Agent 自助注册→建 token→上传
+if [ -n "${E2E_INVITE_CODE:-}" ]; then
+  echo "→ 验证 Agent 自助注册→建 token→上传全链路"
+  JAR=$(mktemp)
+  EMAIL="e2e-$(date +%s)@example.com"
+  S=$(curl -s -o /dev/null -w "%{http_code}" -c "$JAR" -X POST "$BASE/api/v1/auth/register" \
+    -H "Content-Type: application/json" \
+    -d "{\"email\":\"$EMAIL\",\"password\":\"e2e-password-123\",\"invite_code\":\"$E2E_INVITE_CODE\"}")
+  [ "$S" = "200" ] || { echo "FAIL: 注册应 200，实际 $S"; rm -f "$JAR"; exit 1; }
+  TOKEN_JSON=$(curl -s -b "$JAR" -X POST "$BASE/api/v1/auth/api-token" \
+    -H "Content-Type: application/json" -d '{"name":"e2e-agent"}')
+  rm -f "$JAR"
+  NEW_TOKEN=$(printf '%s' "$TOKEN_JSON" | grep -o '"token":"[^"]*"' | sed 's/"token":"//;s/"//')
+  [ -n "$NEW_TOKEN" ] || { echo "FAIL: 未返回 token，实际 $TOKEN_JSON"; exit 1; }
+  S=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/api/v1/documents" \
+    -H "Authorization: Bearer $NEW_TOKEN" -H "Content-Type: application/json" \
+    -d '{"name":"e2e-agent.md","content":"# agent e2e","path":"checks"}')
+  [ "$S" = "200" ] || { echo "FAIL: 新 token 上传应 200，实际 $S"; exit 1; }
+fi
+
+echo "✓ 端到端通过（上传→免登录查看→错误场景→agent-guide 指引块${E2E_INVITE_CODE:+→自助注册全链路}）"
