@@ -94,14 +94,11 @@ bun run test -t "测试名片段"                    # 按测试名过滤
 
 ⚠️ **部署注意**：用 `adapter-node` 产物 + **`node apps/web/build/index.js`** 启动（不要 `bun run` 启服务，会触发 better-sqlite3 加载失败），**不要用 `bun build --compile`** 打单二进制（oven-sh/bun#15734 已知不兼容，详见 spec §10）。生产必填 `SESSION_SECRET`（缺失 fail-fast）；`BODY_SIZE_LIMIT` 必须是字节数（数字，须 > `MAX_UPLOAD_BYTES`）。
 
-## Git 工作流（用户明确规则）
+## Git 工作流
 
-- **commit**：完成一组改动并通过验证后**主动提交**（原子化拆分、跟随项目 semantic 中文风格），无需等用户开口。
-- **push**：**必须等用户明确允许**后才推远端，永远不擅自 push。
-- **worktree 隔离**：功能修改与 Bug 修复**一律在 worktree 副本中进行**（建分支 → 副本内开发/验证 → 合并回 master → 清理副本）；master 主工作区保持随时可部署状态。依赖各副本自行 `bun install`（bun 全局缓存硬链接，秒级、近零磁盘开销）；data/ 为 gitignore 内容，副本天然用独立测试库。
-  - **例外——文档直达**：一般文档修改、设计文档（spec/plan）**可直接提交到 master**，无需走 worktree 流程。
-  - **例外的约束**：**一旦绑定了 worktree 分支，所有改动（含文档）必须落在该分支上**，禁止同时直写 master——防合并冲突与上下文分裂。
-  - **部署红线**：`update.sh` 只允许在主工作区执行，**禁止从 worktree 运行**（它会用脚本所在目录当源码，会把未合并代码发上线）。
+本仓库的 Git 工作流规则与**本机专有配置**（部署拓扑、个人工具链等）在 `AGENTS.local.md`（gitignore，**不入库**）。
+
+> **代理必读引导**：若当前目录存在 `AGENTS.local.md` 且其内容未被自动注入你的上下文，**必须先读取该文件**，并将其作为与 AGENTS.md **同等级**的规则遵守。
 
 ## 运维 / 部署辅助脚本
 
