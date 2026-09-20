@@ -9,6 +9,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: NPM_TOKEN 存在性守卫（防空 token 报晦涩的 ENEEDAUTH）
+        run: '[ -n "$NPM_TOKEN" ] || { echo "NPM_TOKEN secret 未配置或为空——Repo Settings → Secrets and variables → Actions → New repository secret，名字必须是 NPM_TOKEN"; exit 1; }'
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
       - run: bun --filter remote-reader-bridge check
