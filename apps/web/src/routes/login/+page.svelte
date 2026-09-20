@@ -17,6 +17,8 @@
   -H 'Content-Type: application/json' \\
   -d '{"name":"my-agent"}'`);
     const bridgeConfig = $derived(`{"baseUrl":"${data.baseUrl}","token":"rr_..."}`);
+    const npmAddCmd = $derived('claude mcp add remote-reader -- npx -y remote-reader-bridge');
+    const npmServersJson = $derived('{"mcpServers":{"remote-reader":{"command":"npx","args":["-y","remote-reader-bridge"]}}}');
 </script>
 
 <AuthCard title="登录" error={form?.error}>
@@ -63,10 +65,10 @@
         </p>
 
         <h3>1. 安装本地 MCP 桥（二选一）</h3>
-        <p>方式一（npm 包，如已发布）：<code>bunx remote-reader-bridge</code></p>
-        <p>方式二（源码，当前可用）：</p>
+        <p>方式一（npm 包，推荐）：<code>npx -y remote-reader-bridge</code> 或 <code>bunx remote-reader-bridge</code>（node ≥18 即可，无需克隆仓库）</p>
+        <p>方式二（源码克隆）：</p>
         <pre><code>{cloneCmd}</code></pre>
-        <p>桥入口为 <code>remote-reader/apps/mcp-bridge/src/index.ts</code>，注册进 MCP 客户端时必须写绝对路径。</p>
+        <p>方式二的桥入口为 <code>remote-reader/apps/mcp-bridge/src/index.ts</code>，注册进 MCP 客户端时必须写绝对路径。</p>
 
         <h3>2. 注册账号（已有账号请改用登录）</h3>
         <pre><code>{registerCurl}</code></pre>
@@ -83,9 +85,13 @@
         <p>（或设环境变量 <code>REMOTE_READER_URL</code> / <code>REMOTE_READER_TOKEN</code>）</p>
 
         <h3>5. 注册进 MCP 客户端</h3>
-        <p>Claude Code：</p>
+        <p>npm 路线（推荐；已写第 4 步的 config.json 时无需再传 env）：Claude Code：</p>
+        <pre><code>{npmAddCmd}</code></pre>
+        <p>其他客户端用标准 mcpServers JSON：</p>
+        <pre><code>{npmServersJson}</code></pre>
+        <p>方式二（源码克隆）时改用绝对路径注册（Claude Code）：</p>
         <pre><code>claude mcp add remote-reader bun "/absolute/path/to/remote-reader/apps/mcp-bridge/src/index.ts"</code></pre>
-        <p>其他客户端用标准 mcpServers JSON（入口同样写绝对路径）：</p>
+        <p>其他客户端源码路线的 mcpServers JSON（入口同样写绝对路径）：</p>
         <pre><code>{'{"mcpServers":{"remote-reader":{"command":"bun","args":["/absolute/path/to/remote-reader/apps/mcp-bridge/src/index.ts"]}}}'}</code></pre>
 
         <h3>错误处理</h3>

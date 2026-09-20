@@ -87,14 +87,22 @@ The agent reads the `<details id="agent-guide">` block in the login page's SSR H
 
 The local MCP bridge lets an agent upload via an MCP tool call; the bridge holds the token locally and never exposes it to the agent. Once configured, the agent just calls `upload_document({ name, content, path? })` to get the view link.
 
-> **The bridge entry path must be absolute.** The working directory an MCP client spawns the stdio process from is not guaranteed (some clients/launch paths do not pass `cwd`); a relative path fails intermittently with `Module not found` — the typical symptom is "the tool clearly works, but the client's status page shows failed".
+Install the bridge (choose one):
 
-```bash
-# Claude Code integration (run from the repo root; $(pwd) expands to an absolute path at registration time)
-claude mcp add remote-reader bun "$(pwd)/apps/mcp-bridge/src/index.ts" \
-  -e REMOTE_READER_URL=http://localhost:5173 \
-  -e REMOTE_READER_TOKEN=rr_xxx
-```
+- **npm package (recommended)**: `npx -y remote-reader-bridge` / `bunx remote-reader-bridge` — requires node ≥18 only, no repo clone. Register (after writing `~/.config/remote-reader/config.json` no env is needed):
+
+  ```bash
+  claude mcp add remote-reader -- npx -y remote-reader-bridge
+  ```
+
+- **From source**: `git clone https://github.com/earneet/remote-reader && bun install`. **The bridge entry path must be absolute** — the working directory an MCP client spawns the stdio process from is not guaranteed (some clients/launch paths do not pass `cwd`); a relative path fails intermittently with `Module not found` (typical symptom: "the tool works, but the client's status page shows failed").
+
+  ```bash
+  # Claude Code integration (run from the repo root; $(pwd) expands to an absolute path at registration time)
+  claude mcp add remote-reader bun "$(pwd)/apps/mcp-bridge/src/index.ts" \
+    -e REMOTE_READER_URL=http://localhost:5173 \
+    -e REMOTE_READER_TOKEN=rr_xxx
+  ```
 
 For any other MCP client that reads a config file directly (Cursor / Cline / Windsurf / opencode / ZCode …), use the standard `mcpServers` JSON with an absolute entry path (on Windows PowerShell use `"$PWD/apps/mcp-bridge/src/index.ts"`; ZCode nests the same fields under `mcp.servers` in `~/.zcode/cli/config.json`):
 

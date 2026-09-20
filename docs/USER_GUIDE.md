@@ -98,16 +98,21 @@ Docker 部署：migration 在镜像构建期已执行；schema 变更需重建�
 
 Agent 读取登录页 SSR HTML 中的 `<details id="agent-guide">` 指引块（对人默认折叠、对 Agent 始终可见），自动执行：
 
-1. 安装桥：`bunx remote-reader-bridge`（npm 包，如已发布）或 `git clone <BRIDGE_REPO_URL> && bun install`
+1. 安装桥：`npx -y remote-reader-bridge` / `bunx remote-reader-bridge`（npm 包，推荐，node ≥18 无需克隆）或 `git clone <BRIDGE_REPO_URL> && bun install`（源码）
 2. `POST /api/v1/auth/register`（邀请码 + 邮箱 + 密码；已有账号用 `POST /api/v1/auth/login`）→ 种 session cookie
 3. `POST /api/v1/auth/api-token`（带 session cookie）→ 一次性返回 `rr_` token
-4. 写 `~/.config/remote-reader/config.json` → 注册 MCP server
+4. 写 `~/.config/remote-reader/config.json` → 注册 MCP server（npm 路线 `claude mcp add remote-reader -- npx -y remote-reader-bridge`，无需绝对路径）
 
 错误形状统一 `{"message":"..."}`：403 邀请码无效 / 409 邮箱已注册 / 429 限流 / 401 session 失效。
 
 ### 2.1 推荐：本地 MCP 桥 ✅
 
-桥（`apps/mcp-bridge`）是 stdio MCP server，暴露 `upload_document` 工具，本地持有 token 转发到 Web API。Agent 无需手写 HTTP。桥无原生依赖，`bun apps/mcp-bridge/src/index.ts` 直跑。**注册到 MCP 客户端时入口必须写绝对路径**——客户端拉起 stdio 进程的工作目录没有保证，相对路径会间歇性 `Module not found`（典型症状：工具能用但状态页显示 failed）。
+桥（`apps/mcp-bridge`）是 stdio MCP server，暴露 `upload_document` 工具，本地持有 token 转发到 Web API。Agent 无需手写 HTTP。
+
+**安装（二选一）**：
+
+- **npm 包（推荐）**：`npx -y remote-reader-bridge` / `bunx remote-reader-bridge`（node ≥18，无需 bun 与克隆）。写了配置文件后注册只要一行：`claude mcp add remote-reader -- npx -y remote-reader-bridge`
+- **源码**：`git clone` 本仓库 + `bun install`，桥无原生依赖可直跑。**注册进 MCP 客户端时源码入口必须写绝对路径**——客户端拉起 stdio 进程的工作目录没有保证，相对路径会间歇性 `Module not found`（典型症状：工具能用但状态页显示 failed）。
 
 两种配置（env 优先于文件）：
 

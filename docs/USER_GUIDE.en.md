@@ -98,16 +98,21 @@ Send this to your agent (replace the invite code):
 
 The agent reads the `<details id="agent-guide">` block from the login page's SSR HTML (collapsed for humans by default, always visible to agents) and automatically:
 
-1. Installs the bridge: `bunx remote-reader-bridge` (npm package, once published) or `git clone <BRIDGE_REPO_URL> && bun install`
+1. Installs the bridge: `npx -y remote-reader-bridge` / `bunx remote-reader-bridge` (npm package, recommended — node ≥18, no clone) or `git clone <BRIDGE_REPO_URL> && bun install` (from source)
 2. `POST /api/v1/auth/register` (invite code + email + password; existing accounts use `POST /api/v1/auth/login`) → sets the session cookie
 3. `POST /api/v1/auth/api-token` (with session cookie) → returns a one-time `rr_` token
-4. Writes `~/.config/remote-reader/config.json` → registers the MCP server
+4. Writes `~/.config/remote-reader/config.json` → registers the MCP server (`claude mcp add remote-reader -- npx -y remote-reader-bridge` for the npm route, no absolute path needed)
 
 Error shape is uniformly `{"message":"..."}`: 403 invalid invite / 409 email already registered / 429 rate limited / 401 session expired.
 
 ### 2.1 Recommended: Local MCP bridge ✅
 
-The bridge (`apps/mcp-bridge`) is a stdio MCP server that exposes the `upload_document` tool, holds the token locally, and forwards requests to the Web API. Agents need not write HTTP by hand. The bridge has no native dependencies — `bun apps/mcp-bridge/src/index.ts` runs directly. **When registering the entry with an MCP client, always use an absolute path** — the working directory a client spawns the stdio process from is not guaranteed, and a relative path fails intermittently with `Module not found` (typical symptom: the tool works but the status page shows failed).
+The bridge (`apps/mcp-bridge`) is a stdio MCP server that exposes the `upload_document` tool, holds the token locally, and forwards requests to the Web API. Agents need not write HTTP by hand.
+
+**Install (choose one)**:
+
+- **npm package (recommended)**: `npx -y remote-reader-bridge` / `bunx remote-reader-bridge` (node ≥18, no bun or clone required). After writing the config file, registration is one line: `claude mcp add remote-reader -- npx -y remote-reader-bridge`
+- **From source**: `git clone` this repo + `bun install`; the bridge has no native dependencies and runs directly. **When registering the source entry with an MCP client, always use an absolute path** — the working directory a client spawns the stdio process from is not guaranteed, and a relative path fails intermittently with `Module not found` (typical symptom: the tool works but the status page shows failed).
 
 Two configuration options (env takes precedence over file):
 

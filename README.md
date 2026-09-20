@@ -87,14 +87,22 @@ Agent 读取登录页 SSR 输出的 `<details id="agent-guide">` 指引块（对
 
 本地 MCP 桥让 Agent 以 MCP 工具调用上传，桥在本地持有 token、不暴露给 Agent。配置好后 Agent 调 `upload_document({ name, content, path? })` 即可拿到查看链接。
 
-> **桥入口必须写绝对路径。** MCP 客户端拉起 stdio 进程时的工作目录没有保证（部分客户端/启动路径不传 `cwd`），相对路径会间歇性 `Module not found`——典型症状是"工具明明能用，客户端状态页却显示 failed"。
+安装桥（二选一）：
 
-```bash
-# Claude Code 接入（在仓库根目录执行；$(pwd) 在注册时展开为绝对路径）
-claude mcp add remote-reader bun "$(pwd)/apps/mcp-bridge/src/index.ts" \
-  -e REMOTE_READER_URL=http://localhost:5173 \
-  -e REMOTE_READER_TOKEN=rr_xxx
-```
+- **npm 包（推荐）**：`npx -y remote-reader-bridge` / `bunx remote-reader-bridge`，node ≥18 即可，无需克隆仓库。注册（写了 `~/.config/remote-reader/config.json` 后无需 env）：
+
+  ```bash
+  claude mcp add remote-reader -- npx -y remote-reader-bridge
+  ```
+
+- **源码克隆**：`git clone https://github.com/earneet/remote-reader && bun install`。**桥入口必须写绝对路径**——MCP 客户端拉起 stdio 进程时的工作目录没有保证（部分客户端/启动路径不传 `cwd`），相对路径会间歇性 `Module not found`——典型症状是"工具明明能用，客户端状态页却显示 failed"。
+
+  ```bash
+  # Claude Code 接入（在仓库根目录执行；$(pwd) 在注册时展开为绝对路径）
+  claude mcp add remote-reader bun "$(pwd)/apps/mcp-bridge/src/index.ts" \
+    -e REMOTE_READER_URL=http://localhost:5173 \
+    -e REMOTE_READER_TOKEN=rr_xxx
+  ```
 
 其他 MCP 客户端（Cursor / Cline / Windsurf / opencode / ZCode 等直接读配置文件的）用标准 `mcpServers` JSON，入口同样写绝对路径（Windows PowerShell 用 `"$PWD/apps/mcp-bridge/src/index.ts"`；ZCode 写在 `~/.zcode/cli/config.json` 的 `mcp.servers` 下，字段含义相同）：
 
