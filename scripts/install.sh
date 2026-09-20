@@ -17,6 +17,7 @@ set -euo pipefail
 # ---- 默认参数 ----
 INSTALL_DIR="${INSTALL_DIR:-/opt/remote-reader}"
 DATA_DIR="${DATA_DIR:-/var/lib/remote-reader}"
+LOG_DIR="${LOG_DIR:-/var/log/remote-reader}"
 PORT="${PORT:-3000}"
 SERVICE_USER="${SERVICE_USER:-remote-reader}"
 SERVICE_NAME="${SERVICE_NAME:-remote-reader}"
@@ -108,7 +109,9 @@ fi
 
 # ---- 4. 创建目录 + 复制代码 ----
 log "创建目录"
-mkdir -p "${INSTALL_DIR}" "${DATA_DIR}" "${CONFIG_DIR}"
+mkdir -p "${INSTALL_DIR}" "${DATA_DIR}" "${CONFIG_DIR}" "${LOG_DIR}"
+chown "${SERVICE_USER}:${SERVICE_USER}" "${LOG_DIR}"
+chmod 750 "${LOG_DIR}"
 
 log "复制代码到 ${INSTALL_DIR}"
 # 排除：开发产物、运行时数据、版本控制；保留 source maps 以便排错
@@ -227,9 +230,14 @@ MemoryDenyWriteExecute=no
 RemoveIPC=yes
 CapabilityBoundingSet=
 AmbientCapabilities=
-# 仅允许写数据目录；代码/配置只读
-ReadWritePaths=${DATA_DIR}
+# 仅允许写数据目录与日志目录；代码/配置只读
+ReadWritePaths=${DATA_DIR} ${LOG_DIR}
 BindReadOnlyPaths=${INSTALL_DIR}
+
+# 日志落盘 /var/log/remote-reader/app.log（访问+错误合流，按时间序排障最直观）；
+# journald 不再收应用日志（append: 与 journal 互斥），logrotate copytruncate 兜轮转
+StandardOutput=append:${LOG_DIR}/app.log
+StandardError=append:${LOG_DIR}/app.log
 
 # 资源限制
 LimitNOFILE=65536
@@ -241,6 +249,23 @@ WantedBy=multi-user.target
 EOF
 chmod 644 "${UNIT_FILE}"
 ok "unit 已写入"
+
+# ---- 7.5 logrotate（app.log 每日轮转，copytruncate 配合 systemd append: 的持有 fd）----
+LOGROTATE_FILE="/etc/logrotate.d/${SERVICE_NAME}"
+log "写入 ${LOGROTATE_FILE}"
+cat > "${LOGROTATE_FILE}" <<EOF
+${LOG_DIR}/app.log {
+    daily
+    rotate 14
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+}
+EOF
+chmod 644 "${LOGROTATE_FILE}"
+ok "logrotate 已写入（daily × 14 份，copytruncate）"
 
 # ---- 8. 启动 ----
 log "systemctl daemon-reload + enable + start"
@@ -269,6 +294,7 @@ printf '%s═══════════════════════�
 echo
 printf '  首页/登录           %s/login\n' "${BASE_URL}"
 printf '  健康检查            %s/api/health\n' "${BASE_URL}"
+printf '  应用日志            %s/app.log（logrotate 每日×14）\n' "${LOG_DIR}"
 echo
 printf '  %s注册首个管理员所需邀请码%s（仅显示一次，妥善保存）：\n' "${C_YELLOW}" "${C_RESET}"
 printf '      %s%s%s\n' "${C_BOLD}" "${INITIAL_INVITE_CODE}" "${C_RESET}"

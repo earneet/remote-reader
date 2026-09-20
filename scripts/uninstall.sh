@@ -21,6 +21,8 @@ DATA_DIR="${DATA_DIR:-/var/lib/remote-reader}"
 CONFIG_DIR="/etc/${SERVICE_NAME}"
 UNIT_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 ENV_FILE="${CONFIG_DIR}/env"
+LOG_DIR="${LOG_DIR:-/var/log/${SERVICE_NAME}}"
+LOGROTATE_FILE="/etc/logrotate.d/${SERVICE_NAME}"
 
 # ---- 解析命令行参数 ----
 PURGE=0
@@ -69,10 +71,11 @@ confirm() {
 [[ $EUID -eq 0 ]] || die "需要 root 权限,请用 sudo 运行:sudo $0"
 [[ -d /run/systemd/system ]] || die "未检测到 systemd,本脚本仅支持 systemd 发行版"
 
-# 拒绝危险路径:卸载要 rm -rf,DATA_DIR/INSTALL_DIR 为空或根目录会酿成灾难
+# 拒绝危险路径:卸载要 rm -rf,DATA_DIR/INSTALL_DIR/LOG_DIR 为空或根目录会酿成灾难
 [[ -n "${SERVICE_NAME}" ]] || die "SERVICE_NAME 不能为空"
 [[ -n "${INSTALL_DIR}" && "${INSTALL_DIR}" != "/" ]] || die "INSTALL_DIR 非法(${INSTALL_DIR:-空}),拒绝执行"
 [[ -n "${DATA_DIR}" && "${DATA_DIR}" != "/" ]] || die "DATA_DIR 非法(${DATA_DIR:-空}),拒绝执行"
+[[ -n "${LOG_DIR}" && "${LOG_DIR}" != "/" && "${LOG_DIR}" != "/var/log" ]] || die "LOG_DIR 非法(${LOG_DIR:-空}),拒绝执行"
 
 # ---- 2. 存在性检测(unit / 代码 / 数据 / 用户 全无残留 → 幂等退出)----
 installed=0
@@ -132,6 +135,11 @@ ok "unit 已删除 + daemon-reload"
 log "删除代码 + 配置"
 rm -rf "${INSTALL_DIR}" "${CONFIG_DIR}"
 ok "代码/配置已删除"
+
+log "删除日志目录 + logrotate 配置"
+rm -rf "${LOG_DIR}"
+rm -f "${LOGROTATE_FILE}"
+ok "日志已删除（${LOG_DIR}）"
 
 if [[ "${PURGE}" -eq 1 ]]; then
     log "删除数据目录 ${DATA_DIR}"

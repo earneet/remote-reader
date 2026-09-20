@@ -60,6 +60,7 @@ sudo ./scripts/install.sh
 | `SERVICE_USER` | `remote-reader` | 运行专用系统用户名 |
 | `SERVICE_NAME` | `remote-reader` | systemd unit 名 |
 | `BASE_URL` | 自动探测 `http://<内网IP>:<PORT>` | 上传返回链接里的外链前缀。**外网部署必改**为你的域名 |
+| `LOG_DIR` | `/var/log/remote-reader` | 应用日志目录（app.log，logrotate 每日×14） |
 
 示例：
 
@@ -96,6 +97,7 @@ sudo INSTALL_DIR=/opt/rr-prod DATA_DIR=/var/lib/rr-prod SERVICE_NAME=rr-prod ./s
 ═══════ Remote Reader 已安装并启动 ═══════
   首页/登录           http://192.168.1.10:3000/login
   健康检查            http://192.168.1.10:3000/api/health
+  应用日志            /var/log/remote-reader/app.log
 
   注册首个管理员所需邀请码（仅显示一次）：
       0caa11bec3be
@@ -132,14 +134,18 @@ ls -l /etc/remote-reader/env
 | `/var/lib/remote-reader/` | DB + 文档 | ✅ **必须备份** |
 | `/etc/remote-reader/env` | 配置（含 SESSION_SECRET / INVITE_CODE） | ✅ 备份（注意密钥） |
 | `/etc/systemd/system/remote-reader.service` | systemd unit | ❌ 可重生成 |
+| `/var/log/remote-reader/` | 应用日志（logrotate×14） | ❌ 排障后可清 |
 
 ### 日志
 
+应用日志（含每请求访问日志 `[access] METHOD path status ip= origin=`）落盘文件（注：CSRF 403 在框架层先于应用日志拒绝，此类请求不在 `[access]` 中，需外层反代 nginx 日志加 `$http_origin` 取证）：
+
 ```bash
-sudo journalctl -u remote-reader -f              # 实时跟踪
-sudo journalctl -u remote-reader -n 200          # 最近 200 行
-sudo journalctl -u remote-reader --since "1h ago"
+sudo tail -f /var/log/remote-reader/app.log      # 实时跟踪
+sudo tail -n 200 /var/log/remote-reader/app.log  # 最近 200 行
 ```
+
+systemd 层面只剩启停/崩溃信息：`sudo journalctl -u remote-reader -n 50`。logrotate 每日轮转保留 14 份（`/etc/logrotate.d/remote-reader`）。
 
 ### 常用运维命令
 
@@ -269,7 +275,7 @@ A: 当前没有 dry-run 模式。可以先 `bash -n scripts/install.sh` 看语�
 5. 执行清理（每步容错，半残状态也能清干净）：
    - `systemctl stop` + `disable`
    - 删 unit → `daemon-reload` + `reset-failed`
-   - `rm -rf` 代码目录 + 配置目录
+   - `rm -rf` 代码目录 + 配置目录 + 日志目录（含 logrotate 配置）
    - **仅 `--purge`**：`rm -rf` 数据目录
    - `userdel`（**永不加 `-r`**，见下）
 6. ufw 启用则提示（只读不删）

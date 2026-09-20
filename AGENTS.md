@@ -109,6 +109,8 @@ docker compose up --build                      # 一键起服务（:3000），da
 
 **Docker 非 root 运行**：`docker-entrypoint.sh` 先 `chown -R node:node /app/data`（host 首次建卷常是 root 属主），再用 `runuser -u node` 降权跑 `node apps/web/build/index.js`；healthcheck 命中 `/api/health`（含 DB `SELECT 1`，DB/磁盘故障返回 503）。改 entrypoint / Dockerfile 前看 sub3 设计 spec。
 
+**日志**：systemd 部署应用日志落盘 `/var/log/remote-reader/app.log`（unit `StandardOutput/StandardError=append:` + `ReadWritePaths` 含 LOG_DIR + logrotate 每日×14 copytruncate；journald 只剩启停/崩溃）；hooks.server.ts 每请求打 `[access] METHOD path status ip= origin=`（`/_app/` 静态资源不记）。**已知边界**：SvelteKit 的 CSRF 403（Cross-site POST forbidden）在 hooks 链之前由框架拒绝，`[access]` 看不到此类请求——需在外层反代（nginx `log_format` 加 `$http_origin`）取证。docker 部署日志走容器 stdout（`docker compose logs`）。
+
 ## 环境变量（完整清单见 `.env.example`）
 
 env 助手为 `lib/server/env.ts`（共享 getter + DATA_DIR 等调用点就地读取，测试需逐文件覆写）；生产启动校验（SESSION_SECRET/INITIAL_INVITE_CODE/BASE_URL/BODY_SIZE_LIMIT×1.5）见 `lib/server/startup-check.ts`。
