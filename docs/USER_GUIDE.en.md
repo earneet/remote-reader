@@ -90,6 +90,21 @@ Docker deployments: migrations are already applied during image build; schema ch
 
 ## 2. Agent Operator
 
+### 2.0 Agent self-service onboarding (zero manual steps, recommended)
+
+Send this to your agent (replace the invite code):
+
+> Please visit https://your-host — the "Agent onboarding guide" in the page will walk you through installing the MCP bridge and registering; use invite code ri_xxx, and agree on email/password with me.
+
+The agent reads the `<details id="agent-guide">` block from the login page's SSR HTML (collapsed for humans by default, always visible to agents) and automatically:
+
+1. Installs the bridge: `bunx remote-reader-bridge` (npm package, once published) or `git clone <BRIDGE_REPO_URL> && bun install`
+2. `POST /api/v1/auth/register` (invite code + email + password; existing accounts use `POST /api/v1/auth/login`) → sets the session cookie
+3. `POST /api/v1/auth/api-token` (with session cookie) → returns a one-time `rr_` token
+4. Writes `~/.config/remote-reader/config.json` → registers the MCP server
+
+Error shape is uniformly `{"message":"..."}`: 403 invalid invite / 409 email already registered / 429 rate limited / 401 session expired.
+
 ### 2.1 Recommended: Local MCP bridge ✅
 
 The bridge (`apps/mcp-bridge`) is a stdio MCP server that exposes the `upload_document` tool, holds the token locally, and forwards requests to the Web API. Agents need not write HTTP by hand. The bridge has no native dependencies — `bun apps/mcp-bridge/src/index.ts` runs directly. **When registering the entry with an MCP client, always use an absolute path** — the working directory a client spawns the stdio process from is not guaranteed, and a relative path fails intermittently with `Module not found` (typical symptom: the tool works but the status page shows failed).

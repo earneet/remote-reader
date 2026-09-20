@@ -249,6 +249,7 @@ Docker deployments: migrations are already executed at image build time; a schem
 | `DATABASE_PATH` | `./data/app.db` | SQLite path (relative to the runtime cwd) |
 | `DATA_DIR` | `./data/documents` | Root directory where documents persist to disk |
 | `BASE_URL` | `http://localhost:5173` | External URL prefix used when generating share links |
+| `BRIDGE_REPO_URL` | `https://github.com/earneet/remote-reader` | Bridge source repo URL shown in the login-page agent guide (change for custom forks) |
 | `MAX_UPLOAD_BYTES` | `5242880` (5MB) | Per-document size cap |
 | `BODY_SIZE_LIMIT` | adapter-node default 512K | **Bytes (numeric)**, gateway-layer body cap; must be > `MAX_UPLOAD_BYTES` |
 | `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW_MS` | `60` / `60000` | Per-token upload rate limit |

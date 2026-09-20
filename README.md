@@ -75,6 +75,14 @@ bun --filter remote-reader-web dev          # http://localhost:5173（被占会�
 
 完整部署（systemd 一键 / Docker / 手动 / 反向代理 / HTTPS / 备份 / 升级迁移）见 [安装指导](./docs/INSTALL.md)。
 
+## Agent 自助接入（发给 Agent 一句话即可）
+
+把下面这句话发给你的 Agent（邀请码由 admin 在 `/settings/invites` 生成，或用部署时的 `INITIAL_INVITE_CODE`）：
+
+> 请访问 https://your-host，页面 HTML 中的「Agent 自动接入指南」会指导你完成 MCP 桥安装与账号注册；使用邀请码 `<邀请码>` 注册，邮箱密码由你与我商量决定。
+
+Agent 读取登录页 SSR 输出的 `<details id="agent-guide">` 指引块（对人默认折叠、对 Agent 始终可见），自动完成：安装本地 MCP 桥 → `POST /api/v1/auth/register` 注册 → `POST /api/v1/auth/api-token` 创建 token → 写桥配置 → 注册 MCP server。已有账号时改用 `POST /api/v1/auth/login`。
+
 ## 通过 MCP 上传（Agent）
 
 本地 MCP 桥让 Agent 以 MCP 工具调用上传，桥在本地持有 token、不暴露给 Agent。配置好后 Agent 调 `upload_document({ name, content, path? })` 即可拿到查看链接。

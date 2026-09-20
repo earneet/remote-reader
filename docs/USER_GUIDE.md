@@ -90,6 +90,21 @@ Docker 部署：migration 在镜像构建期已执行；schema 变更需重建�
 
 ## 2. Agent 操作者
 
+### 2.0 Agent 自助接入（零手工，推荐）
+
+把这句话发给你的 Agent（替换邀请码）：
+
+> 请访问 https://your-host，页面里的「Agent 自动接入指南」会指导你完成 MCP 桥安装与账号注册；使用邀请码 ri_xxx 注册，邮箱密码由你与我商量决定。
+
+Agent 读取登录页 SSR HTML 中的 `<details id="agent-guide">` 指引块（对人默认折叠、对 Agent 始终可见），自动执行：
+
+1. 安装桥：`bunx remote-reader-bridge`（npm 包，如已发布）或 `git clone <BRIDGE_REPO_URL> && bun install`
+2. `POST /api/v1/auth/register`（邀请码 + 邮箱 + 密码；已有账号用 `POST /api/v1/auth/login`）→ 种 session cookie
+3. `POST /api/v1/auth/api-token`（带 session cookie）→ 一次性返回 `rr_` token
+4. 写 `~/.config/remote-reader/config.json` → 注册 MCP server
+
+错误形状统一 `{"message":"..."}`：403 邀请码无效 / 409 邮箱已注册 / 429 限流 / 401 session 失效。
+
 ### 2.1 推荐：本地 MCP 桥 ✅
 
 桥（`apps/mcp-bridge`）是 stdio MCP server，暴露 `upload_document` 工具，本地持有 token 转发到 Web API。Agent 无需手写 HTTP。桥无原生依赖，`bun apps/mcp-bridge/src/index.ts` 直跑。**注册到 MCP 客户端时入口必须写绝对路径**——客户端拉起 stdio 进程的工作目录没有保证，相对路径会间歇性 `Module not found`（典型症状：工具能用但状态页显示 failed）。

@@ -338,6 +338,7 @@ bun --filter remote-reader-web db:migrate    # 应用（生产在停服/维护�
 | `DATABASE_PATH` | `./data/app.db` | SQLite 路径（相对运行时 cwd） |
 | `DATA_DIR` | `./data/documents` | 文档落盘根目录 |
 | `BASE_URL` | `http://localhost:5173` | 生成分享链接的外链前缀 |
+| `BRIDGE_REPO_URL` | `https://github.com/earneet/remote-reader` | 登录页 Agent 指引块展示的桥源码克隆地址（自定义 fork 时修改） |
 | `MAX_UPLOAD_BYTES` | `5242880`（5MB） | 单文档大小上限 |
 | `BODY_SIZE_LIMIT` | adapter-node 默认 512K | **字节数（数字）**，网关层 body 上限，须 > `MAX_UPLOAD_BYTES` |
 | `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW_MS` | `60` / `60000` | 每 token 上传速率 |
