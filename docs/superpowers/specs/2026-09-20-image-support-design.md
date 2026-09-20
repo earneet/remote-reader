@@ -94,6 +94,8 @@ sequenceDiagram
 | 22 | 软删除墓碑 | ready 图 GC 不物理删行，置 `deleted` 留墓碑（UNIQUE 占位实现名字永不复用，无应用层竞态）；同内容重传时复活（全字段重置） |
 | 23 | 插件元数据 | 插件自声明 `id`（公共契约，有数据即冻结）；核心启动建注册表 `Map<id, store>`；`uploadUrlTtlSeconds?` 可选（默认 600）；presign `opts?` 不透明透传缝（未来七牛 imageView2 等） |
 | 24 | 插件能力分级 | L0 = put/get/delete/head（+getRange）→ 全功能可用（上传走 relay、取图走代理，吃服务器带宽）；L1 = +presign → 直传+直连。**presign 永远是加速项不是依赖，代理路由是万能兜底** |
+| 25 | 图片定位原则 | **图片是文档的内嵌内容，不是一等公民资产**——精细管理（去重/存根/GC）动机是控制存储成本，不提供图片管理能力；一切可见性/操作需求除非来自真实场景不进 v1（列表 API 备案） |
+| 26 | 取图缓存 | 代理路由 `no-cache` + `ETag="<content_hash>"`（协商复用，撤销即时性与 no-store 等价）；直连路径**签名时间桶对齐**（TTL/6 一桶，桶内 URL 稳定 → 浏览器缓存命中）；代理路由 v1 不支持 Range（img 全量加载 + Safari bytes=0-1 探测对 200 兼容）；直连图客户端 `onerror` 兜底占位（带原因，§7.5） |
 
 ## 4. 数据模型（完备版，经 Oracle 审查修复）
 
@@ -256,6 +258,10 @@ token 级行内改写（image token 的 `.map` 行内替换 src 编码形态为*
 
 `<span class="rr-img-missing" title="<原因>">🖼 [alt 或 name]</span>`，虚线框样式，不参与 lightbox。
 
+### 7.5 直连图客户端兜底（onerror）
+
+直连 CDN 图的加载失败（签名过期后直开/CDN 故障）发生在浏览器运行时，服务器侧占位管不到——`MarkdownViewer` 对正文 `<img>` 事件委托 `onerror`：替换为统一 `rr-img-missing` 占位（**带原因 title**，如"图片加载失败：CDN 不可达或链接已过期，刷新页面重试"），与服务器侧占位同款观感，避免浏览器原生裂图在深色模式下的糟糕样式。
+
 ## 8. BlobStore 与插件体系
 
 ```ts
@@ -279,13 +285,38 @@ interface BlobStore {
 - 冷却通用化：tiering 注入 BlobStore；documents 冷档行记录 backend；读冷档按行路由
 - 数据结构不为未来预留 `backend_meta` 列（YAGNI；SQLite 加列廉价，等真实消费者）
 
-## 9. GC 与回收
+## 9. 引用关系管理与 GC
 
-- **触发一·文档删除**：删除事务内 SELECT 快照 refs 清单 → 删文档（CASCADE）→ 逐图：事务内复查 refs==0 → 条件式软删 → 事务后按 §4.3-2 反查删 blob
-- **触发二·覆盖上传**：refs 全量 diff 重算（增：校验 ready 后 INSERT；删：移除后同款归零检查）
-- **触发三·周期兜底**（tiering tick，分批 LIMIT）：pending 超 1h 物理删（条件式+反查）；ready 无 refs 超 24h 软删（条件式+反查）
-- 名字语义：pending 释放、ready 墓碑永不释放（除非 90d 墓碑物理清理——备案后续）
-- 全流程遵守 §4.3 安全包五不变量
+### 9.1 引用计数：不存计数，派生计数
+
+`images` 表**没有 ref_count 列**（故意）：引用关系以 `image_refs` 行存在，计数永远是 `COUNT(*)` 实时派生（有索引）——存计数字段会引入加减丢失/漂移类不一致，不存则这类问题根上不存在。更新时机仅三处：文档创建（批量 `INSERT OR IGNORE`，只对 ready 行）/ 覆盖更新（§9.2）/ 删除（快照 + CASCADE + 终态检查）。移动/重命名 md **零操作**（refs 挂 document_id）。
+
+### 9.2 覆盖更新：集合差原子重算（不变量 R1）
+
+> **R1**：覆盖上传的 refs 重算 = **单个同步事务内的集合差（set difference，非文本逐行 diff）**：`toAdd = new−old` 先 INSERT，`toRemove = old−new` 后 DELETE；GC 归零检查只对 toRemove 做、只在事务提交后、检查时重新 `COUNT(refs)==0` 才条件式软删。**严禁任何"先删后判归零再补插"的分步序列。**
+
+推演关键场景（唯一引用者覆盖后仍引用同一图）：`I ∈ old∩new`（不变集）→ 不进 toAdd 也不进 toRemove → 引用原地不动从未归零，GC 检查名单上根本没有它——"先减到零再发现还要用"的中间态在集合差语义下结构性不存在。即使实现写成全删全加，同事务原子性下外部观察者（GC tick/渲染）也看不到中间态。
+
+### 9.3 GC 三触发点（均遵守 §4.3 安全包）
+
+- **文档删除**：删除事务内 SELECT 快照该 md（含子树全部 file 行，deleteNode 先例）的 refs 清单 → 删文档（CASCADE 清 refs）→ 逐图终态检查归零 → 条件式软删墓碑 → 事务后按 §4.3-2 反查删 blob
+- **覆盖上传**：§9.2 的集合差重算；toRemove 触发同款归零检查
+- **周期兜底**（tiering tick，分批 LIMIT）：pending 超 1h 物理删；ready 无 refs 超 24h 软删；**顺带清理悬空 ref**（`refs JOIN images WHERE status≠'ready'` 的行删除）
+
+### 9.4 不一致态的收敛（发现者 + 收敛器）
+
+| 坏态 | 危害 | 发现者（防御） | 收敛器（最终修复） |
+|---|---|---|---|
+| 悬空 ref（指向非 ready 图） | 渲染占位不炸（替换只认 ready） | 渲染层天然防御 | 周期任务清行（§9.3） |
+| 幽灵图（无 refs 该死未死） | 仅存储浪费 | 无需防御 | **24h 周期回收 = 全局收敛器** |
+| 行 ready 但 blob 丢失（仅顺序写反的 bug 可致；正确序 = 先软删行后删 blob） | 裂图 + exists 复用坏行 | 顺序不变量 + serve 失败日志 | 不变量测试锁定；人工修复备案 |
+| 墓碑复活竞态残留 | 多余对象 | —— | 24h 收敛器 |
+
+**总原则（不对称设计）：宁可晚删，绝不早删。** 晚删最坏代价 = 一份资源多占 24h（周期回收收敛）；早删 = 丢数据且部分不可自愈。全部机制（R1/终态判定/删 blob 反查/条件式写）服务于"早删不可能"，晚删交给常转的清洁工。
+
+### 9.5 名字语义
+
+pending 超时释放；ready 墓碑永不释放（90d 物理清理备案）。
 
 ## 10. 前端
 
