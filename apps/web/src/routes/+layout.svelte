@@ -1,6 +1,7 @@
 <script lang="ts">
     import '../styles/theme.css';
     import { page } from '$app/state';
+    import { enhance } from '$app/forms';
     import ThemeToggle from '$components/ThemeToggle.svelte';
     let { data, children } = $props();
     const showNav = $derived(
@@ -43,7 +44,9 @@
     </details>
     <span class="email">{data.user?.email}</span>
     <ThemeToggle />
-    <form method="POST" action="/logout">
+    <!-- use:enhance 走 fetch 而非整页导航提交：部分隐私配置（Edge 严格模式/扩展）会在
+         导航型 POST 上发 Origin: null 而被 CSRF 校验 403——fetch 请求不受影响（登录同理） -->
+    <form method="POST" action="/logout" use:enhance>
         <button type="submit">登出</button>
     </form>
 </header>
