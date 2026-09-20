@@ -34,6 +34,9 @@ apps/mcp-bridge/config.local.*
 .omo/
 *.log
 AGENTS.local.md
+# 本地私有记忆（决策日志及其详情文件，绝不入库）
+MEMORY.md
+memories/
 
 # 桥 npm 发布构建产物
 apps/mcp-bridge/dist/

@@ -133,5 +133,6 @@ env 助手为 `lib/server/env.ts`（共享 getter + DATA_DIR 等调用点就地�
 
 ## 文档指针
 
+- 决策日志：`MEMORY.md`（行索引指针式，`[D-xxx]` 编号；**本地私有文件，已 gitignore 不入库**，各协作者各自维护、clone 后不存在属正常）。完成重要技术决策（选型/架构裁定/关键修复策略）后必须追加一行（日期+决策+一句理由）；讨论历史决策时若文件存在则引用编号不重述全文
 - 设计 spec（权威）：`docs/superpowers/specs/2026-07-18-remote-reader-design.md`
 - 实现计划：`docs/superpowers/plans/`（按子计划编号）
