@@ -1,10 +1,11 @@
 import { test, expect, afterEach } from 'vitest';
-import { envInt, getBaseUrl, getSessionMaxAgeSeconds } from '../src/lib/server/env';
+import { envInt, getBaseUrl, getBridgeRepoUrl, getSessionMaxAgeSeconds } from '../src/lib/server/env';
 
 afterEach(() => {
     delete process.env.TEST_ENV_INT;
     delete process.env.BASE_URL;
     delete process.env.SESSION_MAX_AGE;
+    delete process.env.BRIDGE_REPO_URL;
 });
 
 test('envInt undefined/空串 → 默认', () => {
@@ -57,4 +58,10 @@ test('getSessionMaxAgeSeconds 默认 30 天 + env 覆盖', () => {
     expect(getSessionMaxAgeSeconds()).toBe(2_592_000);
     process.env.SESSION_MAX_AGE = '3600';
     expect(getSessionMaxAgeSeconds()).toBe(3600);
+});
+
+test('getBridgeRepoUrl：默认值 / env 覆盖 / 尾斜杠归一化', () => {
+    expect(getBridgeRepoUrl()).toBe('https://github.com/earneet/remote-reader');
+    process.env.BRIDGE_REPO_URL = 'https://git.example.com/foo/bar/';
+    expect(getBridgeRepoUrl()).toBe('https://git.example.com/foo/bar');
 });
