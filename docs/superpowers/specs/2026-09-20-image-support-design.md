@@ -30,33 +30,40 @@ sequenceDiagram
     participant Ag as Agent
     participant Br as MCP 桥（本地）
     participant Sv as Web 服务器
-    participant CDN as 七牛/CDN + 读者浏览器
+    participant OSS as 云存储（七牛/R2/MinIO）
 
     Note over Ag,Br: Agent 只管写 md，引用本地路径
     Ag->>Br: upload_document({name:"report.md",<br/>content:"…![fig](/tmp/fig.png)…![logo](logo.png)…"})
 
-    Note over Br: ① markdown-it token 级解析（跳过 code/fence）<br/>提取本地图片引用；相对路径按桥 cwd 解析
-    Br->>Br: 读文件 + sha256
-    loop 每张本地图
-        Br->>Sv: GET /api/v1/images/by-hash/<hash>（预查）
-        alt 已存在 → 跳过上传
-            Sv-->>Br: 200 {name:"logo-2026.png"}
-        else 新图
-            Br->>Sv: POST /api/v1/images {name, content_base64}
-            Sv->>Sv: magic bytes 校验 → hash 去重<br/>同名不同内容 → 自动后缀分配新名
-            Sv-->>Br: {name:"fig.png", created:true}
+    Note over Br: ① token 级解析提取本地引用<br/>② 预检阶段：全部图 stat + magic 一次性体检<br/>（任何问题 → 完整错误清单，零字节上传）
+    Br->>Br: 逐图 sha256 + md5
+
+    loop 每张新图（预检全过后）
+        Br->>Sv: POST /api/v1/images/init {name, hash, md5, size}
+        alt owner 内 hash 已存在 → 跳过
+            Sv-->>Br: {status:"exists", name:已注册名}
+        else s3 后端 → 桥直传云（字节不过服务器）
+            Sv-->>Br: {status:"direct", name:分配名,<br/>upload_url: presigned PUT(TTL 10min), confirm_token}
+            Br->>OSS: PUT 图片字节直传
+            Br->>Sv: POST /api/v1/images/confirm {confirm_token}
+            Note over Sv,OSS: 登记前验证：HEAD(size) +<br/>GET range 32B(magic) + ETag==md5
+            Sv-->>Br: {status:"ok", name}
+        else local 后端 → 服务器中转（开源零配置部署者）
+            Sv-->>Br: {status:"relay", name:分配名}
+            Br->>Sv: POST /api/v1/images（base64）
+            Sv-->>Br: {name}
         end
     end
-    Note over Br: ② 改写 md：本地路径 → 服务器分配的稳定名<br/>③ fail-fast：文件不存在/格式不支持 → 整体报错
+    Note over Br: ③ 改写 md：本地路径 → 稳定名
     Br->>Sv: POST /api/v1/documents（改写后的 md）
-    Sv->>Sv: 落盘 + refs 声明式登记（扫 md 裸名 → 匹配 owner 图行）
+    Sv->>Sv: 落盘 + refs 声明式登记
     Sv-->>Br: {id, url}
     Br-->>Ag: 已上传 + url + 图片摘要（新传 N · 复用 M · 改写 K 处）
 
-    Note over Sv,CDN: —— 读者打开 /s/<token> ——
+    Note over Sv,OSS: —— 读者打开 /s/<token> ——
     Sv->>Sv: SSR 渲染（RENDER_CACHE 存占位符，每次注入新鲜 URL）
-    Sv-->>CDN: HTML：s3 图 = 签名 URL(TTL 1h)·直连；local 图 = 代理路由
-    CDN->>CDN: 浏览器直连云存储取图（带宽不过服务器）
+    Sv-->>OSS: HTML：s3 图 = 签名 URL(TTL 1h)·CDN 直连；local 图 = 代理路由
+    OSS->>OSS: 浏览器直连取图（上传/阅读全链路图片字节不过服务器）
 ```
 
 ## 3. 已确认的设计决策
@@ -66,8 +73,10 @@ sequenceDiagram
 | 1 | 图片模型 | **owner 级资产池**（脱离 documents 目录树；FM 不显示图片行）——去重与 GC 天然成立 |
 | 2 | 稳定名分配 | 服务器分配：同内容 → 幂等返回已有注册名；**同名不同内容 → 自动后缀（`shot-2.png`）**，永不覆盖旧图、名字永不复用（防"改一张图影响所有引用文档"） |
 | 3 | MCP 工具面 | `upload_document` 单工具不变（桥内编排图片）；**不新增独立 upload_image MCP 工具**（Web API 保留供桥调用；独立预传工具备案后续） |
-| 4 | 去重预查询 | `GET /api/v1/images/by-hash/<hash>`：桥先查后传，同图重复上传零带宽浪费 |
-| 5 | 传输通道 | base64 走 JSON（×1.33 体积），与现有上传管线/错误形状一致；不引 multipart |
+| 4 | 去重 + 预查询 | 融合进 `POST /api/v1/images/init`：报 `{name, hash, md5, size}` → 已存在直接返回注册名（零流量）；同时完成名字分配（含后缀） |
+| 5 | 上传通道（s3 后端） | **桥直传云**：init 返回 presigned PUT URL（TTL 10min，仅限单 key、不暴露 AK/SK）→ 桥 PUT 直传 → confirm 登记前验证（HEAD size + GET range 32B magic + ETag==md5 诚实性校验）——上传与阅读全链路图片字节不过服务器 |
+| 5b | 上传通道（local 后端） | 服务器中转 `POST /api/v1/images`（base64，×1.37 体积）：未配云存储的开源部署者零配置可用；桥按 init 响应 `status: relay` 自动选路，对 Agent 透明 |
+| 5c | sha256 与 md5 双哈希 | sha256 = 去重键（行级）；md5 = 诚实性校验（S3 单段 PUT 的 ETag 即内容 MD5，confirm 时比对——桥谎报哈希当场戳穿，验证流量仅几百字节；七牛 ETag 口径列入实测，不标准则退化为 magic+size） |
 | 6 | 格式白名单 | png / jpeg / gif / webp；**magic bytes + 扩展名双校验**；SVG 拒绝（可携脚本，XSS 面），错误信息说明 |
 | 7 | 单图上限 | `MAX_IMAGE_BYTES` 默认 10MB 原始字节；`BODY_SIZE_LIMIT` 启动校验联动（≥ 10MB × 1.37 × 1.5） |
 | 8 | 免登录图片鉴权 | 代理路由走 **refs 白名单**：token → md → 图，且该 md 的 refs 必须命中——share token 持有者不能枚举读 owner 其他未引用图片 |
@@ -76,7 +85,7 @@ sequenceDiagram
 | 11 | 引用登记 | 声明式（md 上传/覆盖时全量 diff 重算）+ **渲染时惰性补录**（`INSERT OR IGNORE`，图行存在才补）——堵"md 先传图后传"时序洞 |
 | 12 | GC | 自动：refs 归零即删（删行先行、blob 后删）；**无手动删除 UI**（资产管理视图备案后续） |
 | 13 | 孤儿回收 | fail-fast 半途而废 / 传图未传 md 的图（`refs==0 && age>24h`）由周期任务兜底清理（复用 tiering scheduler tick）；24h 宽限防误杀上传窗口 |
-| 14 | fail-fast | 本地图不存在 / 格式不支持 → 整个 `upload_document` 报错返回（不静默裂图）；Agent 修正后重试 |
+| 14 | fail-fast（两阶段） | **预检阶段**：全部本地图 stat + magic 预判，**一次性完整报告所有问题**（零字节上传）；**上传阶段**：预检全过后逐张 init/传/confirm，中途失败带进度摘要（"已上传 3 张重试自动跳过，失败于第 4/8 张"） |
 | 15 | RENDER_CACHE | **占位符两段式**：缓存 HTML 存 `%%RR:IMG:n%%`，SSR 尾部字符串替换注入新鲜签名 URL/代理路由（FIFO 缓存无 TTL，存真签名会过期裂图） |
 | 16 | referrer 策略 | 页面全局 `no-referrer` 不变（share token 在 path，绝不外发）；**仅签名 URL 图**在 `<img>` 上加 `referrerpolicy="strict-origin-when-cross-origin"`——跨域只发站点 origin（够七牛 Referer 白名单），token 不泄露 |
 | 17 | 存储后端 | BlobStore 接口 + local/s3 内置双实现 + env 选择；**不做运行时动态插件**（代码级扩展：实现接口 + 注册） |
@@ -121,24 +130,36 @@ ALTER TABLE documents ADD COLUMN storage_backend TEXT;  -- hot 行 NULL；冷档
 
 错误形状统一 SvelteKit `error(status, message)` → 扁平 `{"message":"..."}`。
 
-### 5.1 `POST /api/v1/images`
+### 5.1 `POST /api/v1/images/init`
 
-- 认证/限流：Bearer API token + `upload:${tokenId}` 桶 + authfail IP 桶（与 `/api/v1/documents` 完全同款）
+- 认证：Bearer API token + authfail IP 桶；限流：轻调用桶（`images-meta:${tokenId}`，默认 120/min——init/confirm 是几百字节级元数据调用，与重负载的 upload 桶分开）
+- Body：`{name, content_hash, content_md5, size_bytes}`
+- 校验：name 过 `parsePath` 语义校验（单段）；`size_bytes ≤ MAX_IMAGE_BYTES`（超限 413，避免无谓 presign）
+- 响应三态：
+  - `{status:"exists", name}`——`(owner, content_hash)` 命中，去重跳过，零流量
+  - `{status:"direct", name, upload_url, confirm_token}`——s3 后端：presigned PUT URL（TTL 10min，key = `images/<ownerId>/<content_hash>`，仅限该 key）+ 一次性 confirm_token（内存 Map，TTL 1h，锁定名字分配结果防重试漂移）
+  - `{status:"relay", name}`——local 后端：走 5.2 中转
+- 名字分配：`(owner, name)` 冲突 → **自动后缀** `shot.png → shot-2.png → …`（对 Agent 透明；名字含空格时 sanitize 为 `-`，其余字符保留）
+
+### 5.2 `POST /api/v1/images`（relay 中转通道）
+
+- 认证/限流：与 `/api/v1/documents` 同款（`upload:` 桶 + authfail 桶）
 - Body：`{name, content_base64}`
-- 校验链：base64 解码（失败 400）→ `MAX_IMAGE_BYTES`（413）→ **magic bytes 识别**（png/jpeg/gif/webp，识别失败 415）→ 扩展名与识别结果一致（不一致 400，提示改名）→ name 过 `parsePath` 语义校验（单段、无非法字符）
-- 去重与命名：
-  - `(owner, content_hash)` 命中 → 幂等返回 `{id, name: 已注册名, created: false}`（不写盘）
-  - 未命中且 `(owner, name)` 冲突 → **自动后缀**：`shot.png` → `shot-2.png` → `shot-3.png`…直到不冲突（对 Agent 透明，响应返回实际注册名）
-- 落库顺序：写 blob（按 `IMAGE_STORE_BACKEND`，失败清理回滚）→ 插行（H2 先写存储后落库同语义：崩溃只留孤儿 blob，可被孤儿回收扫到——注：无行的 blob 扫描依赖存储侧 list，v1 孤儿回收只扫"有行无 refs"，无行孤儿 blob 备案容忍）
-- 响应：`{id, name, created}`
+- 校验链：base64 解码（失败 400）→ `MAX_IMAGE_BYTES`（413）→ **magic bytes 识别**（png/jpeg/gif/webp，失败 415）→ 扩展名与识别一致（不一致 400 提示改名）→ `(owner, hash)` 幂等 / 同名后缀
+- 落库：写 blob（local 布局）→ 插行（先存储后落库，崩溃只留无害孤儿 blob）
 
-### 5.2 `GET /api/v1/images/by-hash/<hash>`
+### 5.3 `POST /api/v1/images/confirm`（直传登记）
 
-- 认证同上；owner 作用域
-- 命中 → `200 {name}`；未命中 → `404`
-- 语义：纯优化（省重复上传带宽）；并发窗口（查 404 后他人恰好传入同内容）由 5.1 的 hash 幂等兜住
+- 认证/限流：同 init（轻桶）
+- Body：`{confirm_token}`
+- 登记前验证（桥直传的内容不过服务器手，验证替代上传时校验）：
+  1. HEAD 对象：存在 + `size ≤ MAX_IMAGE_BYTES`
+  2. GET range 前 32 字节：magic bytes 与扩展名一致性（同 5.2 白名单口径）
+  3. ETag == init 报的 `content_md5`（诚实性校验；七牛 ETag≠MD5 时此项跳过，备案实测）
+- 全过 → 插行（backend='s3' + key）→ `{status:"ok", name}`；对象缺失 → `{status:"missing"}`（桥重走 PUT）；校验失败 → 删云对象 → `400 {status:"invalid", reason}`
+- token 幂等：重复 confirm 同 token 返回同结果（不重复登记）
 
-### 5.3 `GET /s/[token]/i/[name]`（免登录代理路由）
+### 5.4 `GET /s/[token]/i/[name]`（免登录代理路由）
 
 ```
 token → md 行（share token 有效）→ owner 内按 name 查 images 行
@@ -148,20 +169,51 @@ token → md 行（share token 有效）→ owner 内按 name 查 images 行
 → 任何失败 404（统一口径，不泄漏存在性）；行内后端实现不存在（如已删 s3 配置）→ 503
 ```
 
-### 5.4 `GET /d/[id]/i/[name]`（owner 视图）
+### 5.5 `GET /d/[id]/i/[name]`（owner 视图）
 
-- `session.user === md.ownerId` 鉴权，其余与 5.3 完全一致（含 refs 白名单）
+- `session.user === md.ownerId` 鉴权，其余与 5.4 完全一致（含 refs 白名单）
 
 ## 6. MCP 桥编排（`packages/shared` 扩展）
 
-`upload_document` 工具行为扩展（签名不变，对 Agent 零新增概念）：
+`upload_document` 工具行为扩展（签名不变，对 Agent 零新增概念），**两阶段**：
 
-1. **token 级解析**：桥内用 markdown-it（进 shared 依赖，esbuild 随桥 bundle）**只 parse 取 image token**——正则会误伤 code/fence 里的示例图片语法导致 fail-fast 误报，必须真 parse
-2. **本地引用判定**：src 非 `http(s)://`、非 `data:`、非 `#`/`mailto:` → 本地路径；相对路径相对**桥进程 cwd**（Agent 工作目录）解析
-3. **逐图处理**：读文件（不存在 → fail-fast 报错，信息含路径与原因）→ sha256 → `by-hash` 预查（命中拿名跳过）→ 未命中 `POST /api/v1/images`（响应可能含后缀名）→ 记录 `本地路径 → 实际注册名` 映射
-4. **改写 md**：src 按映射字符串替换为稳定名（alt 保留）
-5. **上传 md** → 返回 Agent：`已上传（id=…）。查看链接：…。图片：新传 N · 复用 M · 引用改写 K 处`
-6. 超时：多图串行上传，api-client 既有 60s 超时按单请求生效；工具描述提示"多图大图文档耗时较长，单文档图片数受 `RATE_LIMIT_MAX` 约束（默认 60/min 含 md 本身）"
+### 6.1 阶段一：解析 + 预检（零字节上传前完成全部本地检查）
+
+1. **token 级解析**：markdown-it（进 shared 依赖）只 parse 取 image token——正则会误伤 code/fence 里的示例图片语法导致误报，必须真 parse；行内式与引用式（`![alt][ref]` + 定义）都覆盖；带 scheme（`http(s)://`、`data:` 等）的跳过
+2. **本地引用判定**：无 scheme 一律视为本地路径（含 Windows/UNC/POSIX 绝对与相对）；相对路径相对桥进程 cwd（MCP 客户端不传 cwd 时桥 cwd 可能 ≠ Agent 工作目录——错误信息主动暴露基准目录供 Agent 自愈）
+3. **逐图预检**（收集**全部**问题一次性报告，不修一张冒一张）：
+   - `stat`：不存在/断链 → `FILE_NOT_FOUND`；是目录 → `IS_DIRECTORY`；无权 → `PERMISSION_DENIED`；超 `MAX_IMAGE_BYTES` → `TOO_LARGE`
+   - 轻量魔数预判（png/jpeg/gif/webp 文件头）：不符 → `UNSUPPORTED_FORMAT`（SVG 单独说明）
+   - 读文件 IO 异常 → `READ_ERROR`（系统消息原样透出）
+4. **错误输出格式**（MCP `isError` content，机器可解析、每项带自愈建议）：
+
+```
+upload_document 失败：图片预检发现 2 个问题，未上传任何字节
+
+[1/2] FILE_NOT_FOUND: "screenshots/shot.png"
+  尝试路径: /home/user/project/screenshots/shot.png（相对路径按桥工作目录解析，cwd=/home/user/project）
+  建议: 确认文件存在；或改用绝对路径
+[2/2] TOO_LARGE: "/tmp/panorama.png"
+  实际 38.2MB > 上限 10MB（MAX_IMAGE_BYTES）
+  建议: 压缩或裁剪后重试
+
+修正后重新调用 upload_document 即可，相同内容已上传的图片会自动跳过。
+```
+
+### 6.2 阶段二：上传（预检全过后）
+
+逐图：sha256 + md5 → `init`：
+- `exists` → 复用注册名（零流量）
+- `direct` → PUT presigned URL 直传（桥自己的 fetch，超时 300s）→ `confirm` → `missing` 时重 PUT、`invalid` 时 fail-fast 报 reason
+- `relay` → `POST /api/v1/images` base64 中转（超时 300s；md 上传维持 60s）
+
+中断失败时错误信息带进度摘要："已成功上传 3 张（重试自动跳过），失败于第 4/8 张：<原因>"。
+
+### 6.3 改写与收尾
+
+- **token 级行内改写**：按 image token 的 `.map` 行号只在这些行内做 src（编码形态）替换为稳定名——防 code block 内示例文本被全局替换污染；fence/code span 内天然无 image token 不误伤
+- 同文档内同内容多图：后图 init 命中前图注册名，天然去重
+- 上传 md → 返回 Agent：`已上传（id=…）。查看链接：…。图片：新传 N · 复用 M · 引用改写 K 处`
 
 ## 7. 渲染与取图
 
@@ -201,12 +253,17 @@ renderMarkdown(src, { assetResolver, cacheScope })  // cacheScope: '/s/<token>' 
 ```ts
 interface BlobStore {
   id: string;                                            // 'local' | 's3'
-  put(key: string, data: Buffer): Promise<void>;
+  put(key: string, data: Buffer, contentType?: string): Promise<void>;
   get(key: string): Promise<Buffer>;
+  head?(key: string): Promise<{ size: number; etag?: string }>;
+  getRange?(key: string, start: number, end: number): Promise<Buffer>;
   delete(key: string): Promise<void>;
-  getSignedUrl?(key: string, ttlSeconds: number): Promise<string>;
+  getSignedUrl?(op: 'get' | 'put', key: string, ttlSeconds: number): Promise<string>;
 }
 ```
+
+- presign 用 `@aws-sdk/s3-request-presigner`（官方包，七牛官方 SDK 示例直接给同款用法，SigV4 参数签名官方明确支持）；PUT 预签 TTL 10min、GET 预签 TTL = `IMAGE_SIGNED_URL_TTL`
+- 桥全程不持有云凭证（只收一次性 presigned URL，能力限定单 key）
 
 - 内置实现：
   - `local`：`DATA_DIR/<ownerId>/blobs/<hash 前 2 位>/<hash>`（内容寻址，无扩展名，mime 在行里）
@@ -237,12 +294,14 @@ interface BlobStore {
 
 ## 11. 安全清单
 
-- magic bytes 白名单 + 扩展名一致性（415/400）；SVG 拒绝
+- magic bytes 白名单 + 扩展名一致性（relay 路由上传时 + direct 路由 confirm 登记时双重执行）；SVG 拒绝
+- **直传内容不信任链**：字节不过服务器 → confirm 时 HEAD size + GET range magic + ETag==md5 三重登记前验证；serve 侧 `Content-Type` 白名单 + `nosniff` 兜底（mime 造假最坏得到裂图，无 XSS 面）
+- presigned PUT 最小权限（单 key + 短 TTL + 不下发票据）；confirm_token 一次性 + TTL
 - `X-Content-Type-Options: nosniff` + Content-Type 恒白名单四值
 - 代理路由 refs 白名单（share token 不能枚举 owner 未引用图片）
 - 签名 URL TTL 1h；token 不进 referrer（全局 no-referrer 保持 + 签名图 img 级 strict-origin-when-cross-origin）
-- base64 解码失败 400；`BODY_SIZE_LIMIT` 启动校验联动 `MAX_IMAGE_BYTES × 1.37 × 1.5`
-- 限流复用 `upload:` 桶 + authfail IP 桶；by-hash 预查询 token 认证 + owner 作用域
+- base64 解码失败 400；`BODY_SIZE_LIMIT` 启动校验联动 `MAX_IMAGE_BYTES × 1.37 × 1.5`（relay 通道）
+- 限流：init/confirm 轻桶（120/min）+ relay/documents 重桶（60/min）+ authfail IP 桶
 - 占位符注入冲突防护（7.2）
 
 ## 12. env 变更
@@ -258,25 +317,29 @@ interface BlobStore {
 
 ## 13. 测试计划（vitest + Playwright）
 
-- `images` API：magic bytes/扩展名不一致 400、415 SVG、413、429、401、hash 幂等（created:false）、同名自动后缀、owner 隔离
-- `by-hash`：命中/未命中/跨 owner 不泄漏
+- `images` API：init（exists/direct/relay 三态、名字后缀、413 预检、轻桶限流）、relay（magic/扩展名 400、415 SVG、413、429、401、hash 幂等、同名后缀、owner 隔离）、confirm（missing/invalid/ok 三态、ETag 校验、token 幂等重放、验证失败删云对象）
 - 代理路由：refs 白名单（未引用 404）、token 失效 404、响应头、503（backend 实现缺失）、local/s3 双路径
 - `renderMarkdown`：外链原样、裸名占位符、lazy/decoding、referrerpolicy 仅签名图、占位符转义、缓存键隔离（同 src 不同 cacheScope 不同产物、同 scope 命中）
 - 两段式替换：签名注入/代理注入/503 占位
 - refs：声明式登记、覆盖 diff 重算、惰性补录幂等、CASCADE
 - GC：三触发点 + 孤儿回收（fake timers，24h 宽限）+ 名字不复用
-- 桥编排（shared 单测，mock api）：token 级解析（code block 内示例不误伤）、预查跳过、后缀名改写、fail-fast 错误信息
+- 桥编排（shared 单测，mock api）：token 级解析（code block 内示例不误伤）、预检一次性报告全部问题（六类错误码分类、诊断上下文、进度摘要）、init exists 跳过、direct/relay 双路、confirm missing 重 PUT、后缀名改写、fail-fast 错误信息
 - BlobStore：local 布局、s3 key 空间、getSignedUrl 存在性
 - 冷档溯源：回填、读路由、503
 - startup-check：新校验
-- Playwright e2e：上传带图 md（本地图片文件）→ `/s/` 渲染（local 直连代理路由 + mock s3 双模式）→ lightbox 开/关/滚轮缩放/拖动/双击/全屏 → 删除文档后图 404
+- Playwright e2e：上传带图 md（本地图片文件）→ `/s/` 渲染（relay 中转 + direct 直传双模式）→ lightbox 开/关/滚轮缩放/拖动/双击/全屏 → 删除文档后图 404
 
 ## 14. 已知权衡与备案（不实现）
 
 | 项 | 说明 |
 |---|---|
-| 签名 URL 撤销残留 | 撤销分享后 ≤TTL 内已分发 URL 仍可取图（no-store 页面本身立即失效） |
-| 无行孤儿 blob | 写 blob 成功后插行前崩溃留下的 blob 无行可扫，容忍（v1 不做存储侧 list 清理） |
+| **七牛 ETag=MD5 口径** | 单段 PUT 的 ETag= 内容 MD5 是 S3 标准行为，七牛网关需实测；不标准 → confirm 退化为 magic+size 校验（放弃 md5 诚实性校验，无伤大雅） |
+| **七牛 presign PUT 签 Content-Type** | 签上可强制桥传对 mime；七牛兼容性实测，不签则依赖登记时 magic 兜底 |
+| **七牛 2026-04-08 新政策** | 该日期后**新建**空间经 `s3.*.qiniucs.com` 浏览器访问强制 `Content-Disposition: attachment`——对 `<img>` 子资源是否生效官方不明确，**上线前实测**；中招则 INSTALL.md 指引自定义域名/旧空间路径 |
+| **七牛 S3 空间名 ≠ 空间名** | 空间名全局不唯一时自动生成 S3 空间名，presign 的 Bucket 必须用 S3 空间名（控制台空间概览查）——INSTALL.md 部署节写明 |
+| **Referer 防盗链配置口径** | 白名单填站点域名（无 scheme；`*.example.com` 不含裸域需两条）；「允许空 Referer」建议**开启**（门禁本质是 presign 签名；关闭则地址栏直开 403）；签名+Referer 叠加关系以 curl 实测锁定 |
+| 无行孤儿 blob（云侧） | PUT 成功后 confirm 前崩溃的云对象无行可扫——key 内容寻址（`images/<owner>/<hash>`），同内容重传覆盖复用自然消化，永不重传者容忍 |
+| 本地无行孤儿 blob | relay 写盘后插行前崩溃同理，容忍 |
 | 独立 `upload_image` MCP 工具 | Agent 显式预传图场景，备案后续 |
 | 资产管理视图 UI | owner 图片池列表 + 引用数 + 手动删除，备案后续 |
 | 图片内容版本更新 | 同名覆盖全局生效，备案（当前同名自动后缀是保守正确行为） |
