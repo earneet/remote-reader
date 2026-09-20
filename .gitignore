@@ -34,5 +34,8 @@ apps/mcp-bridge/config.local.*
 .omo/
 *.log
 
+# 桥 npm 发布构建产物
+apps/mcp-bridge/dist/
+
 # Brainstorm 视觉伴侣（superpowers）
 .superpowers/
