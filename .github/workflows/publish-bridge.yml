@@ -1,0 +1,29 @@
+name: publish-bridge
+
+on:
+  push:
+    tags: ['bridge-v*']
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun --filter remote-reader-bridge check
+      - run: bun --filter remote-reader-bridge build
+      - name: 版本一致性守卫（tag 版本必须等于 package.json 版本）
+        run: |
+          PKG_VERSION=$(node -p "require('./apps/mcp-bridge/package.json').version")
+          TAG_VERSION="${GITHUB_REF_NAME#bridge-v}"
+          [ "$PKG_VERSION" = "$TAG_VERSION" ] || { echo "version mismatch: pkg=$PKG_VERSION tag=$TAG_VERSION"; exit 1; }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: 'https://registry.npmjs.org'
+      - name: npm publish
+        run: npm publish
+        working-directory: apps/mcp-bridge
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
