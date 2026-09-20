@@ -3,7 +3,7 @@ import type { Actions, PageServerLoad } from './$types';
 import { setSessionCookie } from '$server/session';
 import { checkRateLimit } from '$server/ratelimit';
 import { authenticateUser } from '$server/registration';
-import { envInt } from '$server/env';
+import { envInt, getBaseUrl, getBridgeRepoUrl } from '$server/env';
 
 const LOGIN_RATE_LIMIT = {
     max: envInt('LOGIN_RATE_LIMIT_MAX', 10),
@@ -18,7 +18,8 @@ const LOGIN_IP_RATE_LIMIT = {
 
 export const load: PageServerLoad = async ({ locals }) => {
     if (locals.user) redirect(302, '/');
-    return {};
+    // Agent 指引块（details#agent-guide）SSR 注入本站地址与桥源码仓库地址
+    return { baseUrl: getBaseUrl(), repoUrl: getBridgeRepoUrl() };
 };
 
 export const actions: Actions = {

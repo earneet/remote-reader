@@ -41,7 +41,7 @@ function makeEvent(body: unknown, opts: { address?: string; userId?: string } = 
     } as any;
 }
 
-async function call(fn: (evt: any) => Promise<Response>, body: unknown, opts: { address?: string; userId?: string } = {}) {
+async function call(fn: (evt: any) => Response | Promise<Response>, body: unknown, opts: { address?: string; userId?: string } = {}) {
     const evt = makeEvent(body, opts);
     try {
         const r = await fn(evt);
@@ -157,4 +157,21 @@ test('api-token 400：空 name / 缺 name', async () => {
     expect(r1.status).toBe(400);
     const r2 = await call(tokenPOST, {}, { userId: 'u1' });
     expect(r2.status).toBe(400);
+});
+
+// ── 登录页指引块数据 ──
+
+test('login load 返回 baseUrl/repoUrl（agent-guide SSR 注入）', async () => {
+    // vitest 下 Vite 注入 process.env.BASE_URL='/'（归一化成 ''）——显式设值使断言密闭
+    const prev = process.env.BASE_URL;
+    process.env.BASE_URL = 'https://guide.example.com';
+    try {
+        const { load } = await import('../src/routes/login/+page.server');
+        const data = await load({ locals: { user: null } } as any);
+        expect(data?.baseUrl).toBe('https://guide.example.com');
+        expect(data?.repoUrl).toContain('github.com');
+    } finally {
+        if (prev === undefined) delete process.env.BASE_URL;
+        else process.env.BASE_URL = prev;
+    }
 });

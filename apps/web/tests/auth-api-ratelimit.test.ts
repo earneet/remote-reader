@@ -24,7 +24,7 @@ function evt(body: unknown, address: string) {
     } as any;
 }
 
-async function statusOf(fn: (e: any) => Promise<Response>, body: unknown, address: string): Promise<number> {
+async function statusOf(fn: (e: any) => Response | Promise<Response>, body: unknown, address: string): Promise<number> {
     try {
         return (await fn(evt(body, address))).status;
     } catch (e) {
