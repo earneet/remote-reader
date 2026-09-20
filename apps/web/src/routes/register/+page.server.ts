@@ -1,23 +1,14 @@
 import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
-import { db, schema } from '$server/db';
-import { hashPassword, generateId } from '$server/auth';
 import { setSessionCookie } from '$server/session';
 import { checkRateLimit } from '$server/ratelimit';
+import { registerUser } from '$server/registration';
 import { envInt } from '$server/env';
-import { redeemInviteCodeTx, isInviteCodeValid } from '$server/invites';
-import { eq } from 'drizzle-orm';
 
 const REGISTER_RATE_LIMIT = {
     max: envInt('REGISTER_RATE_LIMIT_MAX', 5),
     windowMs: envInt('RATE_LIMIT_WINDOW_MS', 60_000)
 };
-
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const MIN_PASSWORD = 8;
-
-// 事务内邀请码失效的信号（预检通过、核销时被并发撤销/过期）
-class InviteRejected extends Error {}
 
 export const load: PageServerLoad = async ({ locals }) => {
     if (locals.user) redirect(302, '/');
@@ -27,7 +18,7 @@ export const load: PageServerLoad = async ({ locals }) => {
 export const actions: Actions = {
     default: async ({ request, cookies, getClientAddress }) => {
         const form = await request.formData();
-        const email = String(form.get('email') ?? '').trim().toLowerCase();
+        const email = String(form.get('email') ?? '');
         const password = String(form.get('password') ?? '');
         const inviteCode = String(form.get('invite_code') ?? '');
 
@@ -35,47 +26,10 @@ export const actions: Actions = {
         const rl = checkRateLimit(`register:${getClientAddress()}`, REGISTER_RATE_LIMIT);
         if (!rl.allowed) return fail(429, { error: '注册过于频繁，请稍后再试' });
 
-        if (!email || !password) return fail(400, { error: 'email 与 password 必填' });
-        // M2: 邮箱格式 + 密码强度校验（invite-code 门槛已大幅降低用户枚举价值，409 保留以引导已注册用户登录）
-        if (!EMAIL_RE.test(email)) return fail(400, { error: '邮箱格式不正确' });
-        if (password.length < MIN_PASSWORD) return fail(400, { error: `密码至少 ${MIN_PASSWORD} 位` });
+        const result = await registerUser({ email, password, inviteCode });
+        if (!result.ok) return fail(result.status, { error: result.message });
 
-        // 邀请码预检（不核销）：INITIAL_INVITE_CODE 引导码（存量部署 bootstrap）或 DB 邀请码。
-        // 403 先于 409 的既有顺序保持不变（无有效邀请码不泄露邮箱存在性）
-        const bootstrap = process.env.INITIAL_INVITE_CODE;
-        const isBootstrap = !!bootstrap && inviteCode === bootstrap;
-        if (!isBootstrap && !isInviteCodeValid(inviteCode)) return fail(403, { error: '邀请码无效' });
-
-        const existing = db.select().from(schema.users).where(eq(schema.users.email, email)).get();
-        if (existing) return fail(409, { error: '该邮箱已注册' });
-
-        const passwordHash = await hashPassword(password);
-        // P2-5：核销与建用户同一事务——失败注册（含并发同邮箱撞 UNIQUE）不再虚烧核销计数；
-        // M7：firstUser 判定 + 插入同事务——better-sqlite3 同步执行，事务内不被事件循环中断
-        // （并发首注册不会产生两个 admin）
-        let userId: string;
-        try {
-            userId = db.transaction((tx) => {
-                if (!isBootstrap && !redeemInviteCodeTx(tx, inviteCode)) throw new InviteRejected();
-                const firstUser = tx.select().from(schema.users).all().length === 0;
-                const id = generateId();
-                tx.insert(schema.users).values({
-                    id,
-                    email,
-                    passwordHash,
-                    role: (firstUser ? 'admin' : 'member') as 'admin' | 'member',
-                    createdAt: Date.now()
-                }).run();
-                return id;
-            });
-        } catch (e) {
-            if (e instanceof InviteRejected) return fail(403, { error: '邀请码无效' });
-            if (e instanceof Error && (e as { code?: string }).code === 'SQLITE_CONSTRAINT_UNIQUE') {
-                return fail(409, { error: '该邮箱已注册' });
-            }
-            throw e;
-        }
-        setSessionCookie(cookies, { userId });
+        setSessionCookie(cookies, { userId: result.userId });
         redirect(302, '/');
     }
 };
