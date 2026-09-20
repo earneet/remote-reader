@@ -5,12 +5,14 @@ const url = process.argv[2];
 const token = process.argv[3];
 if (!url || !token) {
     console.error('usage: bun apps/mcp-bridge/scripts/smoke-client.ts <baseUrl> <token>');
+    console.error('  env: SMOKE_COMMAND（默认 bun）/ SMOKE_ARGS（逗号分隔，默认 apps/mcp-bridge/src/index.ts）');
+    console.error('  例：SMOKE_COMMAND=node SMOKE_ARGS=apps/mcp-bridge/dist/index.ts（冒烟 npm 构建产物）');
     process.exit(2);
 }
 
 const transport = new StdioClientTransport({
-    command: 'bun',
-    args: ['apps/mcp-bridge/src/index.ts'],
+    command: process.env.SMOKE_COMMAND ?? 'bun',
+    args: (process.env.SMOKE_ARGS ?? 'apps/mcp-bridge/src/index.ts').split(','),
     env: { ...process.env, REMOTE_READER_URL: url, REMOTE_READER_TOKEN: token } as Record<string, string>
 });
 const client = new Client({ name: 'smoke', version: '0.0.0' });
