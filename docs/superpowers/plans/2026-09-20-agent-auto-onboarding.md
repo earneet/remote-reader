@@ -331,9 +331,8 @@ process.env.REGISTER_RATE_LIMIT_MAX = '10000';
 process.env.LOGIN_RATE_LIMIT_MAX = '10000';
 process.env.LOGIN_IP_RATE_LIMIT_MAX = '10000';
 process.env.INITIAL_INVITE_CODE = 'testinvite';
+// 本任务先只导入 register；loginPOST/tokenPOST 分别在 Task 4/5 追加（避免缺失模块阻塞本任务测试）
 const { POST: registerPOST } = await import('../src/routes/api/v1/auth/register/+server');
-const { POST: loginPOST } = await import('../src/routes/api/v1/auth/login/+server');
-const { POST: tokenPOST } = await import('../src/routes/api/v1/auth/api-token/+server');
 
 beforeEach(() => resetDb());
 
@@ -471,7 +470,7 @@ export const POST: RequestHandler = async ({ request, cookies, getClientAddress 
 - [ ] **Step 4: 跑测试确认通过**
 
 Run: `bun run test apps/web/tests/auth-api.test.ts`
-Expected: register 6 个用例 PASS（login/token import 此时已可解析则一并跑，尚未有用例）
+Expected: register 6 个用例 PASS
 
 - [ ] **Step 5: Commit**
 
@@ -490,7 +489,13 @@ git commit -m "feat(web): /api/v1/auth/register JSON 端点——Agent 程序化
 
 - [ ] **Step 1: 追加失败测试**
 
-在 `apps/web/tests/auth-api.test.ts` 末尾追加：
+在 `apps/web/tests/auth-api.test.ts` 顶部 import 区追加：
+
+```typescript
+const { POST: loginPOST } = await import('../src/routes/api/v1/auth/login/+server');
+```
+
+文件末尾追加：
 
 ```typescript
 // ── login ──
@@ -593,7 +598,13 @@ git commit -m "feat(web): /api/v1/auth/login JSON 端点——双桶限流 + dum
 
 - [ ] **Step 1: 追加失败测试**
 
-在 `apps/web/tests/auth-api.test.ts` 末尾追加：
+在 `apps/web/tests/auth-api.test.ts` 顶部 import 区追加：
+
+```typescript
+const { POST: tokenPOST } = await import('../src/routes/api/v1/auth/api-token/+server');
+```
+
+文件末尾追加：
 
 ```typescript
 // ── api-token ──
@@ -1120,7 +1131,24 @@ Agent 读取登录页 SSR HTML 中的 `<details id="agent-guide">` 指引块（�
 错误形状统一 `{"message":"..."}`：403 邀请码无效 / 409 邮箱已注册 / 429 限流 / 401 session 失效。
 ```
 
-- [ ] **Step 4: USER_GUIDE.en.md**——在「### 2.1」对应位置之前插入英文版（同上内容翻译，标题 `### 2.0 Agent self-service onboarding (zero manual steps, recommended)`）。
+- [ ] **Step 4: USER_GUIDE.en.md**——在「### 2.1」对应位置之前插入：
+
+```markdown
+### 2.0 Agent self-service onboarding (zero manual steps, recommended)
+
+Send this to your agent (replace the invite code):
+
+> Please visit https://your-host — the "Agent onboarding guide" in the page will walk you through installing the MCP bridge and registering; use invite code ri_xxx, and agree on email/password with me.
+
+The agent reads the `<details id="agent-guide">` block from the login page's SSR HTML (collapsed for humans by default, always visible to agents) and automatically:
+
+1. Installs the bridge: `bunx remote-reader-bridge` (npm package, once published) or `git clone <BRIDGE_REPO_URL> && bun install`
+2. `POST /api/v1/auth/register` (invite code + email + password; existing accounts use `POST /api/v1/auth/login`) → sets the session cookie
+3. `POST /api/v1/auth/api-token` (with session cookie) → returns a one-time `rr_` token
+4. Writes `~/.config/remote-reader/config.json` → registers the MCP server
+
+Error shape is uniformly `{"message":"..."}`: 403 invalid invite / 409 email already registered / 429 rate limited / 401 session expired.
+```
 
 - [ ] **Step 5: INSTALL.md**——§9 配置参考表中 `BASE_URL` 行之后插入一行：
 
