@@ -12,6 +12,7 @@ process.env.LOGIN_IP_RATE_LIMIT_MAX = '10000';
 process.env.INITIAL_INVITE_CODE = 'testinvite';
 // 本任务先只导入 register；loginPOST/tokenPOST 分别在 Task 4/5 追加（避免缺失模块阻塞本任务测试）
 const { POST: registerPOST } = await import('../src/routes/api/v1/auth/register/+server');
+const { POST: loginPOST } = await import('../src/routes/api/v1/auth/login/+server');
 
 beforeEach(() => resetDb());
 
@@ -99,4 +100,32 @@ test('register 400：非法 JSON body', async () => {
     } catch (e) {
         expect((e as { status?: number }).status).toBe(400);
     }
+});
+
+// ── login ──
+
+async function seedUser(email = 'a@x.com', password = 'password123') {
+    await call(registerPOST, { email, password, invite_code: 'testinvite' });
+}
+
+test('login 成功 → 200 + session cookie', async () => {
+    await seedUser();
+    const r = await call(loginPOST, { email: 'a@x.com', password: 'password123' });
+    expect(r.status).toBe(200);
+    expect(r.body).toEqual({ ok: true });
+    expect(r.cookies._store.session).toBeTruthy();
+});
+
+test('login 401：密码错与用户不存在响应一致（防邮箱枚举）', async () => {
+    await seedUser();
+    const wrong = await call(loginPOST, { email: 'a@x.com', password: 'wrong-password' });
+    const ghost = await call(loginPOST, { email: 'ghost@x.com', password: 'password123' });
+    expect(wrong.status).toBe(401);
+    expect(ghost.status).toBe(401);
+    expect(wrong.body).toEqual(ghost.body);
+});
+
+test('login 400：缺 email', async () => {
+    const r = await call(loginPOST, { password: 'password123' });
+    expect(r.status).toBe(400);
 });
