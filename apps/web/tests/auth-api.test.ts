@@ -13,6 +13,7 @@ process.env.INITIAL_INVITE_CODE = 'testinvite';
 // 本任务先只导入 register；loginPOST/tokenPOST 分别在 Task 4/5 追加（避免缺失模块阻塞本任务测试）
 const { POST: registerPOST } = await import('../src/routes/api/v1/auth/register/+server');
 const { POST: loginPOST } = await import('../src/routes/api/v1/auth/login/+server');
+const { POST: tokenPOST } = await import('../src/routes/api/v1/auth/api-token/+server');
 
 beforeEach(() => resetDb());
 
@@ -128,4 +129,32 @@ test('login 401：密码错与用户不存在响应一致（防邮箱枚举）',
 test('login 400：缺 email', async () => {
     const r = await call(loginPOST, { password: 'password123' });
     expect(r.status).toBe(400);
+});
+
+// ── api-token ──
+
+test('api-token 成功 → 200 + rr_ 明文 + 哈希入库', async () => {
+    await seedUser();
+    const user = db.select().from(schema.users).where(eq(schema.users.email, 'a@x.com')).get();
+    if (!user) throw new Error('setup failed');
+    const r = await call(tokenPOST, { name: 'my-agent' }, { userId: user.id });
+    expect(r.status).toBe(200);
+    const token = (r.body as { token?: string }).token;
+    expect(token).toMatch(/^rr_/);
+    const row = db.select().from(schema.apiTokens)
+        .where(eq(schema.apiTokens.tokenHash, hashToken(token!))).get();
+    expect(row?.name).toBe('my-agent');
+    expect(row?.userId).toBe(user.id);
+});
+
+test('api-token 401：无 session', async () => {
+    const r = await call(tokenPOST, { name: 'x' });
+    expect(r.status).toBe(401);
+});
+
+test('api-token 400：空 name / 缺 name', async () => {
+    const r1 = await call(tokenPOST, { name: '  ' }, { userId: 'u1' });
+    expect(r1.status).toBe(400);
+    const r2 = await call(tokenPOST, {}, { userId: 'u1' });
+    expect(r2.status).toBe(400);
 });
