@@ -123,6 +123,7 @@ rsync -a --delete \
     --exclude '/apps/web/.svelte-kit' \
     --exclude '/packages/shared/node_modules' \
     --exclude '/apps/mcp-bridge/node_modules' \
+    --exclude '/apps/mcp-bridge/dist' \
     --exclude '/.git' \
     --exclude '/.env' \
     --exclude '/.env.local' \
@@ -185,85 +186,21 @@ chmod 640 "${ENV_FILE}"
 chown root:"${SERVICE_USER}" "${ENV_FILE}"
 ok "env 已写入（含密钥，权限 640 root:${SERVICE_USER}）"
 
-# ---- 7. 写 systemd unit ----
+# ---- 7. 写 systemd unit（模板单源 scripts/gen-unit.sh，与 update.sh 共用防漂移）----
 UNIT_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 log "写入 ${UNIT_FILE}"
 
-cat > "${UNIT_FILE}" <<EOF
-[Unit]
-Description=Remote Reader (Markdown delivery for AI agents)
-Documentation=https://github.com/remote-reader/remote-reader
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=${SERVICE_USER}
-Group=${SERVICE_USER}
-WorkingDirectory=${INSTALL_DIR}
-EnvironmentFile=${ENV_FILE}
-ExecStart=$(command -v node) apps/web/build/index.js
-Restart=on-failure
-RestartSec=5
-TimeoutStopSec=10
-KillSignal=SIGINT
-
-# --- Hardening ---
-NoNewPrivileges=yes
-ProtectSystem=strict
-ProtectHome=yes
-PrivateTmp=yes
-PrivateDevices=yes
-ProtectKernelTunables=yes
-ProtectKernelModules=yes
-ProtectControlGroups=yes
-ProtectClock=yes
-ProtectHostname=yes
-ProtectKernelLogs=yes
-ProtectProc=invisible
-RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
-RestrictNamespaces=yes
-RestrictRealtime=yes
-RestrictSUIDSGID=yes
-LockPersonality=yes
-MemoryDenyWriteExecute=no
-RemoveIPC=yes
-CapabilityBoundingSet=
-AmbientCapabilities=
-# 仅允许写数据目录与日志目录；代码/配置只读
-ReadWritePaths=${DATA_DIR} ${LOG_DIR}
-BindReadOnlyPaths=${INSTALL_DIR}
-
-# 日志落盘 /var/log/remote-reader/app.log（访问+错误合流，按时间序排障最直观）；
-# journald 不再收应用日志（append: 与 journal 互斥），logrotate copytruncate 兜轮转
-StandardOutput=append:${LOG_DIR}/app.log
-StandardError=append:${LOG_DIR}/app.log
-
-# 资源限制
-LimitNOFILE=65536
-MemoryMax=512M
-TasksMax=256
-
-[Install]
-WantedBy=multi-user.target
-EOF
+SERVICE_NAME="${SERVICE_NAME}" SERVICE_USER="${SERVICE_USER}" INSTALL_DIR="${INSTALL_DIR}" \
+    ENV_FILE="${ENV_FILE}" DATA_DIR="${DATA_DIR}" LOG_DIR="${LOG_DIR}" \
+    NODE_BIN="$(command -v node)" \
+    bash "${SCRIPT_DIR}/gen-unit.sh" unit > "${UNIT_FILE}"
 chmod 644 "${UNIT_FILE}"
-ok "unit 已写入"
+ok "unit 已写入（含安全加固与日志落盘）"
 
 # ---- 7.5 logrotate（app.log 每日轮转，copytruncate 配合 systemd append: 的持有 fd）----
 LOGROTATE_FILE="/etc/logrotate.d/${SERVICE_NAME}"
 log "写入 ${LOGROTATE_FILE}"
-cat > "${LOGROTATE_FILE}" <<EOF
-${LOG_DIR}/app.log {
-    daily
-    rotate 14
-    compress
-    delaycompress
-    missingok
-    notifempty
-    copytruncate
-}
-EOF
+LOG_DIR="${LOG_DIR}" bash "${SCRIPT_DIR}/gen-unit.sh" logrotate > "${LOGROTATE_FILE}"
 chmod 644 "${LOGROTATE_FILE}"
 ok "logrotate 已写入（daily × 14 份，copytruncate）"
 

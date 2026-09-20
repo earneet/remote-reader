@@ -25,10 +25,16 @@ SERVICE_USER="${SERVICE_USER:-remote-reader}"
 CONFIG_DIR="/etc/${SERVICE_NAME}"
 ENV_FILE="${CONFIG_DIR}/env"
 UNIT_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
+LOG_DIR="${LOG_DIR:-/var/log/remote-reader}"
+LOGROTATE_FILE="/etc/logrotate.d/${SERVICE_NAME}"
 NODE_MIN_MAJOR=22
 BACKUP_DIR="${INSTALL_DIR}.bak"
 BACKUP_TMP="${INSTALL_DIR}.bak.tmp"
 HEALTH_WAIT=30
+# unit/env 的升级期备份（回滚恢复用；成功后删除，残留检测在开头兜底）。
+# 放 CONFIG_DIR 而非 /etc/systemd/system——后者里的杂后缀文件可能触发 systemd 扫描告警
+UNIT_BAK="${CONFIG_DIR}/unit.update-bak"
+ENV_BAK="${CONFIG_DIR}/env.update-bak"
 
 # ---- 解析命令行参数 ----
 ASSUME_YES=0
@@ -82,6 +88,7 @@ env_val() { awk -F= -v k="$1" '$1==k{sub(/^[^=]*=/,""); print; exit}' "${ENV_FIL
 # 本脚本对生产做原地 rebuild，最大风险是把能跑的服务搞成起不来。better-sqlite3 的
 # .node 在 node_modules 里（不在 build/），bun 重编译可能产出与生产 node ABI 不匹配
 # 的二进制；故必须整目录备份，回滚才完整。do_rollback 自身命令都容错，避免在 trap 里二次失败。
+# 升级期还可能改了 unit（模板刷新）与 env（ORIGIN 迁移）——一并备份恢复。
 ROLLED_BACK=0
 do_rollback() {
     [[ -d "${BACKUP_DIR}" ]] || return 0
@@ -89,6 +96,15 @@ do_rollback() {
     rm -rf "${INSTALL_DIR}"
     mv "${BACKUP_DIR}" "${INSTALL_DIR}"
     chown -R root:root "${INSTALL_DIR}" 2>/dev/null || true
+    if [[ -f "${UNIT_BAK}" ]]; then
+        mv -f "${UNIT_BAK}" "${UNIT_FILE}" 2>/dev/null || true
+        systemctl daemon-reload 2>/dev/null || true
+        warn "已恢复升级前 unit"
+    fi
+    if [[ -f "${ENV_BAK}" ]]; then
+        mv -f "${ENV_BAK}" "${ENV_FILE}" 2>/dev/null || true
+        warn "已恢复升级前 env"
+    fi
     log "重启服务以应用回滚后的代码"
     systemctl restart "${SERVICE_NAME}.service" 2>/dev/null || true
     sleep 2
@@ -172,9 +188,9 @@ NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
 [[ -d "${INSTALL_DIR}" ]] || die "未检测到 install.sh 部署：安装目录不存在（${INSTALL_DIR}）。请先 sudo ./scripts/install.sh"
 [[ -f "${ENV_FILE}" ]]   || die "配置文件不存在：${ENV_FILE}（无法读取 PORT，请确认是 install.sh 部署）"
 
-# 上次升级中断会残留 BACKUP_DIR：宁可停下让人确认，也不盲删/盲覆盖（可能是唯一恢复源）
-if [[ -e "${BACKUP_DIR}" || -e "${BACKUP_TMP}" ]]; then
-    die "检测到上次升级的残留备份（${BACKUP_DIR}）。可能上次升级中断。请手动确认：若当前服务正常，sudo rm -rf ${BACKUP_DIR} ${BACKUP_TMP} 后重试；若异常，从该备份恢复 INSTALL_DIR。"
+# 上次升级中断会残留 BACKUP_DIR 或 unit/env 备份：宁可停下让人确认，也不盲删/盲覆盖（可能是唯一恢复源）
+if [[ -e "${BACKUP_DIR}" || -e "${BACKUP_TMP}" || -f "${UNIT_BAK}" || -f "${ENV_BAK}" ]]; then
+    die "检测到上次升级的残留备份（${BACKUP_DIR} 或 ${UNIT_BAK}/${ENV_BAK}）。可能上次升级中断。请手动确认：若当前服务正常，sudo rm -rf ${BACKUP_DIR} ${BACKUP_TMP} ${UNIT_BAK} ${ENV_BAK} 后重试；若异常，从备份恢复。"
 fi
 
 # ---- 2. 从现有部署读参数（env 文件）----
@@ -205,11 +221,12 @@ if [[ "${GIT_PULL}" -eq 1 ]]; then
 else
     printf '  1) 用当前工作区代码（默认不 git pull；加 --git 才拉取）\n'
 fi
-printf '  2) 备份 %s → %s\n' "${INSTALL_DIR}" "${BACKUP_DIR}"
+printf '  2) 备份 %s → %s（unit / env 变更另有独立备份）\n' "${INSTALL_DIR}" "${BACKUP_DIR}"
 printf '  3) rsync 新码到 %s（排除 data / node_modules / build / .git / .env）\n' "${INSTALL_DIR}"
 printf '  4) chown root:root + bun install + build + 剥离 devDeps\n'
-printf '  5) systemctl restart %s\n' "${SERVICE_NAME}"
-printf '  6) 轮询 /api/health（最多 %ss）；不过则自动回滚\n' "${HEALTH_WAIT}"
+printf '  5) 配置迁移（幂等）：env 补 ORIGIN / 建日志目录 / 补 logrotate / 刷新 unit 模板 + daemon-reload\n'
+printf '  6) systemctl restart %s\n' "${SERVICE_NAME}"
+printf '  7) 轮询 /api/health（最多 %ss）；不过则自动回滚\n' "${HEALTH_WAIT}"
 echo
 warn "升级只动代码 ${INSTALL_DIR}，配置与数据不碰；万一失败脚本自动回滚到升级前状态。"
 warn "仍建议升级前手动备份（双保险）："
@@ -266,6 +283,7 @@ rsync -a --delete \
     --exclude '/apps/web/.svelte-kit' \
     --exclude '/packages/shared/node_modules' \
     --exclude '/apps/mcp-bridge/node_modules' \
+    --exclude '/apps/mcp-bridge/dist' \
     --exclude '/.git' \
     --exclude '/.env' \
     --exclude '/.env.local' \
@@ -297,6 +315,47 @@ ok "生产依赖就绪"
 
 chown -R root:root "${INSTALL_DIR}"
 
+# ---- 7.5 配置迁移（幂等，老部署升级到新特性所需；unit/env 先备份，失败可回滚）----
+# a) env：老部署无 ORIGIN（新版启动校验必填，缺了服务起不来）→ 用 BASE_URL 补写
+if ! grep -q '^ORIGIN=' "${ENV_FILE}" 2>/dev/null; then
+    if [[ -n "${BASE_URL}" ]]; then
+        cp -a "${ENV_FILE}" "${ENV_BAK}"
+        # 先补换行：原文件末行无换行时直接追加会拼成无效变量
+        printf '\nORIGIN=%s\n' "${BASE_URL}" >> "${ENV_FILE}"
+        chown root:"${SERVICE_USER}" "${ENV_FILE}"
+        chmod 640 "${ENV_FILE}"
+        ok "env 已迁移：ORIGIN=${BASE_URL}（原文件备份 ${ENV_BAK}）"
+    else
+        warn "env 未设 ORIGIN 且 BASE_URL 为空，无法自动迁移——新版启动校验要求 ORIGIN，health 可能不过而回滚"
+    fi
+fi
+
+# b) 日志目录（幂等）：unit 的 append: 指向它，缺失则启动失败
+mkdir -p "${LOG_DIR}"
+chown "${SERVICE_USER}:${SERVICE_USER}" "${LOG_DIR}"
+chmod 750 "${LOG_DIR}"
+
+# c) logrotate：缺失则补（幂等）
+if [[ ! -f "${LOGROTATE_FILE}" ]]; then
+    LOG_DIR="${LOG_DIR}" bash "${SCRIPT_DIR}/gen-unit.sh" logrotate > "${LOGROTATE_FILE}"
+    chmod 644 "${LOGROTATE_FILE}"
+    ok "logrotate 已补写 ${LOGROTATE_FILE}"
+fi
+
+# d) unit：模板单源重新生成（与 install.sh 同源防漂移）；有差异才替换
+cp -a "${UNIT_FILE}" "${UNIT_BAK}"
+UNIT_TMP="$(mktemp)"
+SERVICE_NAME="${SERVICE_NAME}" SERVICE_USER="${SERVICE_USER}" INSTALL_DIR="${INSTALL_DIR}" \
+    ENV_FILE="${ENV_FILE}" DATA_DIR="${DATA_ROOT}" LOG_DIR="${LOG_DIR}" \
+    NODE_BIN="$(command -v node)" \
+    bash "${SCRIPT_DIR}/gen-unit.sh" unit > "${UNIT_TMP}"
+if ! diff -q "${UNIT_BAK}" "${UNIT_TMP}" >/dev/null 2>&1; then
+    install -m 644 "${UNIT_TMP}" "${UNIT_FILE}"
+    ok "unit 已刷新（安全加固/日志落盘同步到最新模板）"
+fi
+rm -f "${UNIT_TMP}"
+systemctl daemon-reload
+
 # ---- 8. 重启 + health 校验（生产 node 跑 build/index.js，ABI 不匹配在此暴露）----
 log "systemctl restart ${SERVICE_NAME}"
 systemctl restart "${SERVICE_NAME}.service"
@@ -324,7 +383,8 @@ fi
 
 # ---- 9. 成功：清理备份 + 总结 ----
 rm -rf "${BACKUP_DIR}"
-ok "已清理临时备份 ${BACKUP_DIR}"
+rm -f "${UNIT_BAK}" "${ENV_BAK}"
+ok "已清理临时备份（${BACKUP_DIR} / unit / env）"
 trap - EXIT
 
 echo
@@ -343,5 +403,5 @@ printf '    数据（DB/文档） %s\n' "${DATA_ROOT}"
 echo
 printf '  %s常用命令%s\n' "${C_BOLD}" "${C_RESET}"
 printf '    看状态          systemctl status %s\n' "${SERVICE_NAME}"
-printf '    跟踪日志        journalctl -u %s -f\n' "${SERVICE_NAME}"
+printf '    跟踪日志        sudo tail -f %s/app.log\n' "${LOG_DIR}"
 echo

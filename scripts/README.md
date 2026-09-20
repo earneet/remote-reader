@@ -329,8 +329,9 @@ sudo ./scripts/uninstall.sh --yes           # 跳过所有确认（自动化）
 5. **整目录备份** `/opt/remote-reader` → `/opt/remote-reader.bak`（含 build + node_modules，兜底 better-sqlite3 ABI 坑）
 6. `rsync -a --delete` 新码到 `INSTALL_DIR`（排除 data / node_modules / build / .git / .env）
 7. `chown root:root` + `bun install` + `bun --filter remote-reader-web build` + 剥离 devDeps（与 install.sh 同 build 链路）
-8. `systemctl restart` → 轮询 `/api/health`（最多 30s）
-9. **health 不过则自动回滚** `INSTALL_DIR` ← `.bak` + 重启 + 告警；通过则清理 `.bak` + 总结
+8. **配置迁移（幂等，老部署升级到新特性所需）**：env 缺 `ORIGIN` 时用 `BASE_URL` 补写（原文件备份 `env.update-bak`）；创建 `/var/log/remote-reader`；补写缺失的 logrotate；从单源模板（`gen-unit.sh`，与 install.sh 共用防漂移）重新生成 unit，有差异才替换 + `daemon-reload`（原 unit 备份 `unit.update-bak`）
+9. `systemctl restart` → 轮询 `/api/health`（最多 30s）
+10. **health 不过则自动回滚** `INSTALL_DIR` ← `.bak` + 恢复 unit/env 备份 + `daemon-reload` + 重启 + 告警；通过则清理全部备份 + 总结
 
 ### 基本用法
 
@@ -355,13 +356,13 @@ sudo ./scripts/update.sh -y           # 跳过确认（自动化）
 
 ### 安全设计
 
-- **配置与数据零改动**：不写 `env`、不碰 `/var/lib`、不重新生成 `SESSION_SECRET`（Web 不用重登）。
+- **配置与数据最小改动**：不碰 `/var/lib`、不重新生成 `SESSION_SECRET`（Web 不用重登）；唯一例外是幂等迁移——env 缺 `ORIGIN` 时补一行（有备份、可回滚），unit 模板过期时刷新（有备份、可回滚）。
 - **失败必回滚**：rebuild 前整目录备份；任何中途失败（build 报错等）或 health 不过，EXIT trap 自动 `mv` 还原 `INSTALL_DIR` 并重启，绝不让服务停在起不来的状态。
 - **整目录备份**（而非只备份 `build/`）：better-sqlite3 的 `.node` 在 `node_modules` 里，bun 重编译可能产出与生产 node ABI 不匹配的二进制，只备份 `build` 不足以回滚。
 - **health 校验**：生产跑 `node apps/web/build/index.js`，ABI 不匹配只在此时暴露；build 通过 ≠ 生产可跑。
 - **拒绝危险路径**：`INSTALL_DIR` 为空或 `/` 时中止（回滚要 `rm -rf INSTALL_DIR`）。
 - **`--git` 模式才要求 git 工作区干净**：默认模式用当前工作区代码 rsync、不 pull、不要求干净；`--git` 模式才检查工作区干净再 `git pull`（脏工作区会冲突）。
-- **中断可识别**：上次升级中断留下的 `.bak` 会被检测到并拒绝盲跑，提示人工确认。
+- **中断可识别**：上次升级中断留下的 `.bak` / `unit.update-bak` / `env.update-bak` 会被检测到并拒绝盲跑，提示人工确认。
 - **幂等**：成功后自动清理 `.bak`，重复跑不报错；`systemctl restart` 本身幂等（默认模式不 `git pull`；`--git` 模式的 `git pull` 幂等）。
 
 ### 已知坑（实测踩过，脚本已处理）

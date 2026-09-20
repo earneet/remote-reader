@@ -107,6 +107,8 @@ API_TOKEN=rr_xxx BASE_URL=http://localhost:5173 bash scripts/e2e-check.sh   # �
 docker compose up --build                      # 一键起服务（:3000），data/ 挂载为卷
 ```
 
+**systemd 部署三脚本**（install.sh 初装 / update.sh 原地升级 / uninstall.sh 卸载）：unit 与 logrotate 模板**单源** `scripts/gen-unit.sh`（install/update 共用防漂移，unit 含 17 项加固 + 日志落盘 append:）；update.sh 升级含**幂等配置迁移**（env 缺 `ORIGIN` 用 BASE_URL 补写、建 `/var/log/remote-reader`、补 logrotate、刷新 unit + daemon-reload），unit/env 变更有 `.update-bak` 备份并纳入失败自动回滚——老部署升级新版（含 ORIGIN 启动校验）必须走 update.sh 而非只换代码，否则新校验会拒启。改模板只改 gen-unit.sh，勿在 install/update 各写一份。
+
 **Docker 非 root 运行**：`docker-entrypoint.sh` 先 `chown -R node:node /app/data`（host 首次建卷常是 root 属主），再用 `runuser -u node` 降权跑 `node apps/web/build/index.js`；healthcheck 命中 `/api/health`（含 DB `SELECT 1`，DB/磁盘故障返回 503）。改 entrypoint / Dockerfile 前看 sub3 设计 spec。
 
 **日志**：systemd 部署应用日志落盘 `/var/log/remote-reader/app.log`（unit `StandardOutput/StandardError=append:` + `ReadWritePaths` 含 LOG_DIR + logrotate 每日×14 copytruncate；journald 只剩启停/崩溃）；hooks.server.ts 每请求打 `[access] METHOD path status ip= origin=`（`/_app/` 静态资源不记）。**已知边界**：SvelteKit 的 CSRF 403（Cross-site POST forbidden）在 hooks 链之前由框架拒绝，`[access]` 看不到此类请求——需在外层反代（nginx `log_format` 加 `$http_origin`）取证。docker 部署日志走容器 stdout（`docker compose logs`）。
