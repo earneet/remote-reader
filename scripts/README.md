@@ -398,16 +398,19 @@ sudo DATABASE_PATH=/var/lib/remote-reader/app.db \
 
 ## e2e-check.sh · 端到端冒烟测试
 
-**用途**：在已起服务的环境（dev 或生产）跑一系列 curl，验证关键路径符合预期：上传、免登录查看、401/413/404、路径穿越防护。
+**用途**：在已起服务的环境（dev 或生产）跑一系列 curl，验证关键路径符合预期：上传、免登录查看、401/413/404、路径穿越防护、登录页 Agent 指引块、Agent 自助注册全链路。
 
 **用法**：
 
 ```bash
-# 假设 dev 服务在 5173，已有 API token
+# 假设 dev 服务在 5173，已有 API token（注意 dev 换端口时必须设 BASE_URL，否则上传返回的链接指向默认 5173 连不通）
 API_TOKEN=rr_xxx BASE_URL=http://localhost:5173 ./scripts/e2e-check.sh
 
 # 或 install.sh 装好后测生产
 API_TOKEN=rr_xxx BASE_URL=http://localhost:3000 ./scripts/e2e-check.sh
+
+# 可选：提供 E2E_INVITE_CODE 时追加验证 Agent 自助注册→建 token→上传全链路
+API_TOKEN=rr_xxx E2E_INVITE_CODE=<邀请码> BASE_URL=http://localhost:3000 ./scripts/e2e-check.sh
 ```
 
 **检查项**（任一失败即 exit 1）：
@@ -418,8 +421,12 @@ API_TOKEN=rr_xxx BASE_URL=http://localhost:3000 ./scripts/e2e-check.sh
 - 失效 share token → 404
 - name 含 `../../../evil.md` → 400
 - path 含 `../escape` → 400
+- name 单段 300B 超长 → 400（parsePath NAME_MAX 拦截）
+- 路径段撞同名文件（跨类型同名）→ 409 + message 透传
+- `GET /login` SSR HTML 含 `id="agent-guide"` 指引块
+- （提供 `E2E_INVITE_CODE` 时）`POST /api/v1/auth/register` → 200 + session cookie → `POST /api/v1/auth/api-token` 返回 token → 用新 token 上传 → 200
 
-成功输出：`✓ 子计划 1 端到端通过（上传→免登录查看→401/413/404/400 穿越防护）`。
+成功输出：`✓ 端到端通过（上传→免登录查看→错误场景→agent-guide 指引块[→自助注册全链路]）`。
 
 ---
 
