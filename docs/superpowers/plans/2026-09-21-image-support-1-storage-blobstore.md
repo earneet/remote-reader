@@ -101,6 +101,8 @@ export const imageRefs = sqliteTable('image_refs', {
 }));
 ```
 
+（**命名备案**：索引名与 spec §4.1 的裸名（`images_status_created` 等）**有意不同**——统一带 `_idx`/`_uniq` 后缀随仓库惯例（db-init 守卫测试的 expectedIndexes 全带后缀）；Phase 2+ 实现按本计划名单为准，勿按 spec 字面名查询）
+
 - [ ] **Step 3: 类型检查通过**
 
 Run: `bun --filter remote-reader-web check`
@@ -130,7 +132,8 @@ import { resetDb } from './helpers';
 
 // 三源一致性守卫（spec §4.1）：SCHEMA_SQL（新库路径）/ ensureSchema（存量库路径）/ drizzle 迁移（db:migrate 路径）
 // 对 images / image_refs / documents.storage_backend 的结构断言。
-// 注：vitest 环境下 DATABASE_PATH 指向临时库（tests/helpers.ts setup），ensureSchema 幂等可重复调用。
+// 注：测试库由根 vitest.config.ts 统一管理（共享 ./data/app.db，helpers.ts 不设 DATABASE_PATH）；
+// db/index.ts 模块加载即执行 ensureSchema()（含新表），beforeAll resetDb 保证起点数据干净。
 beforeAll(() => resetDb()); // 起点干净，桩数据不泄漏到后续测试文件
 
 describe('images schema', () => {
@@ -244,16 +247,24 @@ export function ensureDocumentsStorageBackendColumn(target: SqliteDb): void {
     ensureDocumentsStorageBackendColumn(target);
 ```
 
-- [ ] **Step 5: 跑测试确认通过**
+- [ ] **Step 4: 同步 A-2 等价性守卫测试（必改，非可选——本步遗漏则 Task 2 的 commit 即处于红测试状态）**
 
-Run: `bun run test apps/web/tests/images-schema.test.ts`
-Expected: PASS（5 个用例全绿）
+`apps/web/tests/db-init.test.ts` 的守卫测试使用**硬编码清单**（documents 列清单 + `expectedIndexes` 的 `tbl_name IN (...)` 表清单）。本 Task 的 SCHEMA_SQL/加列改动使其立即失配，须同步三处：
+
+1. documents 列清单追加 `'storage_backend'`
+2. `expectedIndexes` 的表清单 `IN (...)` 追加 `'images'`、`'image_refs'`
+3. `expectedIndexes` 增补四个索引行：`images_owner_hash_uniq` / `images_owner_name_uniq` / `images_status_created_idx` / `images_status_ready_idx` / `image_refs_image_id_idx`（按该文件现有行格式）
+
+- [ ] **Step 5: 跑测试确认通过（新守卫 + 存量守卫双绿）**
+
+Run: `bun run test apps/web/tests/images-schema.test.ts apps/web/tests/db-init.test.ts`
+Expected: PASS（5 + 存量全绿——确保本 Task 的 commit 不留红测试）
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add apps/web/src/lib/server/db/index.ts apps/web/tests/images-schema.test.ts
-git commit -m "feat(web): 图片支持——SCHEMA_SQL 建 images/image_refs + documents.storage_backend 兜底回填（TDD）"
+git add apps/web/src/lib/server/db/index.ts apps/web/tests/images-schema.test.ts apps/web/tests/db-init.test.ts
+git commit -m "feat(web): 图片支持——SCHEMA_SQL 建 images/image_refs + documents.storage_backend 兜底回填 + A-2 守卫同步（TDD）"
 ```
 
 ---
@@ -269,24 +280,28 @@ git commit -m "feat(web): 图片支持——SCHEMA_SQL 建 images/image_refs + d
 Run: `bun --filter remote-reader-web db:generate`
 Expected: 生成 `apps/web/src/lib/server/db/migrations/0008_<name>.sql`，内容含 `CREATE TABLE images` / `CREATE TABLE image_refs` / `ALTER TABLE documents ADD storage_backend`。**目检**：与 Task 2 的 SCHEMA_SQL 逐索引对照，索引名必须完全一致（三源一致）。**若生成物是 sqlite 表重建形态**（drizzle-kit 对部分 DDL 会生成 create-new-copy-rename 脚本）：纯加列场景可手编简化为单条 `ALTER TABLE "documents" ADD "storage_backend" text;`（drizzle 迁移文件允许手编，保持语句幂等性靠 ensureSchema 兜底而非迁移本身）；新表保持生成的 CREATE 即可。修 schema.ts 或手编后重新目检。
 
-- [ ] **Step 2: 迁移执行冒烟（独立临时库）**
+- [ ] **Step 2: 迁移执行冒烟（独立临时库；node 段在 apps/web 目录跑——bun workspaces 下仓库根解析不到 better-sqlite3）**
 
-Run: `DATABASE_PATH=/tmp/opencode/img-migrate-smoke.db bun --filter remote-reader-web db:migrate && DATABASE_PATH=/tmp/opencode/img-migrate-smoke.db node -e "const D=require('better-sqlite3');const db=new D('/tmp/opencode/img-migrate-smoke.db');console.log(db.prepare(\"SELECT name FROM sqlite_master WHERE name IN ('images','image_refs')\").all());db.close()"`
-Expected: 输出包含 `images` 与 `image_refs`；无报错。（用 node 直跑 better-sqlite3，符合运行时分工）
+Run: `DATABASE_PATH=/tmp/opencode/img-migrate-smoke.db bun --filter remote-reader-web db:migrate`
+Expected: 无报错。
+
+Run（**workdir = `apps/web`**）:
+```bash
+DATABASE_PATH=/tmp/opencode/img-migrate-smoke.db node -e "const D=require('better-sqlite3');const db=new D('/tmp/opencode/img-migrate-smoke.db');console.log(db.prepare(\"SELECT name FROM sqlite_master WHERE name IN ('images','image_refs')\").all());db.close()"
+```
+Expected: 输出包含 `images` 与 `image_refs`。（用 node 直跑 better-sqlite3，符合运行时分工；若 drizzle.config 的 dbCredentials 硬编码了路径而非读 DATABASE_PATH，先核对配置再冒烟）
 完成后删除冒烟库：`rm /tmp/opencode/img-migrate-smoke.db`
 
 - [ ] **Step 3: resetDb 清表清单同步**
 
-在 `apps/web/tests/helpers.ts` 的 resetDb 中（找到现有 `DELETE FROM documents` / `DELETE FROM share_links` 的清表序列）追加：
+`apps/web/tests/helpers.ts` 的 resetDb 使用 drizzle 风格（`db.delete(schema.X).run()`，无裸 SQL 序列）。在清表序列**最前**（imageRefs 先于 images，均在 documents/users 之前——遵守外键依赖顺序）追加：
 
 ```ts
-    sqlite.exec('DELETE FROM image_refs');
-    sqlite.exec('DELETE FROM images');
+    db.delete(schema.imageRefs).run();
+    db.delete(schema.images).run();
 ```
 
-（顺序：image_refs 先于 images、且在 users 删除之前——遵守外键依赖顺序）
-
-同时确认**现有 schema↔ensureSchema 等价性守卫测试**（A-2 先例，grep `apps/web/tests` 中比对 schema.ts 声明与实表结构的测试文件）是否需要把 images / image_refs 纳入其清单——若为动态枚举 schema.ts 导出则自动覆盖无需改；若为硬编码表清单则同步追加两个新表并跑绿。
+（A-2 守卫测试已在 Task 2 Step 4 同步——本步只动 resetDb）
 
 - [ ] **Step 4: 全量测试回归（确认 resetDb 改动无破坏）**
 
@@ -334,7 +349,7 @@ describe('getImageStoreBackend / getMaxImageBytes', () => {
 });
 ```
 
-（文件顶部 import 区补 `getImageStoreBackend, getMaxImageBytes`——若该文件用 `import * as env` 风格则按现状适配）
+（文件顶部 import 区补 `getImageStoreBackend, getMaxImageBytes`——若该文件用 `import * as env` 风格则按现状适配。**该文件现有 afterEach 只清理固定键清单**——须把 `IMAGE_STORE_BACKEND` / `MAX_IMAGE_BYTES` 加入该清单，防用例中途断言失败时泄漏 env 到后续测试文件（如 blobstore.test.ts 依赖 local 默认值））
 
 - [ ] **Step 2: 跑测试确认失败**
 
@@ -501,14 +516,7 @@ export class LocalBlobStore implements BlobStore {
 
 （注：这是 Task 6 的实现桩——仅让 Task 5 的注册表测试可跑；Task 6 立即替换为真实现。**不是计划占位符**，是任务间的编译依赖顺序。）
 
-同时把 blobstore.ts 中的 require 段改为静态 import：
-
-```ts
-import { S3BlobStore } from './blobstore-s3';
-// buildRegistry 内：if (s3config !== null) m.set('s3', new S3BlobStore(s3config));
-```
-
-并创建 `apps/web/src/lib/server/blobstore-s3.ts` 空壳（Task 7 填满）：
+同时创建 `apps/web/src/lib/server/blobstore-s3.ts` 空壳（Task 7 填满）：
 
 ```ts
 import type { BlobStore } from './blobstore';
@@ -600,6 +608,7 @@ describe('LocalBlobStore', () => {
 
     it('delete 后 get 抛 NotFound；delete 幂等（ENOENT 视为成功）', async () => {
         await store.delete(KEY);
+        await expect(store.get(KEY)).rejects.toBeInstanceOf(ObjectNotFoundError); // 用例名的前半断言
         await expect(store.delete(KEY)).resolves.toBeUndefined();
     });
 
@@ -729,7 +738,7 @@ Expected: 安装成功（与既有 @aws-sdk/client-s3 同族，无新依赖家�
 - [ ] **Step 2: 写失败测试（presign 是纯本地 HMAC 计算，不出网可测）**
 
 ```ts
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { S3BlobStore } from '$server/blobstore-s3';
 
 const CFG = {
@@ -976,16 +985,25 @@ Expected: FAIL（新校验不存在：s3 缺配置不抛 / 8M 通过了旧校验
     }
 ```
 
-- [ ] **Step 4: 跑测试确认通过 + 全文件回归**
+- [ ] **Step 4: 更新被新校验打破的 2 个存量用例 + 同步 .env.example**
+
+新双下限（need = max(5MB×1.5, 10MB×1.37×1.5) ≈ 21.5MB）会使两个现有"通过"用例翻转失败（已逐条排查 16 个存量用例，恰这两条受影响）：
+
+1. `'prod 强配置通过'`：`BODY_SIZE_LIMIT: '8M'` → 改为 `'24M'`（25165824 ≥ 21548237）
+2. `'prod BODY_SIZE_LIMIT 带单位后缀按 1024 进制解析（512K ≥ 1KB×1.5 通过）'`：该用例 `MAX_UPLOAD_BYTES: '1024'` 但 `MAX_IMAGE_BYTES` 未设默认 10MB → need 跳到 21.5MB → 补设 `MAX_IMAGE_BYTES: '1024'`（保持原意图：小上限下 512K 通过）
+
+同时更新 `.env.example` 的 `BODY_SIZE_LIMIT` 行（当前推荐 8388608）：值改 `25165824`，注释改"须 ≥ max(MAX_UPLOAD_BYTES×1.5, MAX_IMAGE_BYTES×1.37×1.5)；5M 文档+10M 图片配 24M"。（8M 存量部署升级即 fail-fast 属 spec §12 有意行为、错误信息自解释；本机生产 /opt/remote-reader 亦在该群体，部署前先改 env。INSTALL.md 汇总表更新留在 Phase 5 文档批）
+
+- [ ] **Step 5: 跑测试确认通过 + 全文件回归**
 
 Run: `bun run test apps/web/tests/startup-check.test.ts`
 Expected: PASS（新旧用例全绿）
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add apps/web/src/lib/server/startup-check.ts apps/web/tests/startup-check.test.ts
-git commit -m "feat(web): 图片支持——startup-check 扩展（s3 后端配置校验 + BODY_SIZE_LIMIT 双下限取 max，TDD）"
+git add apps/web/src/lib/server/startup-check.ts apps/web/tests/startup-check.test.ts .env.example
+git commit -m "feat(web): 图片支持——startup-check 扩展（s3 后端配置校验 + BODY_SIZE_LIMIT 双下限取 max）+ 存量用例与 .env.example 同步（TDD）"
 ```
 
 ---
@@ -1021,5 +1039,5 @@ git status --short   # 确认无未提交文件
 
 1. **Spec 覆盖**：本批覆盖 spec §4.1（DDL/迁移/回填/索引）、§8（接口定义/注册表/两实现/溯源路由前提/uploadUrlTtl）、§12（IMAGE_STORE_BACKEND/MAX_IMAGE_BYTES/startup 校验双下限）。§8 的 presign `opts` 透传缝——**刻意不在本批实现**（YAGNI，无消费者；spec 同款裁定），Phase 2+ 的 confirm/init 实现 presign 调用时不带 opts。§8 的「tiering 注入收敛」「删除旧 ObjectStore」属 Phase 5。✓
 2. **占位符扫描**：Task 5 的两个空壳类是任务间编译依赖（Task 6/7 立即替换为真实现，步骤内注明），非计划占位符。其余步骤均含完整代码/命令。✓
-3. **类型一致性**：`BlobStore` 接口签名与 spec §8 一致（put/get/head?/getRange?/delete/presign?）；`LocalBlobStore.head` 返回 `{ size: number }`（结构子类型兼容 `{ size: number; etag?: string }` ✓）；`S3BlobStore.presign` 实现 3 参数（接口 4 参含可选 opts——少可选参数在 TS 中兼容 ✓）；错误类型复用 object-store.ts 的 `ObjectNotFoundError`/`ArchiveUnavailableError`（该文件已导出，无 S3 依赖）。✓
+3. **类型一致性**：`BlobStore` 接口签名与 spec §8 一致（put/get/head?/getRange?/delete/presign?）；`LocalBlobStore.head` 返回 `{ size: number }`（结构子类型兼容 `{ size: number; etag?: string }` ✓）；`S3BlobStore.presign` 实现 3 参数（接口 4 参含可选 opts——少可选参数在 TS 中兼容 ✓）；错误类型复用 object-store.ts 的 `ObjectNotFoundError`/`ArchiveUnavailableError`（**注意：object-store.ts 顶部值导入 object-store-s3，并非 S3-free**——blobstore-local 引它会传递加载 aws-sdk；server 侧现状同链无正确性问题，加载略重，Phase 5 收敛时把错误类挪至叶子模块）。✓
 4. **已知执行注意**：blobstore.ts 最终形态用静态 import（Task 5 Step 4 已裁定）；`getRange` 的 S3 Range 头在七牛的兼容性已列入 spec §14 实测清单（Phase 8 e2e 真机验证）。
