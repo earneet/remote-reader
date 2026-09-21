@@ -17,6 +17,28 @@
 4. MCP 桥编排（两阶段 / 六类错误 / 双通道）
 5. 前端 Lightbox + 冷却通用化收敛 + e2e + 文档
 
+**env 分批边界**（防"遗漏"误判）：spec §12 共四个新 env——本批只加有消费者的两个（`IMAGE_STORE_BACKEND` / `MAX_IMAGE_BYTES`）；`IMAGE_SIGNED_URL_TTL` 与 `IMAGE_PROXY_ALL` 的消费者在渲染管线，**Phase 3 随实现一起加**（先加 getter 无消费者 = 死代码，违反项目"不做推测性设计"准则）。
+
+---
+
+## Task 0: worktree 准备（执行前置，一次性）
+
+- [ ] **Step 1: 创建 worktree 并安装依赖**
+
+本批为功能代码，按 `AGENTS.local.md` 纪律在 worktree 副本执行（可用 superpowers:using-git-worktrees 或 `git worktree add ../rr-img1 -b feat/image-support-phase1`）。进入副本后：
+
+```bash
+bun install    # bun 全局缓存硬链接，秒级；data/ 为 gitignore，副本天然用独立测试库
+```
+
+- [ ] **Step 2: 基线验证（改动前全绿基线）**
+
+```bash
+bun run test && bun --filter remote-reader-web check
+```
+
+Expected: 全部 PASS / 0 errors——后续任何"回归"都有干净基线可对照。
+
 ---
 
 ## 运行时纪律（全批通用，每个 Task 的验证命令都遵守）
@@ -245,7 +267,7 @@ git commit -m "feat(web): 图片支持——SCHEMA_SQL 建 images/image_refs + d
 - [ ] **Step 1: 生成迁移**
 
 Run: `bun --filter remote-reader-web db:generate`
-Expected: 生成 `apps/web/src/lib/server/db/migrations/0008_<name>.sql`，内容含 `CREATE TABLE images` / `CREATE TABLE image_refs` / `ALTER TABLE documents ADD storage_backend`。**目检**：与 Task 2 的 SCHEMA_SQL 逐索引对照，索引名必须完全一致（三源一致）；若生成物含多余内容（如重复索引），修 schema.ts 后重新生成。
+Expected: 生成 `apps/web/src/lib/server/db/migrations/0008_<name>.sql`，内容含 `CREATE TABLE images` / `CREATE TABLE image_refs` / `ALTER TABLE documents ADD storage_backend`。**目检**：与 Task 2 的 SCHEMA_SQL 逐索引对照，索引名必须完全一致（三源一致）。**若生成物是 sqlite 表重建形态**（drizzle-kit 对部分 DDL 会生成 create-new-copy-rename 脚本）：纯加列场景可手编简化为单条 `ALTER TABLE "documents" ADD "storage_backend" text;`（drizzle 迁移文件允许手编，保持语句幂等性靠 ensureSchema 兜底而非迁移本身）；新表保持生成的 CREATE 即可。修 schema.ts 或手编后重新目检。
 
 - [ ] **Step 2: 迁移执行冒烟（独立临时库）**
 
@@ -263,6 +285,8 @@ Expected: 输出包含 `images` 与 `image_refs`；无报错。（用 node 直�
 ```
 
 （顺序：image_refs 先于 images、且在 users 删除之前——遵守外键依赖顺序）
+
+同时确认**现有 schema↔ensureSchema 等价性守卫测试**（A-2 先例，grep `apps/web/tests` 中比对 schema.ts 声明与实表结构的测试文件）是否需要把 images / image_refs 纳入其清单——若为动态枚举 schema.ts 导出则自动覆盖无需改；若为硬编码表清单则同步追加两个新表并跑绿。
 
 - [ ] **Step 4: 全量测试回归（确认 resetDb 改动无破坏）**
 
@@ -405,24 +429,26 @@ Expected: FAIL（模块不存在）
 import { getImageStoreBackend } from './env';
 import { parseObjectStoreEnv, type ObjectStoreConfig } from './object-store';
 import { LocalBlobStore } from './blobstore-local';
+import { S3BlobStore } from './blobstore-s3';
 
 // BlobStore：无状态字节存储插件接口（spec 2026-09-20 §8）。
 // 契约：插件只认 key 与字节——mime/size/hash 等元数据全在 DB 行，存储层不理解内容。
 // 演进纪律（#27）：只能加可选成员，禁止加必选、禁止删改既有签名；能力用运行时探测（if (store.presign)）。
 // key 由核心分配传入：local '<ownerId>/blobs/<h2>/<hash>' / s3 'images/<ownerId>/<hash>'（per-owner 内容寻址）。
+// ⚠️ 依赖方向约束：blobstore-local.ts / blobstore-s3.ts 对本文件必须 `import type`（type-only）——
+//    值导入会形成 blobstore → blobstore-s3 → blobstore 运行时循环。
 export interface BlobStore {
     readonly id: string;
     /** presigned PUT URL 的建议有效期（秒）；慢后端可自声明更长。默认 600 */
     readonly uploadUrlTtlSeconds?: number;
     put(key: string, data: Buffer, contentType?: string): Promise<void>;
     get(key: string): Promise<Buffer>;
-    head?(key: string): Promise<{ size: number; etag?: string }>;
+    head?(key: string): Promise<{ size: number; etag?: string }>);
+    /** 读 [start, end] 闭区间字节（confirm 魔数预判 32B = getRange(key, 0, 31)） */
     getRange?(key: string, start: number, end: number): Promise<Buffer>;
     delete(key: string): Promise<void>;
     presign?(op: 'get' | 'put', key: string, ttlSeconds: number, opts?: Record<string, string>): Promise<string>;
 }
-
-export interface BlobStoreS3Config extends ObjectStoreConfig {}
 
 // s3 注册条件（P2-7 语义）：OBJECT_STORE_* 配置齐全即注册——即使 IMAGE_STORE_BACKEND=local，
 // 旧 s3 行的读取仍能路由到 s3 实现（换后端不炸旧图；彻底删除 env 才会 503，INSTALL 有文档）
@@ -431,9 +457,6 @@ function buildRegistry(): Map<string, BlobStore> {
     m.set('local', new LocalBlobStore());
     const s3config = parseObjectStoreEnv();
     if (s3config !== null) {
-        // 延迟 require 防 bun/vite 循环依赖：s3 实现只在配置存在时加载
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const { S3BlobStore } = require('./blobstore-s3') as typeof import('./blobstore-s3');
         m.set('s3', new S3BlobStore(s3config));
     }
     return m;
@@ -462,8 +485,6 @@ export function __setBlobStoresForTest(stores: { local: BlobStore } | undefined)
     registry = stores === undefined ? undefined : new Map(Object.entries(stores));
 }
 ```
-
-（若 `require` 在 vite dev 下不可用——本项目 esm——改为顶部静态 `import { S3BlobStore } from './blobstore-s3'`：blobstore-s3 仅 import @aws-sdk 与 object-store（错误类），无循环依赖风险，静态 import 是更简单正确的选择。**执行时采用静态 import**，上面 require 写法仅示意懒加载意图。）
 
 - [ ] **Step 4: 创建最小 `apps/web/src/lib/server/blobstore-local.ts`（空壳，Task 6 填满）**
 
@@ -525,14 +546,21 @@ git commit -m "feat(web): 图片支持——BlobStore 接口与注册表（local
 - [ ] **Step 1: 写失败测试**
 
 ```ts
-import { describe, it, expect } from 'vitest';
-import { mkdtempSync, writeFileSync, statSync, rmSync } from 'node:fs';
+import { describe, it, expect, afterAll } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { LocalBlobStore } from '$server/blobstore-local';
 import { ObjectNotFoundError } from '$server/object-store';
 
 const DIR = mkdtempSync(join(tmpdir(), 'rr-blob-'));
+// DATA_DIR 指向临时目录——必须在任何 store 调用前设置（LocalBlobStore 每次调用时读 getDataDir()）；
+// afterAll 恢复：vitest 单 worker 共享 process.env，不恢复会泄漏到后续测试文件
+process.env.DATA_DIR = DIR;
+afterAll(() => {
+    delete process.env.DATA_DIR;
+    rmSync(DIR, { recursive: true, force: true });
+});
 
 describe('LocalBlobStore', () => {
     const store = new LocalBlobStore();
@@ -580,13 +608,9 @@ describe('LocalBlobStore', () => {
         await expect(store.put('a/../../escape', Buffer.from('x'))).rejects.toThrow();
     });
 });
-
-// DATA_DIR 指向临时目录（模块加载后 env 动态读取，测试内改即可生效）
-process.env.DATA_DIR = DIR;
-afterAll(() => rmSync(DIR, { recursive: true, force: true }));
 ```
 
-（顶部补 `import { afterAll } from 'vitest'`；`writeFileSync/statSync` 若未用到则从 import 中移除——以实际使用为准。注意 `process.env.DATA_DIR` 必须在**构造/首次调用前**设置，LocalBlobStore 内部每次调用时读取 getDataDir()（env.ts 先例：调用时读取支持测试覆写）。）
+（`getRange` 语义为闭区间 `[start, end]`——测试 `getRange(KEY, 0, 31)` 期望 32 字节与接口 JSDoc 一致）
 
 - [ ] **Step 2: 跑测试确认失败**
 
@@ -728,11 +752,17 @@ describe('S3BlobStore presign（本地计算，无网络 IO）', () => {
         expect(url).toMatch(/X-Amz-Signature=[0-9a-f]{64}/);
     });
 
-    it('presign put 同形状；同参数产出确定性 URL（桶对齐的前提）', async () => {
-        const store = new S3BlobStore(CFG);
-        const a = await store.presign!('put', 'k', 600);
-        const b = await store.presign!('put', 'k', 600);
-        expect(a).toBe(b); // 同一时刻签名一致（X-Amz-Date 秒级粒度内）
+    it('presign put 同形状；锁时间后同参数产出逐字节相同 URL（桶对齐的前提）', async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(new Date('2026-09-21T08:00:00Z'));
+        try {
+            const store = new S3BlobStore(CFG);
+            const a = await store.presign!('put', 'k', 600);
+            const b = await store.presign!('put', 'k', 600);
+            expect(a).toBe(b); // X-Amz-Date 锁定后签名确定性（不锁会跨秒 flaky）
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it('uploadUrlTtlSeconds 默认 600', () => {
