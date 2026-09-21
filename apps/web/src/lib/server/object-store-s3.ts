@@ -1,7 +1,6 @@
-import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
-import { NodeHttpHandler } from '@smithy/node-http-handler';
 import type { ObjectStore, ObjectStoreConfig } from './object-store';
 import { ObjectNotFoundError, ArchiveUnavailableError } from './object-store';
+import { S3BlobStore } from './blobstore-s3';
 
 // GET 错误映射：NoSuchKey / HTTP 404 → 对象缺失（404 语义）；其余 → 不可达（503 语义）
 // 404 兜底：部分 S3 兼容网关对缺失对象返回非标准错误体（无 NoSuchKey Code），按状态码归类
@@ -13,62 +12,26 @@ export function mapGetError(key: string, e: unknown): Error {
     return new ArchiveUnavailableError(`get ${key} 失败`, { cause: e });
 }
 
+// 冷档存储适配器（Phase 5 收敛）：string 语义（markdown 文本）转调 S3BlobStore 的字节语义，
+// string↔Buffer 转换收在本层；S3Client 构建/NodeHttpHandler 超时/重试配置单源在 S3BlobStore。
+// （错误消息前缀随转调变为 "blob put/get/delete ..."——异常类型与 404/503 语义不变）
 export class S3ObjectStore implements ObjectStore {
-    private readonly client: S3Client;
-    private readonly bucket: string;
+    private readonly store: S3BlobStore;
 
     constructor(config: ObjectStoreConfig) {
-        this.client = new S3Client({
-            endpoint: config.endpoint,
-            region: config.region,
-            forcePathStyle: config.forcePathStyle,
-            credentials: {
-                accessKeyId: config.accessKeyId,
-                secretAccessKey: config.secretAccessKey
-            },
-            // SDK 默认无请求超时：挂起端点会拖死冷读请求与文档锁，快速失败交给 503 语义（spec §5）
-            requestHandler: new NodeHttpHandler({ requestTimeout: 5_000 }),
-            maxAttempts: 2
-        });
-        this.bucket = config.bucket;
+        this.store = new S3BlobStore(config);
     }
 
     async put(key: string, content: string): Promise<void> {
-        try {
-            await this.client.send(new PutObjectCommand({
-                Bucket: this.bucket,
-                Key: key,
-                Body: content,
-                ContentType: 'text/markdown; charset=utf-8'
-            }));
-        } catch (e) {
-            throw new ArchiveUnavailableError(`put ${key} 失败`, { cause: e });
-        }
+        // ContentType 显式传（P2-5）：不传会落 S3BlobStore 默认的 octet-stream，冷档对象元数据漂移
+        await this.store.put(key, Buffer.from(content), 'text/markdown; charset=utf-8');
     }
 
     async get(key: string): Promise<string> {
-        let body: { transformToString(encoding: string): Promise<string> } | undefined;
-        try {
-            const res = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }));
-            body = res.Body;
-        } catch (e) {
-            throw mapGetError(key, e);
-        }
-        if (!body) throw new ObjectNotFoundError(key);
-        try {
-            return await body.transformToString('utf-8');
-        } catch (e) {
-            // header 阶段之外的 body 流中断（慢网络/传输截断）同样属于“对象存储不可达”，
-            // 归入 503 语义而非裸抛降级 500
-            throw new ArchiveUnavailableError(`get ${key} body 失败`, { cause: e });
-        }
+        return (await this.store.get(key)).toString('utf-8');
     }
 
     async delete(key: string): Promise<void> {
-        try {
-            await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));
-        } catch (e) {
-            throw new ArchiveUnavailableError(`delete ${key} 失败`, { cause: e });
-        }
+        await this.store.delete(key);
     }
 }
