@@ -1,6 +1,6 @@
 # 图片支持设计（资产池去重 · 桥直传云 · CDN 直连取图 · Lightbox）
 
-> 日期：2026-09-20 · 状态：设计定稿 v3（细节讨论中；存储结构经 Oracle 对抗审查修复）
+> 日期：2026-09-20 · 状态：设计定稿 v4（细节讨论完毕；存储结构经 Oracle 对抗审查修复，全文经第二轮 Oracle 代码对照审查修复 P0-1 + P1×4 + P2×7）
 
 ## 1. 背景与目标
 
@@ -113,7 +113,7 @@ CREATE TABLE images (
   size_bytes      INTEGER NOT NULL,              -- pending=init 报称；ready 后=实测回写
   status          TEXT NOT NULL DEFAULT 'pending',  -- 'pending' | 'ready' | 'deleted'
   storage_backend TEXT NOT NULL,                 -- 写入时锁定的插件 id（溯源）
-  storage_key     TEXT NOT NULL,                 -- 插件自解释：local 'blobs/<owner>/<h2>/<hash>' / s3 'images/<owner>/<hash>'（per-owner 内容寻址）
+  storage_key     TEXT NOT NULL,                 -- 插件自解释：local '<ownerId>/blobs/<h2>/<hash>' / s3 'images/<ownerId>/<hash>'（per-owner 内容寻址，与 §8 DATA_DIR 布局一致）
   created_at      INTEGER NOT NULL,              -- pending deadline 计时起点（复活时重置）
   ready_at        INTEGER,                       -- confirm/relay 时刻（关联 deadline 起点；墓碑保留）
   UNIQUE(owner_id, content_hash),
@@ -144,14 +144,15 @@ ALTER TABLE documents ADD COLUMN storage_backend TEXT;  -- NULL=hot；非空=col
 stateDiagram-v2
     [*] --> pending : init 插行（所有后端统一）/ 墓碑复活
     pending --> ready : confirm 验证通过 / relay 写盘验证通过
-    pending --> tomb : 回收：超 1h 未 confirm → 物理删行+删对象+释放名字*
+    pending --> [*] : 回收：超 1h 未 confirm → 物理删行+删对象+释放名字*
     ready --> referenced : md 上传 refs 登记
     referenced --> referenced : 覆盖上传 refs diff 重算
     referenced --> tomb : refs 归零（即时 GC）或 ready 无引用超 24h（周期兜底）<br/>软删除 + 删 blob + 留墓碑
     tomb --> pending : 同内容重传复活（全字段重置）
 ```
 
-\* pending 释放名字安全：从未 ready、从未被引用，无顶替歧义。
+\* pending 释放名字安全：从未 ready、从未被引用，无顶替歧义（窄例外见 §9.1 续期机制）。
+注：`referenced` 为**派生态**（refs 非空的 ready），非存储 status——DDL 的 status 只有 pending/ready/deleted。
 
 ### 4.3 GC 安全包（Oracle 审查修复，全部为不变量）
 
@@ -176,7 +177,7 @@ stateDiagram-v2
 | 流程 | 查询形状 | 命中 |
 |---|---|---|
 | init 去重 | `owner=? AND content_hash=?` 按 status 分支 | UNIQUE 索引 |
-| 名字后缀分配 | `owner=? AND name LIKE 'shot%.png'` | UNIQUE(name) 前缀 |
+| 名字后缀分配 | 候选名**逐个精确 `=` 探测**（2..16）——`%`/`_` 为合法文件名字符，LIKE 前缀扫描会过匹配导致跳号/提前耗尽上限；如保留 LIKE 优化必须 ESCAPE 转义 | UNIQUE(name) |
 | 渲染替换按名查行 | `owner=? AND name=? AND status='ready'` | UNIQUE(name) |
 | refs 白名单 | `EXISTS(… document_id=? AND image_id=?)` | PK 左前缀 |
 | refs 归零判定 | `NOT EXISTS(… image_id=?)` | image_refs_image |
@@ -190,21 +191,22 @@ stateDiagram-v2
 ### 5.1 `POST /api/v1/images/init`
 
 - 认证 Bearer token + authfail IP 桶；限流轻桶 `images-meta:${tokenId}`（默认 120/min）
-- Body `{name, content_hash, content_md5, size_bytes}`；校验 name 单段合法、size≤上限（413 预检）
+- Body `{name, content_hash, content_md5, size_bytes}`；校验链（**P0-1，顺序不可变**）：**`content_hash` 须匹配 `/^[0-9a-f]{64}$/`、`content_md5` 须匹配 `/^[0-9a-f]{32}$/`，否则 400——hash 未经格式校验直接拼入 local 写盘路径（`blobs/<h2>/<hash>`），`..` 可穿越 DATA_DIR 任意写**；name 单段合法；size≤上限（413 预检）
 - 逻辑（按序）：查 `(owner,hash)`——ready → `{status:"exists", name}`；pending → `{status:"direct"|relay 视后端, name, image_id, upload_url?}`（共享行）；deleted 墓碑 → 复活（全字段重置：status→pending、created_at=now、ready_at=NULL、backend=当前、key 新生成、md5/size 按新报值）→ 同新行响应；无行 → 插 pending → 同上
 - 后端为 s3 → `direct` + presigned PUT（key=`images/<owner>/<hash>`，TTL=`store.uploadUrlTtlSeconds ?? 600`）；后端为 local → `relay`
 - 名字冲突（不同内容）→ 后缀循环（§4.4）
 
 ### 5.2 `POST /api/v1/images`（relay）
 
-- 认证/限流：与 documents 同款重桶；Body `{image_id, content_base64}`
-- 验证：base64 → 大小 → magic → 扩展名一致（同白名单口径）
-- 通过 → 写盘（local 布局）+ 事务内 `UPDATE … SET status='ready', ready_at=now, size_bytes=实测 WHERE id=? AND status='pending'`（0 行回查分流同 §4.3-5）→ `{name}`
+- 认证/限流：与 documents 同规格的独立重桶；Body `{image_id, content_base64}`
+- **行必须在 owner 作用域**（同 §5.3 confirm 口径，P2-1）
+- 验证：base64 → 大小 → magic → 扩展名一致（同白名单口径）→ **`sha256(buffer) == 行内 content_hash`（P1-1：封死去重池投毒——谎报 hash 的 init + 异字节的 relay 会污染 owner 全池 exists 复用）**
+- 通过 → 写盘（local 布局；storage.ts tmp 名含随机后缀，并发写同目标为原子 last-wins，内容相同无害）+ 事务内 `UPDATE … SET status='ready', ready_at=now, size_bytes=实测 WHERE id=? AND owner_id=? AND status='pending'`（0 行回查分流同 §4.3-5）→ `{name}`
 
 ### 5.3 `POST /api/v1/images/confirm`
 
 - 认证/限流同 init；Body `{image_id}`
-- 验证（行必须在 owner 作用域且 status='pending'）：HEAD size≤上限；GET range 32B magic+扩展名；ETag==行内 content_md5
+- 验证（行必须在 owner 作用域且 status='pending'）：HEAD size≤上限；GET range 32B magic+扩展名；ETag==行内 content_md5（**默认强校验：mismatch 一律 invalid**；"非-MD5 后端"的退化开关仅在上线实测确认后以代码级常量开启，P2-5——防"一律退化"架空诚实性校验）
 - 通过 → 条件式 UPDATE pending→ready + size 回写 → `{status:"ok", name}`；对象缺失 → `{status:"missing"}`；校验失败 → 删云对象 → `400 {status:"invalid", reason}`
 - 0 行 → 回查：ready→ok；否则 missing
 
@@ -225,7 +227,7 @@ stateDiagram-v2
 
 ### 6.2 阶段二：上传
 
-逐图 sha256+md5 → init → exists 复用 / direct PUT（桥 fetch 超时 300s）+confirm（missing 重 PUT、invalid fail-fast 报 reason）/ relay base64（超时 300s）。中断带进度摘要（"已上传 3 张重试自动跳过，失败于第 4/8 张"）。
+逐图 sha256+md5 → init → exists 复用 / direct PUT（桥 fetch 超时 300s）+confirm（missing 重 PUT、invalid fail-fast 报 reason）/ relay base64（超时 300s）。中断带进度摘要（"已上传 3 张重试自动跳过，失败于第 4/8 张"）。**429 退避（P2-3）：读 Retry-After（无则固定 30s）等待后重试当前图，不整体失败**；工具描述建议单文档 ≤50 图（轻桶 120/min 下 100 图两桶全爆）。
 
 ### 6.3 改写与收尾
 
@@ -233,21 +235,32 @@ token 级行内改写（image token 的 `.map` 行内替换 src 编码形态为*
 
 ## 7. 渲染与取图
 
-### 7.1 renderMarkdown 扩展
+### 7.1 两函数分离的管线接口（P3 修正：渲染阶段与替换阶段参数不得混合）
 
-`renderMarkdown(src, { assetBase?, cacheScope })`；覆盖 image renderer：外链/data:/`/` 开头原样；裸名（decode、去 `./`/query/fragment）→ 嵌占位符；所有 img 补 `loading=lazy decoding=async`。
+```ts
+renderMarkdown(src: string): Promise<{ html: string; names: string[] }>   // 渲染阶段：仅依赖内容（缓存键 = 内容 hash）
+resolveImages(html: string, names: string[], ctx: ResolveCtx): Promise<string>  // 替换阶段：每请求执行
+// ResolveCtx = { kind: 'share', token, ownerId, docId, contentHash } | { kind: 'owner', docId, ownerId, contentHash }
+```
+
+**引用提取单源不变量（P1-3）**：裸名提取/归一化（scheme 过滤、URL decode、去 `./`/query/fragment、含分隔符不匹配）为 `packages/shared` 的**单一纯函数**，桥预检、Web 上传时声明式登记、Web 渲染 names[] 收集**三消费方强制共用**——任何一处私有实现都会造成 refs 漂移 → 活图被 24h GC（数据不可逆丢失）。已知语义差须测试锁定：Web 渲染实例带 math_inline/block 规则（`$![x](y)$` 被 math 吞），桥/shared 提取实例必须同配置。
 
 ### 7.2 两段式管线
 
 ```
 渲染阶段（进 RENDER_CACHE）：md → { html（src=占位符）, names[] }
-  占位符：%%RR:IMG:<contentHash 前 8>:<n>%%（自指不可能——伪造者须预知全文 sha256）
+  占位符：%%RR:IMG:<contentHash 前 8>:<n>%%（自指不可能——伪造者须预知全文 sha256；
+  <n> 替换时 bounds-check，越界忽略）
 替换阶段（每请求执行，缓存命中也走到）：
   按 names[] 查行（只认 ready）→
-    活行 → 生成 URL（§7.3 决策树）+ refs 惰性补录（同步事务校验+INSERT OR IGNORE）
+    活行 → 生成 URL（§7.3 决策树，**name 一律 encodeURIComponent 后拼 URL**——
+      `#` `%` `&` 均为合法文件名字符，`#` 不编码会被 fragment 截断、`%` 有解码歧义、
+      `&` 进 src 属性不转义；裂图占位内 name 过 escapeHtml）+ refs 惰性补录
     无行/pending/后端缺失 → 替换为裂图占位 span
 ```
 
+- **补录 content-hash 守卫（P1-4）**：惰性补录事务内校验 `documents.content_hash == 本次渲染所用 hash`，不等则跳过——封死"渲染期间发生覆盖上传 → 旧渲染把 R1 刚移除的引用补录回去 → 僵尸 ref 拖住已无引用的图永不收敛（24h 兜底也救不回）"竞态
+- 补录批量单事务（50 图一个事务，而非 50 个）
 - 缓存命中也每请求查行 = **特性**：图被 GC 后缓存 HTML 里的占位符替换时自然变裂图，缓存不会让已删图僵尸存活
 - 50 图页面替换阶段毫秒级（SQLite 索引查询 + 本地 HMAC presign）
 
@@ -292,7 +305,7 @@ interface BlobStore {
 
 ### 9.1 引用计数：不存计数，派生计数
 
-`images` 表**没有 ref_count 列**（故意）：引用关系以 `image_refs` 行存在，计数永远是 `COUNT(*)` 实时派生（有索引）——存计数字段会引入加减丢失/漂移类不一致，不存则这类问题根上不存在。更新时机仅三处：文档创建（批量 `INSERT OR IGNORE`，只对 ready 行）/ 覆盖更新（§9.2）/ 删除（快照 + CASCADE + 终态检查）。移动/重命名 md **零操作**（refs 挂 document_id）。
+`images` 表**没有 ref_count 列**（故意）：引用关系以 `image_refs` 行存在，计数永远是 `COUNT(*)` 实时派生（有索引）——存计数字段会引入加减丢失/漂移类不一致，不存则这类问题根上不存在。更新时机仅三处：文档创建（批量 `INSERT OR IGNORE`，只对 ready 行）/ 覆盖更新（§9.2）/ 删除（快照 + CASCADE + 终态检查）。移动/重命名 md **零操作**（refs 挂 document_id）。**声明式扫描命中 pending 行时顺手 `created_at=now` 续期**（P2-6：封死"文本引用指向 pending 名 → 1h 回收释放名字 → 不同内容重用该名 → 引用静默指向新图"的窄洞）。
 
 ### 9.2 覆盖更新：集合差原子重算（不变量 R1）
 
@@ -304,7 +317,7 @@ interface BlobStore {
 
 - **文档删除**：删除事务内 SELECT 快照该 md（含子树全部 file 行，deleteNode 先例）的 refs 清单 → 删文档（CASCADE 清 refs）→ 逐图终态检查归零 → 条件式软删墓碑 → 事务后按 §4.3-2 反查删 blob
 - **覆盖上传**：§9.2 的集合差重算；toRemove 触发同款归零检查
-- **周期兜底**（tiering tick，分批 LIMIT）：pending 超 1h 物理删；ready 无 refs 超 24h 软删；**顺带清理悬空 ref**（`refs JOIN images WHERE status≠'ready'` 的行删除）
+- **周期兜底**（分批 LIMIT）：pending 超 1h 物理删；ready 无 refs 超 24h 软删；**顺带清理悬空 ref**（`refs JOIN images WHERE status≠'ready'` 的行删除）。**P1-2（代码实证）：`startTieringScheduler` 须改为无条件启动**——现状 `tiering.ts` 在 `getObjectStore()` 为 null 时直接 return（未配对象存储则调度器不存在），而默认部署恰是 local 后端无对象存储 → 图片 GC 将永不运行（pending 名永不释放、存储无界增长）；修正后归档循环保留 store 判空 no-op，图片回收循环无外部依赖
 
 ### 9.4 不一致态的收敛（发现者 + 收敛器）
 
@@ -351,18 +364,21 @@ pending 超时释放；ready 墓碑永不释放（90d 物理清理备案）。
 | `IMAGE_SIGNED_URL_TTL` | `3600` | 取图签名有效期秒（桶对齐下实际有效期 TTL ~ TTL+桶宽，设期望值 ~1.2 倍可覆盖） |
 | `IMAGE_PROXY_ALL` | `0` | 强制全代理 |
 
-同步 `.env.example`/`env.ts`/`startup-check.ts`/INSTALL.md/USER_GUIDE。
+同步 `.env.example`/`env.ts`/`startup-check.ts`/INSTALL.md/USER_GUIDE。BODY_SIZE_LIMIT 启动校验为**双下限取 max**：`max(MAX_UPLOAD_BYTES×1.5, MAX_IMAGE_BYTES×1.37×1.5)`。
 
 ## 13. 测试计划
 
-- init 四分支/名字后缀（并发/上限/超长截断）/轻桶限流/413 预检
-- relay 验证链/UPDATE 条件式/0 行回查
-- confirm 三态/ETag 校验/幂等重放/GC 后 confirm→missing/invalid 删对象
+- init 四分支/名字后缀（并发/上限/超长截断/精确 `=` 探测）/轻桶限流/413 预检/**hash·md5 hex 格式拒绝（P0-1）**
+- relay 验证链/**owner 作用域（P2-1）**/**sha256 字节绑定（P1-1：谎报 hash+异字节必须 invalid）**/UPDATE 条件式/0 行回查
+- confirm 三态/ETag 强校验默认+退化开关语义（P2-5）/幂等重放/GC 后 confirm→missing/invalid 删对象
 - GC 安全包五不变量各设场景测试（条件式竞态/删 blob 反查/补录事务边界/软删复查）
-- 墓碑：名字占位/复活全字段重置/并发复活
-- 渲染：占位符自指/两段管线/缓存命中仍替换/裂图/缓存键隔离/referrerpolicy/桶对齐（同桶 URL 逐字节相同）/悬空 ref 周期清理
+- **local 模式（无对象存储）下图片周期 GC 实际运行（P1-2：scheduler 无条件启动）**
+- **提取器三消费方一致性（P1-3）：shared 单源提取函数对同一 md 在桥预检/上传登记/渲染三处产出相同 names[]，含 math 吞图语义差锁定**
+- **补录 content-hash 守卫（P1-4）：渲染期间覆盖上传，旧渲染不得补录已移除引用**
+- 墓碑：名字占位/复活全字段重置/并发复活/pending 命中续期（P2-6）
+- 渲染：占位符自指/两段管线/**两函数签名分离（渲染无上下文参数）**/缓存命中仍替换/裂图/**name encodeURIComponent（`#`/`%`/`&` 名字用例）**/缓存键隔离/referrerpolicy/桶对齐（同桶 URL 逐字节相同）/悬空 ref 周期清理
 - 代理路由缓存：no-cache+ETag 协商 304 / 撤销 token 后协商 404（即时性验证）/ onerror 兜底（Playwright 拦截请求模拟 CDN 失败）
-- 桥：六类错误/两阶段/双通道/进度摘要/token 解析不误伤
+- 桥：六类错误/两阶段/双通道/进度摘要/token 解析不误伤/**429 退避重试**
 - 冷档溯源回归；startup-check；schema↔ensureSchema 等价性
 - Playwright：relay+direct 双模式全链路 + lightbox 交互 + 删文档图 404
 
@@ -380,6 +396,9 @@ pending 超时释放；ready 墓碑永不释放（90d 物理清理备案）。
 | 独立 upload_image MCP 工具 / 资产管理 UI / 图片内容版本 / width-height 防 CLS / 桥 hash 缓存 | 后续 |
 | backend_meta 列 / 墓碑 90d 物理清理 | 等真实消费者 |
 | 有 refs 的 local 图永不分层 | 接受（图片小，冷热分层初衷是文档） |
+| **换后端须保留旧后端 env**（P2-7） | `IMAGE_STORE_BACKEND` 切到 local 且删除 OBJECT_STORE_* → 旧 s3 图行查无实现 503——与冷档现状行为一致；INSTALL 写明：切换后保留旧后端 env 直至旧行清空/迁移完成 |
+| CSP 转 enforcing 时 | img-src 须放行 CDN 域名（当前 report-only/未设不受影响） |
+| 占位符离线碰撞 | 2^32 sha256 前缀离线可碰撞，但伪造者只能命中自己文档的 names[]（owner 作用域），无跨用户影响——接受 |
 
 ## 15. 实现现状
 
