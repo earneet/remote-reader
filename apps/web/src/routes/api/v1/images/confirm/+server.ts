@@ -3,6 +3,7 @@ import type { RequestHandler } from './$types';
 import { authenticateApiToken } from '$server/apitoken-auth';
 import { checkRateLimit } from '$server/ratelimit';
 import { confirmImage } from '$server/images';
+import { ObjectNotFoundError, ArchiveUnavailableError } from '$server/object-store';
 import { envInt } from '$server/env';
 
 const IMAGES_META_RATE_LIMIT = { max: envInt('IMAGES_META_RATE_LIMIT_MAX', 120), windowMs: envInt('RATE_LIMIT_WINDOW_MS', 60_000) };
@@ -20,7 +21,15 @@ export const POST: RequestHandler = async ({ request, getClientAddress }) => {
     const body = await request.json().catch(() => null);
     const raw = (body ?? {}) as { image_id?: unknown };
     if (typeof raw.image_id !== 'string') error(400, 'image_id required');
-    const result = await confirmImage(auth.userId, raw.image_id);
+    let result: Awaited<ReturnType<typeof confirmImage>>;
+    try {
+        result = await confirmImage(auth.userId, raw.image_id);
+    } catch (e) {
+        // head 的 ObjectNotFound 已在服务层消化为 missing；此处兜 getRange 阶段的同错（head 后对象被删竞态）
+        if (e instanceof ObjectNotFoundError) return json({ status: 'missing' }, { status: 404 });
+        if (e instanceof ArchiveUnavailableError) error(503, 'image storage unreachable');
+        throw e;
+    }
     if (result.ok) return json({ status: 'ok', name: result.name });
     if (result.reason === 'missing') return json({ status: 'missing' }, { status: 404 });
     return json({ status: 'invalid', reason: result.message }, { status: 400 });

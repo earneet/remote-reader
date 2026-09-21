@@ -5,7 +5,7 @@ import { generateApiToken, generateId } from '$server/auth';
 import { initImage, relayImage, type InitImageResult } from '$server/images';
 import { LocalBlobStore } from '$server/blobstore-local';
 import { __setBlobStoresForTest, type BlobStore } from '$server/blobstore';
-import { ObjectNotFoundError } from '$server/object-store';
+import { ObjectNotFoundError, ArchiveUnavailableError } from '$server/object-store';
 import { createShareLink } from '$server/shares';
 import { eq } from 'drizzle-orm';
 import { createHash } from 'node:crypto';
@@ -41,13 +41,29 @@ const md5 = (b: Buffer): string => createHash('md5').update(b).digest('hex');
 class FakeS3 implements BlobStore {
     readonly id = 's3';
     readonly uploadUrlTtlSeconds = 600;
+    failHead: 'unavailable' | null = null;
+    failGetRange: 'missing' | null = null;
     private blobs = new Map<string, Buffer>();
     async put(key: string, data: Buffer): Promise<void> { this.blobs.set(key, data); }
     async get(key: string): Promise<Buffer> { const b = this.blobs.get(key); if (!b) throw new ObjectNotFoundError(key); return b; }
-    async head(key: string): Promise<{ size: number; etag?: string }> { const b = this.blobs.get(key); if (!b) throw new ObjectNotFoundError(key); return { size: b.length, etag: md5(b) }; }
-    async getRange(key: string, start: number, end: number): Promise<Buffer> { const b = this.blobs.get(key); if (!b) throw new ObjectNotFoundError(key); return b.subarray(start, end + 1); }
+    async head(key: string): Promise<{ size: number; etag?: string }> {
+        if (this.failHead === 'unavailable') throw new ArchiveUnavailableError(`head ${key} 失败（测试注入）`);
+        const b = this.blobs.get(key); if (!b) throw new ObjectNotFoundError(key); return { size: b.length, etag: md5(b) };
+    }
+    async getRange(key: string, start: number, end: number): Promise<Buffer> {
+        if (this.failGetRange === 'missing') throw new ObjectNotFoundError(key);
+        const b = this.blobs.get(key); if (!b) throw new ObjectNotFoundError(key); return b.subarray(start, end + 1);
+    }
     async delete(key: string): Promise<void> { this.blobs.delete(key); }
     async presign(op: 'get' | 'put', key: string, ttl: number): Promise<string> { return `https://fake-s3/${op}/${key}?ttl=${ttl}`; }
+}
+
+// relay 故障注入：put 抛 ArchiveUnavailableError（S3 网关 5xx 的映射终态）
+class FailingPutStore implements BlobStore {
+    readonly id = 'local';
+    async put(): Promise<void> { throw new ArchiveUnavailableError('put 失败（测试注入）'); }
+    async get(key: string): Promise<Buffer> { throw new Error(`unused: get ${key}`); }
+    async delete(key: string): Promise<void> { throw new Error(`unused: delete ${key}`); }
 }
 
 let ownerId: string;
@@ -228,6 +244,14 @@ describe('POST /api/v1/images（relay）', () => {
         const r = await callPost(relayPost, RELAY_URL, { authorization: u2Auth }, { image_id: imageId, content_base64: PNG.toString('base64') });
         expect(r.status).toBe(404);
     });
+
+    it('存储不可达：put 抛 ArchiveUnavailableError → 503（非裸 500）', async () => {
+        __setBlobStoresForTest({ local: new FailingPutStore() });
+        const init = await callPost(initPost, INIT_URL, { authorization: validAuth }, { name: 'a.png', content_hash: sha256(PNG), content_md5: md5(PNG), size_bytes: PNG.length });
+        const imageId = (init.body as { imageId: string }).imageId;
+        const r = await callPost(relayPost, RELAY_URL, { authorization: validAuth }, { image_id: imageId, content_base64: PNG.toString('base64') });
+        expect(r.status).toBe(503);
+    });
 });
 
 describe('POST /api/v1/images/confirm', () => {
@@ -270,6 +294,39 @@ describe('POST /api/v1/images/confirm', () => {
             expect(r.status).toBe(400);
             expect(r.body).toMatchObject({ status: 'invalid' });
             expect(typeof (r.body as { reason?: string }).reason).toBe('string');
+        } finally {
+            delete process.env.IMAGE_STORE_BACKEND;
+        }
+    });
+
+    it('存储不可达：head 抛 ArchiveUnavailableError → 503（非裸 500，兑现 images.ts:170 注释）', async () => {
+        const fake = new FakeS3();
+        fake.failHead = 'unavailable';
+        __setBlobStoresForTest({ local: new LocalBlobStore(), s3: fake });
+        process.env.IMAGE_STORE_BACKEND = 's3';
+        try {
+            const init = await callPost(initPost, INIT_URL, { authorization: validAuth }, { name: 'a.png', content_hash: sha256(PNG), content_md5: md5(PNG), size_bytes: PNG.length });
+            const { imageId, uploadUrl } = init.body as { imageId: string; uploadUrl: string };
+            await fake.put(uploadUrl.split('/put/')[1]!.split('?')[0], PNG);
+            const r = await callPost(confirmPost, CONFIRM_URL, { authorization: validAuth }, { image_id: imageId });
+            expect(r.status).toBe(503);
+        } finally {
+            delete process.env.IMAGE_STORE_BACKEND;
+        }
+    });
+
+    it('head 后对象被删竞态：getRange 抛 ObjectNotFoundError → 404 {status:"missing"}（非裸 500）', async () => {
+        const fake = new FakeS3();
+        fake.failGetRange = 'missing';
+        __setBlobStoresForTest({ local: new LocalBlobStore(), s3: fake });
+        process.env.IMAGE_STORE_BACKEND = 's3';
+        try {
+            const init = await callPost(initPost, INIT_URL, { authorization: validAuth }, { name: 'a.png', content_hash: sha256(PNG), content_md5: md5(PNG), size_bytes: PNG.length });
+            const { imageId, uploadUrl } = init.body as { imageId: string; uploadUrl: string };
+            await fake.put(uploadUrl.split('/put/')[1]!.split('?')[0], PNG);
+            const r = await callPost(confirmPost, CONFIRM_URL, { authorization: validAuth }, { image_id: imageId });
+            expect(r.status).toBe(404);
+            expect(r.body).toEqual({ status: 'missing' });
         } finally {
             delete process.env.IMAGE_STORE_BACKEND;
         }

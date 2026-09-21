@@ -3,6 +3,7 @@ import type { RequestHandler } from './$types';
 import { authenticateApiToken } from '$server/apitoken-auth';
 import { checkRateLimit } from '$server/ratelimit';
 import { relayImage } from '$server/images';
+import { ArchiveUnavailableError } from '$server/object-store';
 import { envInt } from '$server/env';
 
 const RATE_LIMIT = { max: envInt('RATE_LIMIT_MAX', 60), windowMs: envInt('RATE_LIMIT_WINDOW_MS', 60_000) };
@@ -28,7 +29,14 @@ export const POST: RequestHandler = async ({ request, getClientAddress }) => {
     }
     // base64 解码对无效字符是宽松忽略的——不在此做严格校验：内容真值由 relayImage 的
     // sha256 字节绑定（P1-1）权威兜底，谎报/截断的字节必然 hash 不符 → invalid
-    const result = await relayImage(auth.userId, raw.image_id, data);
+    let result: Awaited<ReturnType<typeof relayImage>>;
+    try {
+        result = await relayImage(auth.userId, raw.image_id, data);
+    } catch (e) {
+        // relayImage 消化行级 miss 为 result missing；此处只映射存储层故障（store.put 5xx 终态）
+        if (e instanceof ArchiveUnavailableError) error(503, 'image storage unreachable');
+        throw e;
+    }
     if (result.ok) return json({ name: result.name });
     if (result.reason === 'missing') error(404, 'image not found');
     return json({ status: 'invalid', reason: result.message }, { status: 400 }); // 与 confirm 同形状（P2-5：桥按 status 字段统一判别）
