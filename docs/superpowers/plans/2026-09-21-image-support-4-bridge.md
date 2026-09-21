@@ -395,7 +395,7 @@ export function rewriteImageRefs(md: string, rename: Map<string, string>): { con
 }
 ```
 
-（`confirmed === null` 分支为骨架示意——实现时 confirm 的 404 missing 由 api-client 抛 ApiError(404)，编排 catch 后**重 PUT+confirm 各一次**再失败才 throw；`readFile 前 32B` 用 `open()`+`read()` 实现而非全量读——预检省内存的意义所在；`lineSet` 的 get/set 链写成清晰 if 形式。这些是展开指令非占位符——行为规格在场景清单。）
+（代码为终态实现——confirm-404 重 PUT 的 catch 收窄与 32B open+read 均已按 P2-1 落实在上方代码内；`readFile` 在阶段二全量读取用于 hash，与预检的 32B 探测分工明确）
 
 - [ ] **Step 4/5: 绿 → Commit** `feat(shared): image-pipeline 两阶段编排——六类错误/429 退避/双通道/token 级改写（TDD）`
 
