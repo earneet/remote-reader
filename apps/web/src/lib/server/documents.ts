@@ -10,6 +10,7 @@ import { getObjectStore, objectKeyFor, ObjectNotFoundError, ArchiveUnavailableEr
 import { createShareLink, activeShareOf } from './shares';
 import { getBaseUrl, getDataDir } from './env';
 import { indexDoc, unindexDocs } from './fts';
+import { registerDocumentRefs, snapshotRefsForDocuments, gcImagesIfUnreferenced } from './image-refs';
 import type { RecentSort, RecentDoc } from '../shared/recent';
 
 type DocumentRow = typeof schema.documents.$inferSelect;
@@ -319,6 +320,8 @@ export async function uploadDocument(
                     try { await unlink(row.storagePath); } catch { /* 旧位置无文件（如冷档）——无害 */ }
                 }
                 indexDoc(row.id, name, content);
+                // 图片 refs 声明式重算（R1 集合差，事务在 image-refs 内；幂等分支不经过此处）
+                registerDocumentRefs(ownerId, row.id, content);
                 // 旧态为 cold：清理旧远端对象（旧 key 含旧 hash；失败仅留孤儿对象，无害）
                 if (row.storageTier === 'cold') {
                     const store = getObjectStore();
@@ -372,6 +375,7 @@ export async function uploadDocument(
             throw e;
         }
         indexDoc(id, name, content);
+        registerDocumentRefs(ownerId, id, content);
         const url = await ensureShareUrl(id);
         return { id, url };
     }
@@ -689,6 +693,9 @@ export function deleteNode(ownerId: string, id: string): void {
         .where(and(inArray(schema.documents.id, subtreeIds), eq(schema.documents.type, 'file')))
         .all();
 
+    // 图片 GC（spec §9.3 触发一）：CASCADE 删 refs 前快照受影响图清单，删后按终态归零检查
+    const imageIdsForGc = snapshotRefsForDocuments(subtreeIds);
+
     db.transaction((tx) => {
         tx.delete(schema.shareLinks).where(inArray(schema.shareLinks.documentId, subtreeIds)).run();
         // unindexDocs 为同连接同步执行，在事务回调内调用即落同一事务（语义等同原内联 SQL）
@@ -713,6 +720,8 @@ export function deleteNode(ownerId: string, id: string): void {
             }
         }
     }
+
+    void gcImagesIfUnreferenced(imageIdsForGc);
 }
 
 // 冷热分层：访问时间戳（推迟冷却判定；只动 last_viewed_at，不动 updated_at 避免影响排序语义）

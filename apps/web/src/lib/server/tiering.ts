@@ -6,6 +6,7 @@ import { readFile, writeFile } from './storage';
 import { getObjectStore, objectKeyFor } from './object-store';
 import type { ObjectStore } from './object-store';
 import { getColdTierAfterDays } from './env';
+import { runImageGcCycle } from './image-refs';
 
 type DocumentRow = typeof schema.documents.$inferSelect;
 
@@ -195,14 +196,18 @@ let schedulerStarted = false;
 
 export function startTieringScheduler(): void {
     if (schedulerStarted) return;
-    const store = getObjectStore();
-    if (!store) return; // 未配置对象存储：分层整体关闭，行为与现状一致
     schedulerStarted = true;
-    void runArchiveCycle(store)
-        .then((n) => { if (n > 0) console.log('[tiering] 首轮归档完成', n, '篇'); })
+    // P1-2（Oracle 代码实证）：原实现 store 为 null 直接 return——默认部署（local 图片后端、无对象存储）
+    // 下调度器不存在，图片周期 GC 永不运行。修正：调度器无条件启动；归档循环保留 store 判空（分层仍可选）。
+    void runArchiveCycle().then((n) => { if (n > 0) console.log('[tiering] 首轮归档完成', n, '篇'); })
         .catch((e) => console.warn('[tiering] 首轮归档失败（对象存储连通性待确认）', e));
     const timer = setInterval(() => {
-        void runArchiveCycle(store).catch((e) => console.warn('[tiering] 归档周期失败', e));
+        void runArchiveCycle().catch((e) => console.warn('[tiering] 归档周期失败', e));
+        void runImageGcCycle().then((r) => {
+            if (r.pendingReaped + r.readyReaped + r.danglingRefs > 0) {
+                console.log('[img-gc] 周期回收', JSON.stringify(r));
+            }
+        }).catch((e) => console.warn('[img-gc] 周期回收失败', e));
     }, TIERING_INTERVAL_MS);
     timer.unref();
 }
