@@ -133,7 +133,7 @@ export function normalizeImageRef(raw: string): string | null {
 
 **Files:** Modify `apps/web/src/lib/server/markdown.ts`；Test `apps/web/tests/markdown.test.ts`（适配 + 新用例）
 
-- [ ] 失败测试（**先适配既有断言**：该文件所有 `renderMarkdown(x)` 结果取用从 string 改 `.html`——机械替换 `(await renderMarkdown(...))` 为 `(await renderMarkdown(...)).html`；然后追加新 describe）：
+- [ ] 失败测试（**先适配既有断言**：该文件 25 处 `const html = await renderMarkdown(...)` 形态的调用改为 `const html = (await renderMarkdown(...)).html`——机械取 `.html`；78-80 行缓存断言的引用语义适配后仍成立。然后追加新 describe）：
 
 ```ts
 describe('渲染管线两段式（占位符阶段）', () => {
@@ -150,6 +150,11 @@ describe('渲染管线两段式（占位符阶段）', () => {
         expect(r.html).toContain('src="sub/d.png"');
         expect(r.names).toEqual([]);
     });
+    it('math 吞图锁定（P1-3 第三消费方）：$...$ 内图片不提取不占位', async () => {
+        const r = await renderMarkdown('$![a](x.png)$');
+        expect(r.names).toEqual([]);
+        expect(r.html).not.toContain('%%RR:IMG');
+    });
     it('重复引用同图共用索引（names 去重保序一致）', async () => {
         const r = await renderMarkdown('![a](x.png)![b](x.png)');
         expect(r.html.match(/%%RR:IMG:[0-9a-f]{8}:0%%/g)?.length).toBe(2);
@@ -161,7 +166,7 @@ describe('渲染管线两段式（占位符阶段）', () => {
     it('缓存命中返回同构结果（value 结构 {html,names,contentHash}）', async () => {
         const a = await renderMarkdown('# t ![x](a.png)');
         const b = await renderMarkdown('# t ![x](a.png)');
-        expect(b).toEqual(a); // 深比较：缓存 value 是同一对象引用也过；关键是结构完整
+        expect(b).toEqual(a); // 结构完整性（缓存命中行为由既有缓存用例覆盖）
     });
 });
 ```
@@ -219,7 +224,7 @@ export async function renderMarkdown(src: string): Promise<{ html: string; names
 
 **（执行注——renderer 竞态：mdInstance 单例 + renderer.rules.image 每次 render 前设置/后恢复，因 better-sqlite3/node 单线程且 render 同步，无并发交错；但 stub 每次渲染不同 → 恢复必要，防后续无占位需求渲染误用旧 stub。`token.attrSet` 顺序：先 src 后 loading/decoding（属性顺序不影响断言的 match 正则）。）**
 
-- [ ] 绿（新 5 + 既有全适配）→ **同步适配其余 renderMarkdown 调用方**：`s/[token]/+page.server.ts` 与 `d/[id]/+page.server.ts` 的 `const html = await renderMarkdown(content);` 临时改为 `const html = (await renderMarkdown(content)).html;`（Task 5 再完整接线——本任务保绿不破）→ 全量回归 → Commit `feat(web): renderMarkdown 两函数分离——占位符渲染阶段（{html,names,contentHash}，TDD）`
+- [ ] 绿（新 5 + 既有全适配）→ **同步适配其余 renderMarkdown 调用方**：`s/[token]/+page.server.ts` 与 `d/[id]/+page.server.ts` 的 `const html = await renderMarkdown(content);` 临时改为 `const html = (await renderMarkdown(content)).html;`（Task 5 再完整接线——**已知过渡态：Task 3 至 Task 5 的 commit 之间带图文档渲染裸占位符裂图，无图文档不受影响；Phase 内 commit 不要求独立可部署**）→ 全量回归 → Commit `feat(web): renderMarkdown 两函数分离——占位符渲染阶段（{html,names,contentHash}，TDD）`
 
 ---
 
@@ -230,17 +235,21 @@ export async function renderMarkdown(src: string): Promise<{ html: string; names
 - [ ] 失败测试（场景清单，正路建图：initImage+relayImage；FakeS3 注入 `__setBlobStoresForTest`；`/s/` 与 `/d/` 两 ctx 形态）：
 
 ```
-- 代理路由 URL：local 后端 + share ctx → src=/s/<token>/i/<encodeURIComponent(name)>（含空格名编码断言）
+- 代理路由 URL：local 后端 + share ctx → src=/s/<token>/i/<encodeURIComponent(name)>
+  · 危险字符用例（spec §13 点名）：shot#a.png / a%b.png / a&b.png → URL 含 %23/%25/%26 且 img src 无裸 #/&
+  · 含空格名 → %20
 - owner ctx → /d/<docId>/i/... 前缀
 - IMAGE_PROXY_ALL=1 → local 与 s3 行全部走代理（presign 不调用——FakeS3 计数器断言）
-- s3 行（FakeS3）→ presign URL 直连 + referrerpolicy="strict-origin-when-cross-origin" 属性在 img 上
-- 桶对齐：fake timers 锁时间 → 同桶两次 resolveImages 产出逐字节相同 URL；
+- s3 行（FakeS3）→ presign URL 直连 + img 带 referrerpolicy="strict-origin-when-cross-origin"（渲染期预置）
+- 桶对齐：fake timers 锁时间 + __resetPresignCacheForTest → 同桶两次 resolveImages 产出逐字节相同 URL；
   advance 到下一桶 → URL 变化（重签）
 - s3 行但 store 未注册（清 OBJECT_STORE_* 注入只有 local）→ 裂图占位 span（title 含"存储后端"）
-- 无行/pending 图名 → 裂图占位 span（rr-img-missing + title 原因 + 🖼 [name]）
+- 无行/pending 图名 → 裂图占位 span
+  · 强断言（P0-1）：裂图输出 not.toContain('<img')——整个 img 标签被吃掉；
+    且 alt 文本不出现在标签外（正则断言 alt 只在合法属性位或不存在裸文本泄漏）
 - refs 惰性补录：resolveImages 后 image_refs 行存在（lazyRegisterRefs 接线证据）；
   contentHash 过期守卫（改 documents.content_hash 后 resolve → refs 不增）
-- 替换完整性：多图 md（代理+直连+裂图混合）→ 输出无残留 %%RR:IMG（全部替换）
+- 替换完整性：多图 md（代理+直连+裂图混合）→ 输出无残留 %%RR:IMG（全部替换）且结构合法（裂图后无 <img 残段）
 - 防冲突：md 正文里手工写死伪造占位符 %%RR:IMG:deadbeef:0%%（hash 段不同于真实内容 hash）
   → 替换后伪造串原样保留（自指不可能构造的验证）
 - 裂图占位内 name 过 escapeHtml（名字含 < 会被 init 拒——用 & 断言）
@@ -264,6 +273,8 @@ function escapeHtml(s: string): string {
 
 // presign URL 桶缓存（spec §7.3 桶对齐）：同桶内复用首签 URL（逐字节相同 → 浏览器缓存命中）。
 // 不依赖 SDK signingDate——用结果缓存；expiresIn = TTL + 桶宽 保证桶末仍有效（envTtl 语义=最短有效期）。
+// 并发 miss 允许短暂双 URL（SigV4 本地 HMAC，microtask 窗口真实存在；两 URL 均有效，桶内后续稳定，
+// 仅一次浏览器缓存不命中）——刻意不加锁，后人勿当 bug 修。
 const presignCache = new Map<string, { bucket: number; url: string }>();
 const PRESIGN_CACHE_MAX = 256;
 
@@ -313,10 +324,21 @@ export async function resolveImages(html: string, names: string[], ctx: ResolveC
     }
     // refs 惰性补录（P1-4 content-hash 守卫在 lazyRegisterRefs 内部）：批量单事务
     lazyRegisterRefs(ctx.ownerId, ctx.docId, ctx.contentHash, names);
-    // 逐占位符替换（contentHash 前 8 自指防冲突——伪造者的 hash 段不匹配本内容，split 不命中）
+    // 逐占位符替换（contentHash 前 8 自指防冲突）。双轨（P0-1）：
+    //  - URL（代理/presign）：占位符在 src 属性值内，split/join 只换值——安全
+    //  - 裂图 span：必须吃掉整个 <img> 标签——span 塞进 src 值会被内部引号截断属性、
+    //    alt/loading/decoding 泄漏为可见文本（HTML 结构破坏）。正则匹配含占位符的整标签：
+    //    占位符仅含 hex/冒号/%%（非正则元字符），markdown-it 转义 alt 保证标签体内无裸 >，
+    //    [^>]* 安全；'g' 覆盖同图多引用
     let out = html;
     for (let n = 0; n < names.length; n++) {
-        out = out.split(`%%RR:IMG:${ctx.contentHash.slice(0, 8)}:${n}%%`).join(urls[n]);
+        const ph = `%%RR:IMG:${ctx.contentHash.slice(0, 8)}:${n}%%`;
+        const replacement = urls[n];
+        if (replacement.startsWith('<span')) {
+            out = out.replace(new RegExp(`<img[^>]*${ph}[^>]*>`, 'g'), replacement);
+        } else {
+            out = out.split(ph).join(replacement);
+        }
     }
     return out;
 }
@@ -409,7 +431,7 @@ style 区追加（裂图占位——服务器侧与客户端同款观感）：
 
 ## Self-Review 记录
 
-1. **Spec 覆盖**：§7.1 两函数分离 ✓ / §7.2 占位符+两段管线+补录接线 ✓ / §7.3 决策树+桶对齐（结果缓存方案）+referrerpolicy（渲染期预置——执行注修正）✓ / §7.4 裂图占位 ✓ / §7.5 onerror ✓ / §12 两 env ✓。Phase 2 遗留的 lazyRegisterRefs 消费者接线本批完成 ✓。
-2. **无占位符**：全部代码块为终态（自审轮已将 referrerpolicy 落点修正为渲染期预置并删除 extraAttrs 死代码机制）；Task 3 的执行注仅为 renderer 竞态说明（非修正指令）。
-3. **类型一致性**：ResolveCtx 联合与两 load 构造一致；renderMarkdown 返回结构在 Task 3 定义、Task 5 消费、__resetMarkdownCacheForTest 清 Map（value 类型变——签名不变 ✓）。
-4. **风险点**：markdown.test.ts 适配量（~15 处 .html 取用）机械但需细心；presignCache 模块级（测试需清——导出 __resetPresignCacheForTest）。
+1. **Spec 覆盖**：§7.1 两函数分离 ✓（返回值比 spec 多 `contentHash`——ResolveCtx 自身要求该字段的必要补全，非偏离）/ §7.2 占位符+两段管线+补录接线+危险字符用例（Oracle P1-1）✓ / §7.3 决策树+桶对齐（结果缓存方案）+referrerpolicy 渲染期预置 ✓ / §7.4 裂图占位**整标签替换**（Oracle P0-1 修复：span 塞 src 值会截断属性破坏 HTML，双轨替换+强断言）✓ / §7.5 onerror ✓ / §12 两 env ✓ / math 吞图锁定用例（Oracle P2-1）✓。
+2. **无占位符**：全部代码块为终态（Oracle 审查后已修复 P0-1 双轨替换与并发 miss 声明）。
+3. **类型一致性**：ResolveCtx 联合与两 load 构造一致；renderMarkdown 返回结构在 Task 3 定义、Task 5 消费、__resetMarkdownCacheForTest 清 Map（签名不变 ✓）。
+4. **风险点**：markdown.test.ts 适配量 25 处（`const html = (await ...).html` 形态）；presignCache 模块级（`__resetPresignCacheForTest` 已导出）；Task 3→5 过渡态已注明。
