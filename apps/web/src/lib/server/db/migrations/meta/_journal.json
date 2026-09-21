@@ -57,6 +57,13 @@
       "when": 1789444351367,
       "tag": "0007_handy_violations",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1789961476740,
+      "tag": "0008_superb_spectrum",
+      "breakpoints": true
     }
   ]
 }
