@@ -14,6 +14,10 @@ export default defineConfig({
     },
     test: {
         environment: 'node',
+        // vitest 4 下 fileParallelism:false 不再保证单进程——每文件独立 fork 并行，跨文件共享
+        // ./data/app.db 的 resetDb 互踩（间歇性 FK 失败）。singleFork 强制全部文件跑在同一 fork。
+        pool: 'forks',
+        poolOptions: { forks: { singleFork: true } },
         fileParallelism: false,
         include: [
             'packages/shared/src/**/*.test.ts',
