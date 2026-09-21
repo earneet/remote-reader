@@ -21,6 +21,7 @@ import { readFile } from '../src/lib/server/storage';
 import { setDocTags } from '../src/lib/server/tags';
 import { runArchiveCycle } from '../src/lib/server/tiering';
 import { MemoryObjectStore, __setObjectStoreForTest, objectKeyFor } from '../src/lib/server/object-store';
+import { TooManyImageRefsError } from '../src/lib/server/image-refs';
 import { join, dirname } from 'node:path';
 import { eq, and, isNull } from 'drizzle-orm';
 
@@ -90,6 +91,13 @@ test('不同内容覆盖：id 不变、hash 更新为最新内容', async () => 
     const row = db.select().from(schema.documents).where(eq(schema.documents.id, a.id)).get();
     expect(row?.contentHash).toBe(sha256Hex('v2'));
     expect(row?.sizeBytes).toBe(2);
+});
+
+test('图片引用超上限 501 名 → TooManyImageRefsError 且零副作用（不建行/不建 share）', async () => {
+    const md = Array.from({ length: 501 }, (_, i) => `![i${i}](i${i}.png)`).join('\n');
+    await expect(uploadDocument(ownerId, 'big.md', md, [])).rejects.toThrow(TooManyImageRefsError);
+    expect(db.select().from(schema.documents).where(eq(schema.documents.type, 'file')).all()).toHaveLength(0);
+    expect(db.select().from(schema.shareLinks).all()).toHaveLength(0);
 });
 
 test('嵌套路径级联创建文件夹且复用（不重复建）', async () => {

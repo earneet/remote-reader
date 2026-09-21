@@ -2,6 +2,7 @@ import { resolveImageByName } from './images';
 import { getBlobStore } from './blobstore';
 import { getImageSignedUrlTtl, getImageProxyAll } from './env';
 import { lazyRegisterRefs } from './image-refs';
+import { MAX_IMAGE_REFS } from '@remote-reader/shared/image-extract';
 
 export type ResolveCtx =
     | { kind: 'share'; token: string; ownerId: string; docId: string; contentHash: string }
@@ -25,6 +26,13 @@ export function __resetPresignCacheForTest(): void {
 
 /** 替换阶段（每请求执行，缓存命中也走到，spec §7.2）：占位符 → 最终 URL/裂图占位 + refs 惰性补录 */
 export async function resolveImages(html: string, names: string[], ctx: ResolveCtx): Promise<string> {
+    // 数量超限防御（交叉审查 P0，防存量/绕过）：下方逐名循环是 O(N×|html|)+O(N) 查询——
+    // 超限文档整体降级为单趟正则替换，跳过逐名解析与 refs 补录，免登录页零放大
+    if (names.length > MAX_IMAGE_REFS) {
+        const span = `<span class="rr-img-missing" title="图片引用超过上限 ${MAX_IMAGE_REFS}，图片渲染已停用">🖼 [图片引用过多，请拆分文档]</span>`;
+        const re = new RegExp(`<img[^>]*%%RR:IMG:${ctx.contentHash.slice(0, 8)}:\\d+%%[^>]*>`, 'g');
+        return html.replace(re, () => span);
+    }
     const ttl = getImageSignedUrlTtl();
     const bucketMs = (ttl * 1000) / 6;
     const bucket = Math.floor(Date.now() / bucketMs);

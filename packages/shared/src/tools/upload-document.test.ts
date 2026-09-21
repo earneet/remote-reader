@@ -83,6 +83,15 @@ test('带图 md（tmpdir 真 PNG）：全流程 → 文本含图片摘要，改�
     }
 });
 
+test('图片引用超上限（501 名）→ 预检入口直接拒绝，零 API 调用（先于文件 IO）', async () => {
+    const m = mockApi();
+    m.uploadDocument.mockResolvedValue({ id: 'd1', url: 'http://s/t' });
+    const md = Array.from({ length: 501 }, (_, i) => `![i](missing-${i}.png)`).join('\n');
+    await expect(uploadDocumentHandler({ name: 'a.md', content: md }, asApi(m))).rejects.toThrow('图片引用超过上限');
+    expect(m.uploadDocument).toHaveBeenCalledTimes(0);
+    expect(m.initImage).toHaveBeenCalledTimes(0);
+});
+
 test('预检失败：throw ImageValidationError（多行问题清单），零上传', async () => {
     const m = mockApi();
     m.uploadDocument.mockResolvedValue({ id: 'd1', url: 'http://s/t' });

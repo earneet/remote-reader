@@ -1,7 +1,21 @@
 import { and, eq, inArray, lt, sql } from 'drizzle-orm';
 import { db, schema } from './db';
 import { getBlobStore } from './blobstore';
-import { extractImageNames } from '@remote-reader/shared/image-extract';
+import { extractImageNames, MAX_IMAGE_REFS } from '@remote-reader/shared/image-extract';
+
+// 上传侧图片引用数量超限（路由层 → 413；语义同 ImageInputError 的 size 超限档）
+export class TooManyImageRefsError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = 'TooManyImageRefsError';
+    }
+}
+
+export function assertImageRefsWithinLimit(content: string): void {
+    if (extractImageNames(content).length > MAX_IMAGE_REFS) {
+        throw new TooManyImageRefsError(`文档图片引用超过上限 ${MAX_IMAGE_REFS}，请拆分文档`);
+    }
+}
 
 /** 声明式登记（文档创建/覆盖统一入口，R1 集合差原子重算，spec §9.2）。
  *  绝不允许"先删后判再插"的分步序列——不变量 R1。 */
