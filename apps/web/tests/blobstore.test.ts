@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { getBlobStore, getActiveImageStore, __setBlobStoresForTest } from '$server/blobstore';
 import { LocalBlobStore } from '$server/blobstore-local';
+import { S3BlobStore } from '$server/blobstore-s3';
 
 describe('blobstore 注册表', () => {
     beforeEach(() => __setBlobStoresForTest(undefined));
@@ -15,6 +16,20 @@ describe('blobstore 注册表', () => {
     it('未配 OBJECT_STORE_* 时 s3 不注册，查询返回 null', () => {
         delete process.env.OBJECT_STORE_ENDPOINT;
         expect(getBlobStore('s3')).toBeNull();
+    });
+
+    it('OBJECT_STORE_* 五项配置齐全 → s3 注册（P2-7 换后端不炸旧图的根基）', () => {
+        process.env.OBJECT_STORE_ENDPOINT = 'https://s3.example.com';
+        process.env.OBJECT_STORE_REGION = 'us-east-1';
+        process.env.OBJECT_STORE_BUCKET = 'b';
+        process.env.OBJECT_STORE_ACCESS_KEY_ID = 'AK';
+        process.env.OBJECT_STORE_SECRET_ACCESS_KEY = 'SK';
+        try {
+            expect(getBlobStore('s3')).toBeInstanceOf(S3BlobStore);
+        } finally {
+            for (const k of ['OBJECT_STORE_ENDPOINT', 'OBJECT_STORE_REGION', 'OBJECT_STORE_BUCKET',
+                'OBJECT_STORE_ACCESS_KEY_ID', 'OBJECT_STORE_SECRET_ACCESS_KEY']) delete process.env[k];
+        }
     });
 
     it('IMAGE_STORE_BACKEND=s3 但 s3 未注册 → active 抛错（运行时防御，startup-check 先拦）', () => {

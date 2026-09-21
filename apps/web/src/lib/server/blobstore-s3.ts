@@ -89,7 +89,12 @@ export class S3BlobStore implements BlobStore {
             throw mapGetError(key, e);
         }
         if (!body) throw new ObjectNotFoundError(key);
-        return Buffer.from(await body.transformToByteArray());
+        try {
+            return Buffer.from(await body.transformToByteArray());
+        } catch (e) {
+            // 同 get() 先例：header 阶段之外的 body 流中断（慢网络/传输截断）归入 503 语义，不裸抛降级 500
+            throw new ArchiveUnavailableError(`blob getRange ${key} body 失败`, { cause: e });
+        }
     }
 
     async delete(key: string): Promise<void> {
