@@ -54,7 +54,8 @@ export async function resolveImages(html: string, names: string[], ctx: ResolveC
             urls.push(cached.url);
             continue;
         }
-        const url = await store.presign('get', row.storageKey, ttl + Math.ceil(bucketMs / 1000));
+        // canPresign 已含 store.presign !== undefined——TS 不跨中间布尔收窄，断言兜底（同 defaultImage! 先例）
+        const url = await store.presign!('get', row.storageKey, ttl + Math.ceil(bucketMs / 1000));
         if (presignCache.size >= PRESIGN_CACHE_MAX) {
             const first = presignCache.keys().next().value;
             if (first !== undefined) presignCache.delete(first);
