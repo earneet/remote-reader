@@ -14,7 +14,7 @@
 
 - Agent 上传带图 md **零新增概念**：仍只调 `upload_document`，桥自动编排（解析→预检→上传→改写）
 - **去重**：owner 内按内容 hash 只存一份，重复上传零流量（init 预查）
-- **存根 + 自动 GC**：init 即建存Stub 行，两段 deadline（pending 1h / ready 无引用 24h），引用归零即清
+- **存根 + 自动 GC**：init 即建存根行，两段 deadline（pending 1h / ready 无引用 24h），引用归零即清
 - **存储后端插件式**：BlobStore 无状态接口 + local/s3 内置 + 行级 backend 溯源（换后端不炸旧图）
 - **上传直传云**（presigned PUT）+ **阅读 CDN 直连**（presigned GET）——服务器只过元数据
 - 前端 **Lightbox**：放大/全屏/滚轮锚定缩放/pinch/拖动/双击
@@ -59,7 +59,7 @@ sequenceDiagram
     Br-->>Ag: 已上传 + url + 图片摘要
 
     Note over Sv,OSS: —— 读者打开 /s/<token> ——
-    Sv->>Sv: SSR：渲染（缓存存占位符）→ 替换（每请求注入新鲜 URL）
+    Sv->>Sv: SSR：渲染（缓存存占位符）→ 替换（每请求执行，签名桶对齐）
     Sv-->>OSS: HTML：s3 图=签名 URL·CDN 直连；local 图=代理路由
     OSS->>OSS: 浏览器直连取图
 ```
@@ -209,7 +209,7 @@ stateDiagram-v2
 
 ### 5.4 `GET /s/[token]/i/[name]` 与 5.5 `GET /d/[id]/i/[name]`（代理路由）
 
-- /s/：share token → md 行 → refs 白名单（该 md 必须引用此图）→ 按行 backend+key 取字节 → `200 Content-Type=行内 mime + nosniff + no-store`
+- /s/：share token → md 行 → refs 白名单（该 md 必须引用此图）→ 按行 backend+key 取字节 → `200 Content-Type=行内 mime + nosniff + Cache-Control:no-cache + ETag="<content_hash>"`（决策 #26：协商复用——未变 304 无 body，撤销/删除协商即 404，即时性与 no-store 等价；v1 不支持 Range）
 - /d/：`session.user===md.ownerId`，其余同
 - 失败统一 404；行内后端无实现 → 503
 
@@ -252,7 +252,7 @@ token 级行内改写（image token 的 `.map` 行内替换 src 编码形态为*
 
 ### 7.3 URL 决策树
 
-`IMAGE_PROXY_ALL=1` → 全代理；backend=local → 代理路由；backend=s3 且实现存在 → presign GET + `referrerpolicy="strict-origin-when-cross-origin"`；backend=s3 但无实现 → 裂图占位（503 语义 title）。
+`IMAGE_PROXY_ALL=1` → 全代理；backend=local → 代理路由；backend=s3 且实现存在 → presign GET（**签名时间桶对齐**：TTL/6 一桶，桶内所有 SSR 产出同一 URL → 浏览器缓存命中；有效期在 TTL~TTL+桶宽间波动）+ `referrerpolicy="strict-origin-when-cross-origin"`；backend=s3 但无实现 → 裂图占位（503 语义 title）。
 
 ### 7.4 裂图占位
 
@@ -345,7 +345,7 @@ pending 超时释放；ready 墓碑永不释放（90d 物理清理备案）。
 |---|---|---|
 | `IMAGE_STORE_BACKEND` | `local` | `local` \| `s3`（选 s3 需 OBJECT_STORE_* 齐全，启动校验） |
 | `MAX_IMAGE_BYTES` | `10485760` | 单图原始字节上限 |
-| `IMAGE_SIGNED_URL_TTL` | `3600` | 取图签名有效期秒 |
+| `IMAGE_SIGNED_URL_TTL` | `3600` | 取图签名有效期秒（桶对齐下实际有效期 TTL ~ TTL+桶宽，设期望值 ~1.2 倍可覆盖） |
 | `IMAGE_PROXY_ALL` | `0` | 强制全代理 |
 
 同步 `.env.example`/`env.ts`/`startup-check.ts`/INSTALL.md/USER_GUIDE。
@@ -357,7 +357,8 @@ pending 超时释放；ready 墓碑永不释放（90d 物理清理备案）。
 - confirm 三态/ETag 校验/幂等重放/GC 后 confirm→missing/invalid 删对象
 - GC 安全包五不变量各设场景测试（条件式竞态/删 blob 反查/补录事务边界/软删复查）
 - 墓碑：名字占位/复活全字段重置/并发复活
-- 渲染：占位符自指/两段管线/缓存命中仍替换/裂图/缓存键隔离/referrerpolicy
+- 渲染：占位符自指/两段管线/缓存命中仍替换/裂图/缓存键隔离/referrerpolicy/桶对齐（同桶 URL 逐字节相同）/悬空 ref 周期清理
+- 代理路由缓存：no-cache+ETag 协商 304 / 撤销 token 后协商 404（即时性验证）/ onerror 兜底（Playwright 拦截请求模拟 CDN 失败）
 - 桥：六类错误/两阶段/双通道/进度摘要/token 解析不误伤
 - 冷档溯源回归；startup-check；schema↔ensureSchema 等价性
 - Playwright：relay+direct 双模式全链路 + lightbox 交互 + 删文档图 404
