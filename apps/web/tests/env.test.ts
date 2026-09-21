@@ -1,11 +1,13 @@
-import { test, expect, afterEach } from 'vitest';
-import { envInt, getBaseUrl, getBridgeRepoUrl, getSessionMaxAgeSeconds } from '../src/lib/server/env';
+import { test, expect, afterEach, describe, it } from 'vitest';
+import { envInt, getBaseUrl, getBridgeRepoUrl, getImageStoreBackend, getMaxImageBytes, getSessionMaxAgeSeconds } from '../src/lib/server/env';
 
 afterEach(() => {
     delete process.env.TEST_ENV_INT;
     delete process.env.BASE_URL;
     delete process.env.SESSION_MAX_AGE;
     delete process.env.BRIDGE_REPO_URL;
+    delete process.env.IMAGE_STORE_BACKEND;
+    delete process.env.MAX_IMAGE_BYTES;
 });
 
 test('envInt undefined/空串 → 默认', () => {
@@ -64,4 +66,26 @@ test('getBridgeRepoUrl：默认值 / env 覆盖 / 尾斜杠归一化', () => {
     expect(getBridgeRepoUrl()).toBe('https://github.com/earneet/remote-reader');
     process.env.BRIDGE_REPO_URL = 'https://git.example.com/foo/bar/';
     expect(getBridgeRepoUrl()).toBe('https://git.example.com/foo/bar');
+});
+
+describe('getImageStoreBackend / getMaxImageBytes', () => {
+    it('默认 local / 10MB', () => {
+        delete process.env.IMAGE_STORE_BACKEND;
+        delete process.env.MAX_IMAGE_BYTES;
+        expect(getImageStoreBackend()).toBe('local');
+        expect(getMaxImageBytes()).toBe(10 * 1024 * 1024);
+    });
+    it('合法值 s3 / 自定义字节', () => {
+        process.env.IMAGE_STORE_BACKEND = 's3';
+        process.env.MAX_IMAGE_BYTES = '2097152';
+        expect(getImageStoreBackend()).toBe('s3');
+        expect(getMaxImageBytes()).toBe(2097152);
+        delete process.env.IMAGE_STORE_BACKEND;
+        delete process.env.MAX_IMAGE_BYTES;
+    });
+    it('非法后端值 fail-fast', () => {
+        process.env.IMAGE_STORE_BACKEND = 'ftp';
+        expect(() => getImageStoreBackend()).toThrow('IMAGE_STORE_BACKEND');
+        delete process.env.IMAGE_STORE_BACKEND;
+    });
 });

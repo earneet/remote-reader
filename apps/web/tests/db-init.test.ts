@@ -104,7 +104,7 @@ test('A-2 schema.ts 全表全列在 ensureSchema 空白库上可见（三处同�
         api_tokens: ['id', 'user_id', 'name', 'token_hash', 'last_used_at', 'created_at'],
         invite_codes: ['id', 'code_hash', 'created_by', 'note', 'expires_at', 'revoked_at', 'used_count', 'last_used_at', 'created_at'],
         documents: ['id', 'owner_id', 'parent_id', 'name', 'type', 'storage_path', 'content_hash', 'size_bytes',
-            'created_at', 'updated_at', 'storage_tier', 'last_viewed_at', 'archived_at', 'owner_viewed_at'],
+            'created_at', 'updated_at', 'storage_tier', 'last_viewed_at', 'archived_at', 'owner_viewed_at', 'storage_backend'],
         share_links: ['id', 'document_id', 'token', 'expires_at', 'created_at'],
         tags: ['id', 'owner_id', 'name', 'created_at'],
         document_tags: ['tag_id', 'document_id']
@@ -123,10 +123,12 @@ test('A-2 schema.ts 全表全列在 ensureSchema 空白库上可见（三处同�
         'documents_owner_type_updated_idx', 'documents_owner_type_viewed_idx',
         'share_links_token_unique', 'share_links_document_id_idx',
         'tags_owner_name_unique', 'tags_owner_id_idx',
-        'document_tags_document_id_idx', 'document_tags_tag_id_idx'
+        'document_tags_document_id_idx', 'document_tags_tag_id_idx',
+        'images_owner_hash_uniq', 'images_owner_name_uniq', 'images_status_created_idx', 'images_status_ready_idx',
+        'image_refs_image_id_idx'
     ];
     const gotIdx = (fresh.prepare(
-        "SELECT name FROM sqlite_master WHERE type='index' AND name NOT LIKE 'sqlite_%' AND tbl_name IN ('users','api_tokens','invite_codes','documents','share_links','tags','document_tags')"
+        "SELECT name FROM sqlite_master WHERE type='index' AND name NOT LIKE 'sqlite_%' AND tbl_name IN ('users','api_tokens','invite_codes','documents','share_links','tags','document_tags','images','image_refs')"
     ).all() as { name: string }[]).map((r) => r.name);
     expect(gotIdx.sort(), `索引不一致：ensureSchema=${gotIdx.join(',')}`).toEqual([...expectedIndexes].sort());
     expect(!!fresh.prepare("SELECT name FROM sqlite_master WHERE name='docs_fts'").get()).toBe(true);

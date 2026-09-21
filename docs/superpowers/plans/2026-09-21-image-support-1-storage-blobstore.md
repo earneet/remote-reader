@@ -31,6 +31,14 @@
 bun install    # bun 全局缓存硬链接，秒级；data/ 为 gitignore，副本天然用独立测试库
 ```
 
+- [ ] **Step 1b: 生成 .svelte-kit（新 checkout 必需——否则全部测试 TSCONFIG_ERROR: Tsconfig not found）**
+
+```bash
+cd apps/web && bunx svelte-kit sync && ls .svelte-kit/tsconfig.json
+```
+
+（`.svelte-kit/` 是 gitignore 生成物，worktree 新 checkout 没有；vitest 4 的 vite:oxc 转译依赖它解析 tsconfig。**执行期实测发现**）
+
 - [ ] **Step 2: 基线验证（改动前全绿基线）**
 
 ```bash
@@ -38,6 +46,8 @@ bun run test && bun --filter remote-reader-web check
 ```
 
 Expected: 全部 PASS / 0 errors——后续任何"回归"都有干净基线可对照。
+
+**执行期经验（Phase 2+ 派发时带上）**：① 实现方法签名必须与调用点参数一致（接口 3 参的 put，实现类也要 3 参——TS 少参对接口兼容但具体类调用点会挂 svelte-check；本批 Task 6 已踩）；② `bun --filter <pkg> add <dep>` 在部分 bun 版本报 "No packages matched"，改在 `apps/web` 目录直接 `bun add` 效果等同；③ LSP 诊断工具不认 worktree 路径，类型验证用 `bun --filter remote-reader-web check` 等效完成。
 
 ---
 
