@@ -76,7 +76,9 @@ export async function resolveImages(html: string, names: string[], ctx: ResolveC
         const ph = `%%RR:IMG:${ctx.contentHash.slice(0, 8)}:${n}%%`;
         const replacement = urls[n];
         if (replacement.startsWith('<span')) {
-            out = out.replace(new RegExp(`<img[^>]*${ph}[^>]*>`, 'g'), replacement);
+            // 替换串走函数形式：裂图 span 内嵌用户可控 name，`$&`/`$1` 等 $ 模式会被
+            // String.replace 替换串语义解释（name="a$&b.png" 合法 → 整个 img 标签被展开进文本）
+            out = out.replace(new RegExp(`<img[^>]*${ph}[^>]*>`, 'g'), () => replacement);
         } else {
             out = out.split(ph).join(replacement);
         }

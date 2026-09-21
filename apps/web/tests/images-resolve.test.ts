@@ -253,6 +253,16 @@ describe('裂图占位（P0-1 双轨整标签替换）', () => {
         expect(html).toContain('[a&amp;b.png]');
         expect(html).not.toContain('[a&b.png]');
     });
+
+    it('裂图 name 含 $& 不被 replace 替换串语义展开（函数形式替换）', async () => {
+        mkUser('u1');
+        mkDoc('d1', 'u1');
+        // $& 是合法文件名字符；String.replace 字符串替换串会把 $& 展开为整个匹配（img 标签）
+        const r = await renderMarkdown('![a](a$&b.png)');
+        const html = await resolveImages(r.html, r.names, shareCtx(r));
+        expect(html).toContain('[a$&amp;b.png]');   // escapeHtml 后 $& 字面保留（非 img 标签展开）
+        expect(html).not.toContain('<img');
+    });
 });
 
 describe('refs 惰性补录接线（lazyRegisterRefs）', () => {
