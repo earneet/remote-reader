@@ -1,18 +1,29 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import { db, schema, sqlite } from '$server/db';
 import { resetDb } from './helpers';
 import { initImage, type InitImageResult } from '$server/images';
 import { eq } from 'drizzle-orm';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+
+const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'rr-imginit-'));
+process.env.DATA_DIR = DIR;
+afterAll(() => { delete process.env.DATA_DIR; fs.rmSync(DIR, { recursive: true, force: true }); });
 
 beforeEach(() => resetDb());
 
 function mkUser(id: string): void {
     sqlite.exec(`INSERT INTO users (id, email, password_hash, role, created_at) VALUES ('${id}', '${id}@t.local', 'x', 'member', 0)`);
 }
+// exists 分支会 head 探测 blob（自愈）——种子行必须落真实 blob 才是健康 ready 态
 function mkReadyImage(ownerId: string, name: string, hash: string): string {
     const id = `img-${hash.slice(0, 8)}`;
+    const key = `${ownerId}/blobs/${hash.slice(0, 2)}/${hash}`;
+    fs.mkdirSync(path.dirname(path.join(DIR, ...key.split('/'))), { recursive: true });
+    fs.writeFileSync(path.join(DIR, ...key.split('/')), Buffer.alloc(10, 1));
     sqlite.exec(`INSERT INTO images (id, owner_id, name, content_hash, content_md5, mime_type, size_bytes, status, storage_backend, storage_key, created_at, ready_at)
-        VALUES ('${id}', '${ownerId}', '${name}', '${hash}', '${'m'.repeat(32)}', 'image/png', 10, 'ready', 'local', '${ownerId}/blobs/${hash.slice(0, 2)}/${hash}', 0, 0)`);
+        VALUES ('${id}', '${ownerId}', '${name}', '${hash}', '${'m'.repeat(32)}', 'image/png', 10, 'ready', 'local', '${key}', 0, 0)`);
     return id;
 }
 
