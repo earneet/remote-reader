@@ -22,7 +22,7 @@ export const load: PageServerLoad = async ({ locals, params, setHeaders }) => {
         if (e instanceof ArchiveUnavailableError) error(503, '归档存储暂时不可达，请稍后重试');
         throw e;
     }
-    const html = await renderMarkdown(content);
+    const html = (await renderMarkdown(content)).html;
     // M1: 免登录查看页禁缓存——撤销 share token 后浏览器/CDN/bfcache 不再展示已撤销内容
     setHeaders({ 'cache-control': 'no-store' });
     // 「最近浏览」写入侧（spec §7.1）：owner 登录态打开分享链接也算一次浏览——

@@ -20,7 +20,7 @@ export const load: PageServerLoad = async ({ locals, params, setHeaders }) => {
         if (e instanceof ArchiveUnavailableError) error(503, '归档存储暂时不可达，请稍后重试');
         throw e;
     }
-    const html = await renderMarkdown(content);
+    const html = (await renderMarkdown(content)).html;
     const tags = listTagsForDoc(doc.id, locals.user.id);
     setHeaders({ 'cache-control': 'no-store' });
     return { id: doc.id, title: doc.name, html, tags, updatedAt: doc.updatedAt, sizeBytes: doc.sizeBytes };
