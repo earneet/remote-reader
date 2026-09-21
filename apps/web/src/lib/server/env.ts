@@ -30,3 +30,18 @@ export function getSessionMaxAgeSeconds(): number {
 export function getColdTierAfterDays(): number {
     return envInt('COLD_TIER_AFTER_DAYS', 30);
 }
+
+// —— 图片支持（spec 2026-09-20 §12）——
+export type ImageStoreBackend = 'local' | 's3';
+
+export function getImageStoreBackend(): ImageStoreBackend {
+    const raw = process.env.IMAGE_STORE_BACKEND ?? 'local';
+    if (raw !== 'local' && raw !== 's3') {
+        throw new Error(`env IMAGE_STORE_BACKEND 须为 local 或 s3，实际值: ${JSON.stringify(raw)}`);
+    }
+    return raw;
+}
+
+export function getMaxImageBytes(): number {
+    return envInt('MAX_IMAGE_BYTES', 10 * 1024 * 1024);
+}
