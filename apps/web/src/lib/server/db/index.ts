@@ -85,6 +85,34 @@ CREATE TABLE IF NOT EXISTS document_tags (
 );
 CREATE INDEX IF NOT EXISTS document_tags_document_id_idx ON document_tags (document_id);
 CREATE INDEX IF NOT EXISTS document_tags_tag_id_idx ON document_tags (tag_id);
+CREATE TABLE IF NOT EXISTS images (
+    id text PRIMARY KEY NOT NULL,
+    owner_id text NOT NULL,
+    name text NOT NULL,
+    content_hash text NOT NULL,
+    content_md5 text NOT NULL,
+    mime_type text NOT NULL,
+    size_bytes integer NOT NULL,
+    status text NOT NULL DEFAULT 'pending',
+    storage_backend text NOT NULL,
+    storage_key text NOT NULL,
+    created_at integer NOT NULL,
+    ready_at integer,
+    FOREIGN KEY (owner_id) REFERENCES users(id) ON UPDATE no action ON DELETE no action
+);
+CREATE UNIQUE INDEX IF NOT EXISTS images_owner_hash_uniq ON images (owner_id, content_hash);
+CREATE UNIQUE INDEX IF NOT EXISTS images_owner_name_uniq ON images (owner_id, name);
+CREATE INDEX IF NOT EXISTS images_status_created_idx ON images (status, created_at);
+CREATE INDEX IF NOT EXISTS images_status_ready_idx ON images (status, ready_at);
+CREATE TABLE IF NOT EXISTS image_refs (
+    document_id text NOT NULL,
+    image_id text NOT NULL,
+    created_at integer NOT NULL,
+    FOREIGN KEY (document_id) REFERENCES documents(id) ON UPDATE no action ON DELETE cascade,
+    FOREIGN KEY (image_id) REFERENCES images(id) ON UPDATE no action ON DELETE no action,
+    PRIMARY KEY (document_id, image_id)
+);
+CREATE INDEX IF NOT EXISTS image_refs_image_id_idx ON image_refs (image_id);
 CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5(doc_id UNINDEXED, name, content, tokenize = 'trigram');
 `;
 
@@ -129,6 +157,16 @@ export function ensureOwnerViewedColumn(target: SqliteDb): void {
     target.exec('CREATE INDEX IF NOT EXISTS documents_owner_type_viewed_idx ON documents (owner_id, type, owner_viewed_at DESC, id DESC)');
 }
 
+// 图片支持（spec §4.1）：documents 冷档溯源列——存量库 ALTER 兜底 + 存量 cold 行一次性回填 's3'
+// （现状唯一归档后端；幂等：WHERE storage_backend IS NULL 使回填只补不覆盖）
+export function ensureDocumentsStorageBackendColumn(target: SqliteDb): void {
+    const cols = target.prepare('PRAGMA table_info(documents)').all() as { name: string }[];
+    if (!cols.some((c) => c.name === 'storage_backend')) {
+        target.exec('ALTER TABLE documents ADD COLUMN storage_backend text');
+    }
+    target.exec("UPDATE documents SET storage_backend = 's3' WHERE storage_tier = 'cold' AND storage_backend IS NULL");
+}
+
 // P1-1 唯一索引前的存量清洗：清除并发首传竞态产生的同 (owner, parent, name, type) 重复行
 // （保留 rowid 最小者 = findNode().get() 实际命中的行；share_links/docs_fts 无级联须先清，
 // document_tags 有 ON DELETE cascade 随行删除）。仅在索引尚不存在时执行一次
@@ -150,6 +188,7 @@ export function ensureSchema(target: SqliteDb = sqlite): void {
     target.exec(SCHEMA_SQL);
     ensureTierColumns(target);
     ensureOwnerViewedColumn(target);
+    ensureDocumentsStorageBackendColumn(target);
     // P1-1 唯一索引不进 SCHEMA_SQL：存量库可能带竞态重复行，CREATE UNIQUE 会启动即崩——先清洗再建
     const hasUnique = target.prepare(
         "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'documents_owner_parent_name_type_uniq'"
