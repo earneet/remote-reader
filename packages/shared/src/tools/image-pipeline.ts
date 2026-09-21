@@ -155,6 +155,9 @@ export function rewriteImageRefs(md: string, rename: Map<string, string>): { con
     const escapeRegExp = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     let rewrites = 0;
     for (const [line, srcs] of lineSrcs) {
+        // 行定位失败（转义/entity 写法使原文行不含 src 任何形态，终审 P3）→ 跳过而非 crash：
+        // 残留本地路径在渲染端自愈（两端 markdown-it 均做 entity/转义 decode → 裸名命中已上传图）
+        if (line < 0 || line >= lines.length) continue;
         const variants = [...srcs].flatMap((s) => (decodeLocalSrc(s) === s ? [s] : [s, decodeLocalSrc(s)]));
         const ordered = variants.sort((a, b) => b.length - a.length); // 长 src 优先（alternation 左侧优先匹配）
         const re = new RegExp(ordered.map(escapeRegExp).join('|'), 'g');

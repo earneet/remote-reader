@@ -309,4 +309,12 @@ describe('rewriteImageRefs（token 级改写）', () => {
         expect(content).toBe('![a](x.png)');
         expect(rewrites).toBe(0);
     });
+
+    it('终审 P3：行定位失败（entity/转义写法使原文行不含 src 任何形态）→ 跳过不 crash', () => {
+        // markdown-it 把 a&amp;b.png 解码为 a&b.png（token src），原文行只含 a&amp;b.png
+        // → lineOf 全形态 miss → line=-1。改写须跳过（图已上传，残留路径由渲染端裸名匹配自愈）。
+        const r = rewriteImageRefs('![a](a&amp;b.png)', new Map([['a&b.png', 'reg.png']]));
+        expect(r.content).toBe('![a](a&amp;b.png)'); // 原样保留（不 crash、不误改）
+        expect(r.rewrites).toBe(0);
+    });
 });
