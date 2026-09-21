@@ -153,6 +153,39 @@ describe('confirmImage（spec §5.3）', () => {
     });
 });
 
+describe('initImage exists 分支 head 自愈（交叉审查 P1：blob 丢失 → exists 永续 → 裂图永续）', () => {
+    const blobPathOf = (imageId: string): string => {
+        const row = db.select({ storageKey: schema.images.storageKey }).from(schema.images).where(eq(schema.images.id, imageId)).get()!;
+        return path.join(DIR, ...row.storageKey.split('/'));
+    };
+
+    it('ready 行 blob 丢失 → 不再 exists：降级墓碑复活重传，relay 后 ready 且 blob 恢复', async () => {
+        __setBlobStoresForTest({ local: new LocalBlobStore() });
+        mkUser('u1');
+        const first = await initImage('u1', { name: 'a.png', contentHash: sha256(PNG), contentMd5: md5(PNG), sizeBytes: PNG.length });
+        await relayImage('u1', idOf(first), PNG);
+        expect(fs.existsSync(blobPathOf(idOf(first)))).toBe(true);
+        fs.rmSync(blobPathOf(idOf(first))); // 模拟磁盘损坏/误删
+        const again = await initImage('u1', { name: 'a.png', contentHash: sha256(PNG), contentMd5: md5(PNG), sizeBytes: PNG.length });
+        expect(again.status).toBe('relay'); // 不再 exists
+        const r = await relayImage('u1', (again as { imageId: string }).imageId, PNG);
+        expect(r.ok).toBe(true);
+        expect(fs.existsSync(blobPathOf((again as { imageId: string }).imageId))).toBe(true); // blob 已恢复
+        const row = db.select().from(schema.images).where(eq(schema.images.id, (again as { imageId: string }).imageId)).get()!;
+        expect(row.status).toBe('ready');
+        expect(row.name).toBe('a.png'); // 同名复活，裸名引用不断裂
+    });
+
+    it('blob 在 → 照旧 exists（幂等快路径不回退）', async () => {
+        __setBlobStoresForTest({ local: new LocalBlobStore() });
+        mkUser('u1');
+        await relayImage('u1', idOf(await initImage('u1', { name: 'a.png', contentHash: sha256(PNG), contentMd5: md5(PNG), sizeBytes: PNG.length })), PNG);
+        const again = await initImage('u1', { name: 'other.png', contentHash: sha256(PNG), contentMd5: md5(PNG), sizeBytes: PNG.length });
+        expect(again.status).toBe('exists');
+        expect(again.name).toBe('a.png');
+    });
+});
+
 describe('resolveImageByName', () => {
     it('只认 ready（pending/deleted/无行 → null）', async () => {
         __setBlobStoresForTest({ local: new LocalBlobStore() });

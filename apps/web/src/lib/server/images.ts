@@ -68,7 +68,24 @@ export async function initImage(ownerId: string, input: InitImageInput): Promise
         if (attempt >= 4) throw new ImageInputError('init 并发冲突重试次数超限，请重试', 409);
         const byHash = db.select().from(schema.images)
             .where(and(eq(schema.images.ownerId, ownerId), eq(schema.images.contentHash, input.contentHash))).get();
-        if (byHash?.status === 'ready') return { status: 'exists', name: byHash.name };
+        if (byHash?.status === 'ready') {
+            // blob 丢失自愈（交叉审查 P1）：行 ready 但物理 blob 不在（磁盘损坏/误删）时若仍报 exists，
+            // 重传永远命中 exists → 裂图永续。head 探测丢失 → 降级墓碑（复用 GC 软删语义）→ continue
+            // 走复活重传。上传路径非渲染热路径，每图一次 head 可接受；探测自身故障（不可达）不阻断幂等快路径。
+            const store = getBlobStore(byHash.storageBackend);
+            if (store?.head) {
+                try {
+                    await store.head(byHash.storageKey);
+                } catch (e) {
+                    if (e instanceof ObjectNotFoundError) {
+                        db.update(schema.images).set({ status: 'deleted' })
+                            .where(and(eq(schema.images.id, byHash.id), eq(schema.images.status, 'ready'))).run();
+                        continue;
+                    }
+                }
+            }
+            return { status: 'exists', name: byHash.name };
+        }
         if (byHash && (byHash.status === 'pending' || byHash.status === 'deleted')) {
             const rowId = byHash.id;
             if (byHash.status === 'deleted') {
