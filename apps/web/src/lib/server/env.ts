@@ -45,3 +45,17 @@ export function getImageStoreBackend(): ImageStoreBackend {
 export function getMaxImageBytes(): number {
     return envInt('MAX_IMAGE_BYTES', 10 * 1024 * 1024);
 }
+
+// 取图签名有效期秒（桶对齐下实际最短有效期 = TTL，同桶内 URL 稳定复用——spec §7.3/§12）
+export function getImageSignedUrlTtl(): number {
+    return envInt('IMAGE_SIGNED_URL_TTL', 3600);
+}
+
+// 强制全代理（隐蔽优先：不向读者暴露云存储域名；默认 0 = 直连，spec #10）
+export function getImageProxyAll(): boolean {
+    const raw = process.env.IMAGE_PROXY_ALL ?? '0';
+    if (raw !== '0' && raw !== '1') {
+        throw new Error(`env IMAGE_PROXY_ALL 须为 0 或 1，实际值: ${JSON.stringify(raw)}`);
+    }
+    return raw === '1';
+}
