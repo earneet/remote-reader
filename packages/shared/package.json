@@ -9,7 +9,10 @@
     ".": "./src/index.ts",
     "./paths": "./src/paths.ts",
     "./api-client": "./src/api-client.ts",
-    "./tools/upload-document": "./src/tools/upload-document.ts"
+    "./tools/upload-document": "./src/tools/upload-document.ts",
+    "./markdown-math": "./src/markdown-math.ts",
+    "./image-extract": "./src/image-extract.ts",
+    "./image-mime": "./src/image-mime.ts"
   },
   "devDependencies": {
     "@types/node": "^26.1.1"
