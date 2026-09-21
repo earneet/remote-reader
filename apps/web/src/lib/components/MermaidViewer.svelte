@@ -1,8 +1,10 @@
 <script lang="ts">
     import { onMount } from 'svelte';
-    import { nextZoom, formatZoom, ZOOM_STEP, clampZoom } from '$lib/shared/mermaid-zoom';
+    import { nextZoom, formatZoom, ZOOM_STEP, clampZoom } from '$lib/shared/zoom';
+    import { overlayOnMount } from '$lib/shared/overlay-mount';
+    import { overlayGestures } from '$lib/shared/overlay-gestures';
+    import type { GestureOpts } from '$lib/shared/overlay-gestures';
     import { trapTabKey } from '$lib/shared/focus-trap';
-    import { lockBodyScroll, unlockBodyScroll } from '$lib/shared/body-scroll';
 
     let { container, html }: { container: HTMLDivElement | undefined; html: string } = $props();
 
@@ -125,90 +127,34 @@
         browserFs = !!document.fullscreenElement;
     }
 
-    // lightbox 打开时聚焦 overlay、锁 body 滚动（顶栏/边距区的滚轮会穿透滚动背景），
-    // 关闭时解锁 + 焦点回触发元素
-    function overlayOnMount(node: HTMLElement) {
-        const prev = document.activeElement as HTMLElement | null;
-        node.focus();
-        lockBodyScroll();
-        return {
-            destroy() {
-                unlockBodyScroll();
-                if (prev && typeof prev.focus === 'function') prev.focus();
-            }
-        };
-    }
-
-    // Pointer Events 统一鼠标/触摸/笔：单指拖动平移、双指 pinch 缩放、滚轮缩放
-    function gestures(node: HTMLElement) {
-        let pointers = new Map<number, { x: number; y: number }>();
-        let pinchStartDist = 0;
-        let zoomStart = 1;
-        let dragStart = { x: 0, y: 0 };
-        let panStart = { x: 0, y: 0 };
-        let dragging = false;
-
-        const onPointerDown = (e: PointerEvent) => {
+    // 手势快照（overlay-gestures 上报增量/累计比，消费方组合绝对值）：
+    // onPanStart 快照 panStart → onPan(dx,dy) 里 panStart + dx；
+    // onPinchStart 快照 zoomStart → onZoom(factor) 里 zoomStart * factor（基准式，防指数爆炸）
+    let panStart = { x: 0, y: 0 };
+    let pinchZoomStart = 1;
+    const gesturesOpts: GestureOpts = {
+        onPanStart: () => {
             if (!fullscreen) return;
-            pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-            if (pointers.size === 1) {
-                dragging = true;
-                dragStart = { x: e.clientX, y: e.clientY };
-                panStart = { x: fullscreen.x, y: fullscreen.y };
-            } else if (pointers.size === 2) {
-                dragging = false;
-                const pts = [...pointers.values()];
-                pinchStartDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
-                zoomStart = fullscreen.zoom;
-            }
-            try {
-                node.setPointerCapture(e.pointerId);
-            } catch (e) {
-                // 忽略 capture 失败
-            }
-        };
-        const onPointerMove = (e: PointerEvent) => {
+            panStart = { x: fullscreen.x, y: fullscreen.y };
+        },
+        onPan: (dx, dy) => {
             if (!fullscreen) return;
-            if (pointers.has(e.pointerId)) {
-                pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-            }
-            if (pointers.size >= 2 && pinchStartDist > 0) {
-                const pts = [...pointers.values()];
-                const d = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
-                fullscreen.zoom = clampZoom(zoomStart * (d / pinchStartDist));
-            } else if (dragging) {
-                fullscreen.x = panStart.x + (e.clientX - dragStart.x);
-                fullscreen.y = panStart.y + (e.clientY - dragStart.y);
-            }
-        };
-        const onPointerUp = (e: PointerEvent) => {
-            pointers.delete(e.pointerId);
-            if (pointers.size < 2) pinchStartDist = 0;
-            if (pointers.size === 0) dragging = false;
-        };
-        const onWheel = (e: WheelEvent) => {
+            fullscreen.x = panStart.x + dx;
+            fullscreen.y = panStart.y + dy;
+        },
+        onPinchStart: () => {
             if (!fullscreen) return;
-            e.preventDefault();
-            fullscreen.zoom = clampZoom(fullscreen.zoom - e.deltaY * 0.0015);
-        };
-
-        node.addEventListener('pointerdown', onPointerDown);
-        node.addEventListener('pointermove', onPointerMove);
-        node.addEventListener('pointerup', onPointerUp);
-        node.addEventListener('pointercancel', onPointerUp);
-        node.addEventListener('wheel', onWheel, { passive: false });
-        // use:gestures 在 {#if fullscreen} 内，浮层每次开关都会重跑 action——
-        // 必须返回 destroy 逐次拆监听，否则 detached DOM 与处理器随开关累积（P2-12）
-        return {
-            destroy() {
-                node.removeEventListener('pointerdown', onPointerDown);
-                node.removeEventListener('pointermove', onPointerMove);
-                node.removeEventListener('pointerup', onPointerUp);
-                node.removeEventListener('pointercancel', onPointerUp);
-                node.removeEventListener('wheel', onWheel);
-            }
-        };
-    }
+            pinchZoomStart = fullscreen.zoom;
+        },
+        onZoom: (factor) => {
+            if (!fullscreen) return;
+            fullscreen.zoom = clampZoom(pinchZoomStart * factor);
+        },
+        onWheelZoom: (deltaY) => {
+            if (!fullscreen) return;
+            fullscreen.zoom = clampZoom(fullscreen.zoom - deltaY * 0.0015);
+        }
+    };
 
     onMount(() => {
         themeObserver = new MutationObserver(() => {
@@ -263,7 +209,7 @@
                     >✕</button>
                 </div>
             </div>
-            <div class="rr-mermaid-stage" use:gestures>
+            <div class="rr-mermaid-stage" use:overlayGestures={gesturesOpts}>
                 <div
                     class="rr-mermaid-svg-wrap"
                     style={`transform: translate(${fullscreen.x}px, ${fullscreen.y}px) scale(${fullscreen.zoom})`}
