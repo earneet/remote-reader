@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto';
+import { error } from '@sveltejs/kit';
 import { and, eq, ne } from 'drizzle-orm';
 import { db, schema } from './db';
 import { generateId } from './auth';
 import { getBlobStore, getActiveImageStore } from './blobstore';
 import { getMaxImageBytes } from './env';
 import { sanitizeImageName, detectImageMime } from '@remote-reader/shared/image-mime';
-import { ObjectNotFoundError } from './object-store';
+import { ObjectNotFoundError, ArchiveUnavailableError } from './object-store';
 
 const HEX64 = /^[0-9a-f]{64}$/;
 const HEX32 = /^[0-9a-f]{32}$/;
@@ -213,4 +214,43 @@ export function resolveImageByName(ownerId: string, name: string): { id: string;
     }).from(schema.images)
         .where(and(eq(schema.images.ownerId, ownerId), eq(schema.images.name, name), eq(schema.images.status, 'ready')))
         .get() ?? null;
+}
+
+/** 图片代理响应（/s/[token]/i/[name] 与 /d/[id]/i/[name] 的公共段，调用方只负责各自鉴权）：
+ *  refs 白名单（spec #8：该 md 必须引用此图——share token 不能枚举 owner 其他图）→
+ *  no-cache 协商（spec #26：ETag=content_hash，If-None-Match 命中 → 304 无 body，头在 Response 上）→
+ *  取字节 → 错误三分类（blob 缺失 404 / 后端未注册 503 / 存储不可达 503）。 */
+export async function serveImageResponse({ request, setHeaders, ownerId, documentId, name }: {
+    request: Request;
+    setHeaders: (headers: Record<string, string>) => void;
+    ownerId: string;
+    documentId: string;
+    name: string;
+}): Promise<Response> {
+    const img = resolveImageByName(ownerId, name);
+    if (!img) error(404, 'Not Found');
+    const refed = db.select({ x: schema.imageRefs.documentId }).from(schema.imageRefs)
+        .where(eq(schema.imageRefs.imageId, img.id)).all().some((r) => r.x === documentId);
+    if (!refed) error(404, 'Not Found');
+    const etag = `"${img.contentHash}"`;
+    if (request.headers.get('if-none-match') === etag) {
+        return new Response(null, { status: 304, headers: { ETag: etag, 'Cache-Control': 'no-cache' } });
+    }
+    const store = getBlobStore(img.storageBackend);
+    if (!store) error(503, 'image backend unavailable');
+    let data: Buffer;
+    try {
+        data = await store.get(img.storageKey);
+    } catch (e) {
+        if (e instanceof ObjectNotFoundError) error(404, 'Not Found');
+        if (e instanceof ArchiveUnavailableError) error(503, 'image storage unreachable');
+        throw e;
+    }
+    setHeaders({
+        'Content-Type': img.mimeType,
+        'X-Content-Type-Options': 'nosniff',
+        'Cache-Control': 'no-cache',
+        ETag: etag
+    });
+    return new Response(new Uint8Array(data));
 }
