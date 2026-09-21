@@ -64,7 +64,7 @@ describe('markdown-math 共享规则', () => {
 });
 ```
 
-- [ ] **Step 2: 确认失败**：`bun run test apps/web/tests/img-shared-math.test.ts`。测试放 `apps/web/tests/`（根 vitest include 只覆盖 apps/web——packages/shared 的测试不在收集范围），跨包用相对路径 import 源文件（`../../../packages/shared/src/markdown-math`，3 层到仓库根；markdown-it 从 web 的 node_modules hoisted 解析）。测试文件顶部：
+- [ ] **Step 2: 确认失败**：`bun run test packages/shared/src/markdown-math.test.ts`——根 vitest.config.ts 的 include 覆盖 `packages/shared/src/**/*.test.ts`（实证），测试就放 shared 包内（`import './markdown-math'` 同目录相对导入，无需跨包路径）；markdown-it 经 bun workspace hoisted 从根 node_modules 解析。
 
 ```ts
 import { registerMathRules } from '../../../packages/shared/src/markdown-math';
@@ -93,7 +93,7 @@ export function registerMathRenderers(md: MarkdownIt): void {
 （执行者：搬移 = 从 markdown.ts 剪切对应代码段到本文件，字符级不变；上方省略号仅因计划不重复 60 行已存在代码——**这不是占位符，是"搬移既有代码"的显式指令**，源位置已给精确行号）
 
 - [ ] **Step 4: web markdown.ts 改用**：删除 99-165 行内联定义，`getMarkdown` 内构建实例后调用 `registerMathRules(md); registerMathRenderers(md);`（import 自 `../../../packages/shared/src/markdown-math`——web 已有 `$shared` alias？AGENTS.md：`$shared`→`packages/shared/src` ✓ 用 `$shared/markdown-math`）。
-- [ ] **Step 5: 跑新测试 + 既有 markdown 测试全绿**：`bun run test apps/web/tests/img-shared-math.test.ts apps/web/tests/markdown.test.ts`（math 行为不变的回归锁定）。
+- [ ] **Step 5: 跑新测试 + 既有 markdown 测试全绿**：`bun run test packages/shared/src/markdown-math.test.ts apps/web/tests/markdown.test.ts`（math 行为不变的回归锁定）。
 - [ ] **Step 6: Commit** `feat(shared): math 规则抽取为单源（web 渲染与图片提取器共用，P1-3 地基）`
 
 ---
@@ -101,14 +101,14 @@ export function registerMathRenderers(md: MarkdownIt): void {
 ### Task 2: shared 提取器 extractImageNames（P1-3 核心）
 
 **Files:**
-- Create: `packages/shared/src/image-refs.ts`
-- Test: `apps/web/tests/img-extract.test.ts`
+- Create: `packages/shared/src/image-extract.ts`（**命名刻意避开 image-refs**——服务端 `apps/web/src/lib/server/image-refs.ts` 是另一物，同名混淆已在计划评审中实证（P2-4））
+- Test: `packages/shared/src/image-extract.test.ts`
 
 - [ ] **Step 1: 写失败测试**
 
 ```ts
 import { describe, it, expect } from 'vitest';
-import { extractImageNames } from '../../../packages/shared/src/image-refs';
+import { extractImageNames } from './image-extract';
 
 describe('extractImageNames（裸名提取单源）', () => {
     it('本地裸名提取', () => {
@@ -139,7 +139,9 @@ describe('extractImageNames（裸名提取单源）', () => {
 ```
 
 - [ ] **Step 2: 确认失败**
-- [ ] **Step 3: 实现 `packages/shared/src/image-refs.ts`**
+- [ ] **Step 3: 实现 `packages/shared/src/image-extract.ts`**
+
+（**Step 3 前置：`packages/shared/package.json`**——① `dependencies` 增 `"markdown-it": "<与 apps/web 同版本>"`；② `exports` 白名单增补 `"./markdown-math"`、`"./image-extract"`、`"./image-mime"` 三条（形状照 `./paths` 条目）；桥 bundle（Phase 4）与 web 生产构建都按 exports 解析，缺条目构建即失败）
 
 ```ts
 import MarkdownIt from 'markdown-it';
@@ -314,7 +316,7 @@ describe('initImage 四分支（spec §5.1）', () => {
         expect(second.imageId).toBe(first.imageId);
         expect(second.name).toBe('a.png'); // 响应返回行内注册名（spec #2 唯一权威）
     });
-    it('墓碑复活：deleted 行 → 复活为 pending，全字段重置', () => {
+    it('墓碑复活：deleted 行 → 复活为 pending，全字段重置（P0-1：同名重传沿用原名——引用不断裂）', () => {
         mkUser('u1');
         const id = mkReadyImage('u1', 'tomb.png', '9'.repeat(64));
         sqlite.exec(`UPDATE images SET status='deleted', ready_at=5 WHERE id='${id}'`);
@@ -322,9 +324,17 @@ describe('initImage 四分支（spec §5.1）', () => {
         expect(r.status).toBe('relay');
         const row = db.select().from(schema.images).where(eq(schema.images.id, id)).get();
         expect(row?.status).toBe('pending');
+        expect(row?.name).toBe('tomb.png'); // ← P0-1 关键断言：不得被自身占名强制改成 tomb-2.png
         expect(row?.readyAt).toBeNull();
         expect(row?.sizeBytes).toBe(7);       // 按新报值重置
         expect(row?.contentMd5).toBe('8'.repeat(32));
+    });
+    it('墓碑别名重传：请求名 != 行名 → 分配新名且不被墓碑旧名挤占', () => {
+        mkUser('u1');
+        const id = mkReadyImage('u1', 'tomb.png', '9'.repeat(64));
+        sqlite.exec(`UPDATE images SET status='deleted' WHERE id='${id}'`);
+        const r = initImage('u1', { name: 'fresh.png', contentHash: '9'.repeat(64), contentMd5: '8'.repeat(32), sizeBytes: 7 });
+        expect(r.name).toBe('fresh.png'); // 墓碑自己的 tomb.png 不构成对 fresh.png 的占用
     });
     it('同名不同内容：自动后缀 -2..-N（精确探测，跨墓碑也占位）', () => {
         mkUser('u1');
@@ -360,10 +370,9 @@ import { db, schema } from './db';
 import { generateId } from './auth';
 import { getBlobStore, getActiveImageStore } from './blobstore';
 import { getMaxImageBytes } from './env';
-import { sanitizeImageName } from '@remote-reader-shared/image-mime';
-// shared 引入模式：照既有 `@remote-reader/shared/paths` 先例（web 的 tsconfig/vite 已映射该前缀）。
-// 执行前置：确认 packages/shared/package.json 的 exports/编译产物是否含 image-mime/image-refs——
-// paths 走 TS paths 直映射 src 则零配置；若有 exports 白名单则增补两个新模块条目。
+import { sanitizeImageName } from '@remote-reader/shared/image-mime';
+// shared 引入：包名是 @remote-reader/shared（连字符在 remote-reader 内——照 `@remote-reader/shared/paths` 先例）。
+// exports 白名单前置步骤见 Task 2/3（本批显式增补 ./markdown-math、./image-refs、./image-mime 三条）。
 
 const HEX64 = /^[0-9a-f]{64}$/;
 const HEX32 = /^[0-9a-f]{32}$/;
@@ -392,11 +401,17 @@ function validateInitInput(input: InitImageInput): void {
     }
 }
 
-/** 名字分配：请求名可用直接用；被占（任何 status 的行——墓碑占位是特性）则后缀 -2..-16 精确探测 */
-function allocateName(ownerId: string, requested: string): string {
+/** 名字分配：请求名可用直接用；被占（任何 status 的行——墓碑占位是特性）则后缀 -2..-16 精确探测。
+ *  excludeId：复活场景排除自身行（P0-1：不排除则墓碑的现存名被自己"占用"，同名重传被强制 -2 改名 →
+ *  裸名引用断裂 → 无 refs 二次 GC 丢数据） */
+function allocateName(ownerId: string, requested: string, excludeId?: string): string {
     const taken = (n: string): boolean =>
         db.select({ id: schema.images.id }).from(schema.images)
-            .where(and(eq(schema.images.ownerId, ownerId), eq(schema.images.name, n))).get() !== undefined;
+            .where(and(
+                eq(schema.images.ownerId, ownerId),
+                eq(schema.images.name, n),
+                excludeId === undefined ? undefined : ne(schema.images.id, excludeId)
+            )).get() !== undefined;
     if (!taken(requested)) return requested;
     const dot = requested.lastIndexOf('.');
     const base = dot > 0 ? requested.slice(0, dot) : requested;
@@ -418,15 +433,21 @@ export async function initImage(ownerId: string, input: InitImageInput): Promise
     const active = getActiveImageStore();
     const now = Date.now();
     for (let attempt = 0; ; attempt++) {
+        if (attempt >= 4) throw new ImageInputError('init 并发冲突重试次数超限，请重试', 409); // 外壳统一上限（revive 对峙与 UNIQUE 撞击共用）
         const byHash = db.select().from(schema.images)
             .where(and(eq(schema.images.ownerId, ownerId), eq(schema.images.contentHash, input.contentHash))).get();
         if (byHash?.status === 'ready') return { status: 'exists', name: byHash.name };
         if (byHash && (byHash.status === 'pending' || byHash.status === 'deleted')) {
             let rowId = byHash.id;
             if (byHash.status === 'deleted') {
-                // 墓碑复活：条件式 UPDATE（并发复活 0 行者重查走共享，spec §4.4）
+                // 墓碑复活（P0-1）：请求名 == 行名（同名重传，主场景）直接沿用原名——md 裸名引用不断裂；
+                // 别名重传走 allocateName 且排除自身行（墓碑现存名不构成对新名的"占用"）
+                const wanted = sanitizeImageName(input.name);
+                const keepName = wanted === byHash.name
+                    ? byHash.name
+                    : allocateName(ownerId, wanted, byHash.id);
                 const revived = db.update(schema.images).set({
-                    status: 'pending', name: allocateName(ownerId, sanitizeImageName(input.name)),
+                    status: 'pending', name: keepName,
                     contentMd5: input.contentMd5, sizeBytes: input.sizeBytes,
                     storageBackend: active.id, storageKey: storageKeyFor(active.id, ownerId, input.contentHash),
                     createdAt: now, readyAt: null
@@ -447,7 +468,7 @@ export async function initImage(ownerId: string, input: InitImageInput): Promise
             }).run();
         } catch (e) {
             // 并发撞 UNIQUE（hash 或 name）→ 外壳重查（uploadDocument 先例；attempt 内不递归）
-            if (e instanceof Error && (e as { code?: string }).code === 'SQLITE_CONSTRAINT_UNIQUE' && attempt < 4) continue;
+            if (e instanceof Error && (e as { code?: string }).code === 'SQLITE_CONSTRAINT_UNIQUE') continue;
             throw e;
         }
         return await directOrRelay(id);
@@ -484,6 +505,7 @@ import { resetDb } from './helpers';
 import { initImage, relayImage, confirmImage, resolveImageByName } from '$server/images';
 import { LocalBlobStore } from '$server/blobstore-local';
 import { __setBlobStoresForTest } from '$server/blobstore';
+import { createHash } from 'node:crypto'; // ESM import（vitest 无 require——P1-4）
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -494,8 +516,8 @@ process.env.DATA_DIR = DIR;
 beforeEach(() => resetDb());
 // PNG 8字节头 + 填充
 const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(120, 7)]);
-const sha256 = (b: Buffer): string => require('node:crypto').createHash('sha256').update(b).digest('hex');
-const md5 = (b: Buffer): string => require('node:crypto').createHash('md5').update(b).digest('hex');
+const sha256 = (b: Buffer): string => createHash('sha256').update(b).digest('hex');
+const md5 = (b: Buffer): string => createHash('md5').update(b).digest('hex');
 
 describe('relayImage（spec §5.2）', () => {
     it('happy path：写盘 + ready + mime/size 实测回写 + sha256 字节绑定过', async () => {
@@ -548,6 +570,10 @@ export async function relayImage(ownerId: string, imageId: string, data: Buffer)
     if (!row) return { ok: false, reason: 'missing' };
     if (row.status === 'ready') return { ok: true, name: row.name };               // 幂等重放（0 行回查的 ready 分支）
     if (row.status !== 'pending') return { ok: false, reason: 'missing' };          // 墓碑/已删
+    // 实测大小（spec §5.2 校验链第二环，P1-1）：init 报称 size 可谎报绕过预检，此处按真实字节拦截
+    if (data.length > getMaxImageBytes()) {
+        return { ok: false, reason: 'invalid', message: `图片实际大小 ${data.length}B 超过上限 ${getMaxImageBytes()}B` };
+    }
     // P1-1 字节绑定：relay 是唯一内容真值时刻——sha256(buffer) 必须等于 init 报称 hash
     const actualHash = createHash('sha256').update(data).digest('hex');
     if (actualHash !== row.contentHash) return { ok: false, reason: 'invalid', message: `内容 hash 与 init 报称不符（去重池完整性拒绝）` };
@@ -666,7 +692,7 @@ runImageGcCycle（周期回收，spec §9.3）
 import { and, eq, inArray, lt, sql } from 'drizzle-orm';
 import { db, schema } from './db';
 import { getBlobStore } from './blobstore';
-import { extractImageNames } from '...shared/image-refs'; // 引入方式同 Task 4 注
+import { extractImageNames } from '@remote-reader/shared/image-extract';
 
 type ImageRow = typeof schema.images.$inferSelect;
 
@@ -761,6 +787,11 @@ export function snapshotRefsForDocuments(docIds: string[]): string[] {
 export async function runImageGcCycle(): Promise<{ pendingReaped: number; readyReaped: number; danglingRefs: number }> {
     const now = Date.now();
     const BATCH = 200;
+    // 0) 悬空 ref 清理【必须最先跑——P1-3】：image_refs.image_id FK 是 ON DELETE no action 且
+    //    pragma foreign_keys=ON——若悬空 ref 指向某 pending 行（防御对象正是这种历史坏态），
+    //    后续物理删行会抛 SQLITE_CONSTRAINT_FOREIGNKEY 且中断整轮 GC；清理放在删除之前，
+    //    收敛器才不会在坏态面前自杀（原顺序：第 1 步炸 → 第 3 步永远执行不到 → GC 永久卡死）
+    const danglingRefs = sqlite_exec_dangling_cleanup();
     // 1) pending 超 1h：物理删行（条件式）+ 反查删 blob
     const stalePending = db.select({ id: schema.images.id }).from(schema.images)
         .where(and(eq(schema.images.status, 'pending'), lt(schema.images.createdAt, now - 3_600_000)))
@@ -793,9 +824,6 @@ export async function runImageGcCycle(): Promise<{ pendingReaped: number; readyR
                 if (r) void deleteBlobIfOrphaned(r.storageBackend, r.storageKey);
             }
         }
-    }
-    // 3) 悬空 ref 清理（指向非 ready 行）
-    const danglingRefs = sqlite_exec_dangling_cleanup();
     return { pendingReaped, readyReaped, danglingRefs };
 }
 
@@ -829,7 +857,9 @@ function sqlite_exec_dangling_cleanup(): number {
 - deleteNode 删除含图文档 → 快照图归零 → 墓碑 + blob 删；被两文档引用的图 → 删一个仍在
 - deleteNode 删文件夹（子树多 md）→ 子树全部 refs 处理
 - P1-2：无 OBJECT_STORE_* 环境下 startTieringScheduler 启动且 runImageGcCycle 被调度
-  （fake timers：vi.useFakeTimers + advance 1h → 断言 pending 行被物理删——直接测 runImageGcCycle 的调度接线）
+  （fake timers：vi.useFakeTimers + `advanceTimersByTimeAsync(1h)`（**必须 Async 版**——回调内 fire-and-forget promise 需微任务刷新，同步 advance 后立即断言必红）；断言 pending 行被物理删。
+  ⚠️ schedulerStarted 模块级单例无重置钩子 → 该用例须独立测试文件且仅能调用一次 startTieringScheduler。
+  ⚠️ 所有涉及 `void gcImagesIfUnreferenced(...)` / `void deleteBlobIfOrphaned(...)` 的断言前先 `await new Promise(r => setImmediate(r))` 刷新 fire-and-forget 微任务）
 ```
 
 - [ ] **Step 2: 确认失败** → **Step 3: 实现（三处挂载 + 调度器重构）**
@@ -958,7 +988,7 @@ export const POST: RequestHandler = async ({ request, getClientAddress }) => {
         if (!rl.allowed) error(429, 'too many failed auth attempts, slow down');
         error(401, 'invalid or missing api token');
     }
-    const rl = checkRateLimit(`upload:${auth.tokenId}`, RATE_LIMIT);
+    const rl = checkRateLimit(`img-relay:${auth.tokenId}`, RATE_LIMIT); // 独立重桶（P1-2）：与 documents 的 upload: 桶分离——50 图文档不被文档上传挤爆
     if (!rl.allowed) error(429, 'rate limit exceeded');
     const body = await request.json().catch(() => null);
     const raw = (body ?? {}) as { image_id?: unknown; content_base64?: unknown };
@@ -974,7 +1004,7 @@ export const POST: RequestHandler = async ({ request, getClientAddress }) => {
     const result = await relayImage(auth.userId, raw.image_id, data);
     if (result.ok) return json({ name: result.name });
     if (result.reason === 'missing') error(404, 'image not found');
-    error(400, result.message);
+    return json({ status: 'invalid', reason: result.message }, 400); // 与 confirm 同形状（P2-5：桥按 status 字段统一判别）
 };
 ```
 
