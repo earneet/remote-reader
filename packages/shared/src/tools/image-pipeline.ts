@@ -1,7 +1,7 @@
 import { stat, readFile, open } from 'node:fs/promises';
 import { isAbsolute, join, basename } from 'node:path';
 import { createHash } from 'node:crypto';
-import { imageTokenLines, extractLocalImageSrcs, decodeLocalSrc } from '../image-extract';
+import { imageTokenLines, extractLocalImageSrcs, decodeLocalSrc, MAX_IMAGE_REFS } from '../image-extract';
 import { detectImageMime } from '../image-mime';
 import { ApiError, type ApiClient } from '../api-client';
 
@@ -38,7 +38,12 @@ function resolveLocal(src: string): string {
 /** 阶段一：全部本地图一次性体检（stat→魔数 32B），零字节上传 */
 export async function collectImageProblems(md: string): Promise<ImageProblem[]> {
     const problems: ImageProblem[] = [];
-    for (const src of extractLocalImageSrcs(md)) { // P2-6：单源复用
+    const srcs = extractLocalImageSrcs(md); // P2-6：单源复用
+    // 数量上限预检（先于文件 IO，与服务器 413 同源常量）：免得 501 张都 stat 完才在服务端被拒
+    if (srcs.length > MAX_IMAGE_REFS) {
+        throw new Error(`文档图片引用超过上限 ${MAX_IMAGE_REFS}，请拆分文档`);
+    }
+    for (const src of srcs) {
         const resolvedPath = resolveLocal(src);
         let st;
         try { st = await stat(resolvedPath); }

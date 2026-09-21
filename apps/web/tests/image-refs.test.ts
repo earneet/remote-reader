@@ -29,11 +29,18 @@ beforeEach(() => {
 
 const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const pngBytes = (seed: number): Buffer => Buffer.concat([PNG_MAGIC, Buffer.alloc(120, seed)]);
+// seed > 255 时 Buffer.alloc fill 取 mod 256 会撞 hash（600 行测试实测只产出 256 唯一值）——
+// 大规模种子用尾部写全序号字节保证唯一
+const uniqPng = (seed: number): Buffer =>
+    Buffer.concat([PNG_MAGIC, Buffer.alloc(118, 7), Buffer.of(seed & 0xff, (seed >>> 8) & 0xff)]);
 const sha256 = (b: Buffer): string => createHash('sha256').update(b).digest('hex');
 const md5 = (b: Buffer): string => createHash('md5').update(b).digest('hex');
 
-// fire-and-forget 的 void promise（blob unlink 挂微任务）刷新后才可断言文件系统终态
-const flush = (): Promise<void> => new Promise((r) => setImmediate(r));
+// fire-and-forget 的 void promise（blob unlink 走线程池）沉降后再断言文件系统终态：
+// 全量联跑高负载下单轮 setImmediate 可能先于 fs 回调执行——多轮轮询（每轮含 poll 阶段）兜住
+const flush = async (): Promise<void> => {
+    for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r));
+};
 
 function mkUser(id: string): void {
     sqlite.exec(`INSERT INTO users (id, email, password_hash, role, created_at) VALUES ('${id}', '${id}@t.local', 'x', 'member', 0)`);
@@ -260,6 +267,26 @@ describe('runImageGcCycle（周期回收，spec §9.3）', () => {
         expect(r.danglingRefs).toBe(1);
         expect(r.pendingReaped).toBe(1);
         expect(imageRow(p)).toBeUndefined();
+    });
+
+    it('单轮清空：600 个超时 pending → 一轮全清（吞吐追平 init 产速，交叉审查 P1）', async () => {
+        mkUser('u1');
+        for (let i = 0; i < 600; i++) await mkPendingImage('u1', `p${i}.png`, uniqPng(i));
+        sqlite.exec(`UPDATE images SET created_at=0 WHERE status='pending'`);
+        const r = await runImageGcCycle();
+        await flush();
+        expect(r.pendingReaped).toBe(600);
+        expect(db.select().from(schema.images).where(eq(schema.images.status, 'pending')).all()).toHaveLength(0);
+    });
+
+    it('单轮清空：600 个超时无 refs ready → 一轮全软删', async () => {
+        mkUser('u1');
+        for (let i = 0; i < 600; i++) await mkReadyImage('u1', `r${i}.png`, uniqPng(i));
+        sqlite.exec(`UPDATE images SET ready_at=0 WHERE status='ready'`);
+        const r = await runImageGcCycle();
+        await flush();
+        expect(r.readyReaped).toBe(600);
+        expect(db.select().from(schema.images).where(eq(schema.images.status, 'ready')).all()).toHaveLength(0);
     });
 
     it('条件式：快照候选刚转 ready（created_at 超时但已转正）→ DELETE WHERE status=pending 0 行 → 行保留', async () => {

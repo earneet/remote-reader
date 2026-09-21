@@ -1,6 +1,11 @@
 import MarkdownIt from 'markdown-it';
 import { registerMathRules } from './markdown-math';
 
+// 单文档图片引用数量硬上限（上传 413 / 渲染整体降级 / 桥预检拦截三方共用）：
+// 5MB md 可含数十万互异图名——无上限时 resolveImages 每请求 O(N×|html|) 替换 + O(N) 同步
+// SQLite 查询，免登录查看页单请求即可阻塞事件循环分钟级（交叉审查 P0 DoS）
+export const MAX_IMAGE_REFS = 500;
+
 // 图片引用名提取的单一事实源（spec P1-3）：桥预检（Phase 4）、Web 上传时声明式 refs 登记、
 // Web 渲染 names[] 收集（Phase 3）三方强制共用——任何私有实现都会造成 refs 漂移 → 活图被 24h GC。
 // math 规则必须注册：与 web 渲染实例同构，否则 $...$ 内图片被多提取（渲染端不渲染它）。

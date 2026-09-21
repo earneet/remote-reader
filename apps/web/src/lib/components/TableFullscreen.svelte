@@ -1,17 +1,18 @@
 <script lang="ts">
-    import { clampZoom, nextZoom, formatZoom, ZOOM_STEP } from '$lib/shared/zoom';
+    import { clampZoom, nextZoom, formatZoom, ZOOM_STEP, ZOOM_WHEEL_FACTOR } from '$lib/shared/zoom';
     import { overlayOnMount } from '$lib/shared/overlay-mount';
     import { overlayGestures } from '$lib/shared/overlay-gestures';
     import type { GestureOpts } from '$lib/shared/overlay-gestures';
     import { trapTabKey } from '$lib/shared/focus-trap';
+    import { browserFullscreen, type BrowserFullscreenCtl } from '$lib/shared/browser-fullscreen';
 
     let { container, html }: { container: HTMLDivElement | undefined; html: string } = $props();
 
     let fs = $state<{ html: string } | null>(null);
     let zoom = $state(1);
-    let browserFs = $state(false);
-    let overlayEl: HTMLDivElement | undefined = $state(undefined);
     let rotated = $state(false);
+    // 挂载时由 use:browserFullscreen 装入实现（组件侧零全屏状态）
+    let fsCtl: BrowserFullscreenCtl = { toggle: () => {}, exit: () => {} };
 
     // 横屏展示：设备竖屏(portrait)时把表格旋转 90° 铺满屏幕长边；设备已横屏(landscape)则不转，避免反向旋转。
     // 用户点 ⛶ 进 overlay 时按当前方向决定；之后旋转设备会触发 orientationchange 自动同步。
@@ -35,32 +36,12 @@
     function openFullscreen(tableHtml: string) {
         fs = { html: tableHtml };
         zoom = 1;
-        browserFs = false;
         syncRotation();
     }
 
     function closeOverlay() {
-        if (document.fullscreenElement) document.exitFullscreen()?.catch(() => {});
-        browserFs = false;
+        fsCtl.exit();
         fs = null;
-    }
-
-    function toggleFs() {
-        browserFs = !browserFs;
-        const el = overlayEl;
-        // 旧 WebKit（<16.4）requestFullscreen 存在但返回 undefined——变量中转再 ?.catch 防 TypeError
-        if (browserFs) {
-            const p = el?.requestFullscreen?.();
-            p?.catch(() => {});
-        }
-        else if (document.fullscreenElement) {
-            const p2 = document.exitFullscreen?.();
-            p2?.catch(() => {});
-        }
-    }
-
-    function onFsChange() {
-        browserFs = !!document.fullscreenElement;
     }
 
     // 手势快照：pinch 基准式（onPinchStart 快照 → onZoom 里 zoomStart * factor）；
@@ -69,7 +50,7 @@
     const gesturesOpts: GestureOpts = {
         onPinchStart: () => { pinchZoomStart = zoom; },
         onZoom: (factor) => { zoom = clampZoom(pinchZoomStart * factor); },
-        onWheelZoom: (deltaY) => { zoom = clampZoom(zoom - deltaY * 0.0015); },
+        onWheelZoom: (deltaY) => { zoom = clampZoom(zoom - deltaY * ZOOM_WHEEL_FACTOR); },
         wheelRequiresCtrl: true
     };
 
@@ -192,10 +173,8 @@
         const mq = window.matchMedia('(orientation: landscape)');
         const onOrient = () => syncRotation();
         mq.addEventListener('change', onOrient);
-        document.addEventListener('fullscreenchange', onFsChange);
         return () => {
             mq.removeEventListener('change', onOrient);
-            document.removeEventListener('fullscreenchange', onFsChange);
         };
     });
 </script>
@@ -203,12 +182,11 @@
 {#if fs}
     <div
         class="rr-tbl-overlay"
-        class:rr-fs={browserFs}
-        bind:this={overlayEl}
         role="dialog"
         aria-modal="true"
         tabindex="-1"
         use:overlayOnMount
+        use:browserFullscreen={fsCtl}
         onclick={(e) => { if (e.target === e.currentTarget) closeOverlay(); }}
         onkeydown={(e) => {
             if (e.key === 'Escape') closeOverlay();
@@ -221,7 +199,7 @@
                 <button type="button" title="缩小" onclick={() => (zoom = nextZoom(zoom, -ZOOM_STEP))}>−</button>
                 <button type="button" title="重置" onclick={() => (zoom = 1)}>⊙</button>
                 <button type="button" title="放大" onclick={() => (zoom = nextZoom(zoom, ZOOM_STEP))}>+</button>
-                <button type="button" title="全屏" onclick={toggleFs}>⛶</button>
+                <button type="button" title="全屏" onclick={() => fsCtl.toggle()}>⛶</button>
                 <button type="button" title="关闭" onclick={closeOverlay}>✕</button>
             </div>
         </div>
@@ -289,9 +267,10 @@
         background: var(--rr-inline-code-bg); color: var(--rr-inline-code-text);
         padding: 0.15em 0.35em; border-radius: 4px;
     }
-    .rr-tbl-overlay.rr-fs .rr-tbl-bar {
+    /* 全屏 class 由 use:browserFullscreen 运行时添加（模板静态分析不可见）→ 选择器须 :global */
+    :global(.rr-tbl-overlay.rr-fs .rr-tbl-bar) {
         position: absolute; top: 8px; right: 8px; z-index: 10;
         background: transparent; border: none;
     }
-    .rr-tbl-overlay.rr-fs .rr-tbl-label { display: none; }
+    :global(.rr-tbl-overlay.rr-fs .rr-tbl-label) { display: none; }
 </style>

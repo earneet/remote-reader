@@ -1,18 +1,29 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import { db, schema, sqlite } from '$server/db';
 import { resetDb } from './helpers';
 import { initImage, type InitImageResult } from '$server/images';
 import { eq } from 'drizzle-orm';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+
+const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'rr-imginit-'));
+process.env.DATA_DIR = DIR;
+afterAll(() => { delete process.env.DATA_DIR; fs.rmSync(DIR, { recursive: true, force: true }); });
 
 beforeEach(() => resetDb());
 
 function mkUser(id: string): void {
     sqlite.exec(`INSERT INTO users (id, email, password_hash, role, created_at) VALUES ('${id}', '${id}@t.local', 'x', 'member', 0)`);
 }
+// exists 分支会 head 探测 blob（自愈）——种子行必须落真实 blob 才是健康 ready 态
 function mkReadyImage(ownerId: string, name: string, hash: string): string {
     const id = `img-${hash.slice(0, 8)}`;
+    const key = `${ownerId}/blobs/${hash.slice(0, 2)}/${hash}`;
+    fs.mkdirSync(path.dirname(path.join(DIR, ...key.split('/'))), { recursive: true });
+    fs.writeFileSync(path.join(DIR, ...key.split('/')), Buffer.alloc(10, 1));
     sqlite.exec(`INSERT INTO images (id, owner_id, name, content_hash, content_md5, mime_type, size_bytes, status, storage_backend, storage_key, created_at, ready_at)
-        VALUES ('${id}', '${ownerId}', '${name}', '${hash}', '${'m'.repeat(32)}', 'image/png', 10, 'ready', 'local', '${ownerId}/blobs/${hash.slice(0, 2)}/${hash}', 0, 0)`);
+        VALUES ('${id}', '${ownerId}', '${name}', '${hash}', '${'m'.repeat(32)}', 'image/png', 10, 'ready', 'local', '${key}', 0, 0)`);
     return id;
 }
 
@@ -64,6 +75,24 @@ describe('initImage 四分支（spec §5.1）', () => {
         sqlite.exec(`UPDATE images SET status='deleted' WHERE id='${id}'`);
         const r = await initImage('u1', { name: 'fresh.png', contentHash: '9'.repeat(64), contentMd5: '8'.repeat(32), sizeBytes: 7 });
         expect(r.name).toBe('fresh.png');
+    });
+    it('并发复活同一墓碑：两 init Promise.all 同 (owner,hash) → 单行 + 共享 imageId + 状态一致', async () => {
+        // 交叉审查 D P2-6：条件 UPDATE status='deleted' 只允许一路复活成功（revived 0 行 → continue 重查），
+        // 迟到一路必落在 pending 行上复用同一 imageId——不得插第二行或留下状态漂移
+        mkUser('u1');
+        const id = mkReadyImage('u1', 'race.png', '5'.repeat(64));
+        sqlite.exec(`UPDATE images SET status='deleted' WHERE id='${id}'`);
+        const [a, b] = await Promise.all([
+            initImage('u1', { name: 'race.png', contentHash: '5'.repeat(64), contentMd5: '4'.repeat(32), sizeBytes: 7 }),
+            initImage('u1', { name: 'race.png', contentHash: '5'.repeat(64), contentMd5: '4'.repeat(32), sizeBytes: 7 })
+        ]);
+        expect(a.status).toBe('relay');
+        expect(b.status).toBe('relay');
+        expect(idOf(b)).toBe(idOf(a));
+        const rows = db.select().from(schema.images).where(eq(schema.images.ownerId, 'u1')).all();
+        expect(rows).toHaveLength(1);
+        expect(rows[0]?.status).toBe('pending');
+        expect(rows[0]?.name).toBe('race.png');
     });
     it('同名不同内容：自动后缀 -2..-N（精确探测，跨墓碑也占位）', async () => {
         mkUser('u1');

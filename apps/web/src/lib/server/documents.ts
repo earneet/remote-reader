@@ -10,7 +10,7 @@ import { getObjectStore, objectKeyFor, ObjectNotFoundError, ArchiveUnavailableEr
 import { createShareLink, activeShareOf } from './shares';
 import { getBaseUrl, getDataDir } from './env';
 import { indexDoc, unindexDocs } from './fts';
-import { registerDocumentRefs, snapshotRefsForDocuments, gcImagesIfUnreferenced } from './image-refs';
+import { registerDocumentRefs, snapshotRefsForDocuments, gcImagesIfUnreferenced, assertImageRefsWithinLimit } from './image-refs';
 import type { RecentSort, RecentDoc } from '../shared/recent';
 
 type DocumentRow = typeof schema.documents.$inferSelect;
@@ -247,6 +247,8 @@ export async function uploadDocument(
     content: string,
     pathSegments: string[]
 ): Promise<{ id: string; url: string }> {
+    // 图片引用数量上限（交叉审查 P0）：置于所有盘/库副作用之前——原子拒绝，且新建/覆盖/幂等三分支统一拦截
+    assertImageRefsWithinLimit(content);
     let parentId = ensureFolder(ownerId, pathSegments);
     if (findNode(ownerId, parentId, name, 'folder')) {
         throw new NameConflictError(`"${name}" 与同名文件夹冲突`);

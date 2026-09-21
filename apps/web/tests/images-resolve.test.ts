@@ -287,6 +287,34 @@ describe('refs 惰性补录接线（lazyRegisterRefs）', () => {
     });
 });
 
+describe('图片引用超上限整体降级（交叉审查 P0：免登录渲染 DoS 防御）', () => {
+    const HASH = 'a'.repeat(64);
+    const ownerCtx = { kind: 'owner', ownerId: 'u1', docId: 'd1', contentHash: HASH } as const;
+
+    it('names 501 → 单趟整体降级：全部 img 标签吃成统一 span，无 %%RR 残留、无 <img 泄漏', async () => {
+        mkUser('u1');
+        mkDoc('d1', 'u1');
+        const html = `<p>pre</p>\n<img src="%%RR:IMG:aaaaaaaa:0%%" alt="i0">\n<img src="%%RR:IMG:aaaaaaaa:1%%" alt="i1">\n<p>post</p>`;
+        const names = Array.from({ length: 501 }, (_, i) => `i${i}.png`);
+        const out = await resolveImages(html, names, ownerCtx);
+        expect(out).not.toContain('<img');
+        expect(out).not.toContain('%%RR');
+        expect(out).toContain('pre');
+        expect(out).toContain('post');
+        expect((out.match(/超过上限/g) ?? []).length).toBe(2); // 每个占位符一个降级 span
+    });
+
+    it('names 500（恰好上限）→ 不降级：走正常裂图轨道（图片不存在 span）', async () => {
+        mkUser('u1');
+        mkDoc('d1', 'u1');
+        const html = `<img src="%%RR:IMG:aaaaaaaa:0%%" alt="i0">`;
+        const names = Array.from({ length: 500 }, (_, i) => `i${i}.png`);
+        const out = await resolveImages(html, names, ownerCtx);
+        expect(out).toContain('图片不存在或未就绪');
+        expect(out).not.toContain('超过上限');
+    });
+});
+
 describe('替换完整性与防冲突', () => {
     it('混合 md（代理 + 裂图）→ 无 %%RR:IMG 残留；<img 计数 = 成功图数（裂图零残段）', async () => {
         mkUser('u1');

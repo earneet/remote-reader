@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto';
+import { error } from '@sveltejs/kit';
 import { and, eq, ne } from 'drizzle-orm';
 import { db, schema } from './db';
 import { generateId } from './auth';
 import { getBlobStore, getActiveImageStore } from './blobstore';
 import { getMaxImageBytes } from './env';
-import { sanitizeImageName, detectImageMime } from '@remote-reader/shared/image-mime';
-import { ObjectNotFoundError } from './object-store';
+import { sanitizeImageName, detectImageMime, extsForMime } from '@remote-reader/shared/image-mime';
+import { ObjectNotFoundError, ArchiveUnavailableError } from './object-store';
 
 const HEX64 = /^[0-9a-f]{64}$/;
 const HEX32 = /^[0-9a-f]{32}$/;
@@ -68,7 +69,24 @@ export async function initImage(ownerId: string, input: InitImageInput): Promise
         if (attempt >= 4) throw new ImageInputError('init 并发冲突重试次数超限，请重试', 409);
         const byHash = db.select().from(schema.images)
             .where(and(eq(schema.images.ownerId, ownerId), eq(schema.images.contentHash, input.contentHash))).get();
-        if (byHash?.status === 'ready') return { status: 'exists', name: byHash.name };
+        if (byHash?.status === 'ready') {
+            // blob 丢失自愈（交叉审查 P1）：行 ready 但物理 blob 不在（磁盘损坏/误删）时若仍报 exists，
+            // 重传永远命中 exists → 裂图永续。head 探测丢失 → 降级墓碑（复用 GC 软删语义）→ continue
+            // 走复活重传。上传路径非渲染热路径，每图一次 head 可接受；探测自身故障（不可达）不阻断幂等快路径。
+            const store = getBlobStore(byHash.storageBackend);
+            if (store?.head) {
+                try {
+                    await store.head(byHash.storageKey);
+                } catch (e) {
+                    if (e instanceof ObjectNotFoundError) {
+                        db.update(schema.images).set({ status: 'deleted' })
+                            .where(and(eq(schema.images.id, byHash.id), eq(schema.images.status, 'ready'))).run();
+                        continue;
+                    }
+                }
+            }
+            return { status: 'exists', name: byHash.name };
+        }
         if (byHash && (byHash.status === 'pending' || byHash.status === 'deleted')) {
             const rowId = byHash.id;
             if (byHash.status === 'deleted') {
@@ -133,10 +151,7 @@ export async function relayImage(ownerId: string, imageId: string, data: Buffer)
         return { ok: false, reason: 'invalid', message: isSvg ? '不支持的图片格式（SVG 可携脚本，安全考虑不支持；支持 png/jpeg/gif/webp）' : '无法识别的图片格式（支持 png/jpeg/gif/webp）' };
     }
     const ext = row.name.split('.').pop()?.toLowerCase() ?? '';
-    const allowedExts: Record<string, string[]> = {
-        'image/png': ['png'], 'image/jpeg': ['jpg', 'jpeg'], 'image/gif': ['gif'], 'image/webp': ['webp']
-    };
-    if (!(allowedExts[mime] ?? []).includes(ext)) {
+    if (!extsForMime(mime).includes(ext)) {
         return { ok: false, reason: 'invalid', message: `扩展名 .${ext} 与实际格式 ${mime} 不一致，请改名重传` };
     }
     const store = getBlobStore(row.storageBackend);
@@ -173,6 +188,12 @@ export async function confirmImage(ownerId: string, imageId: string): Promise<Co
     const head32 = await store.getRange(row.storageKey, 0, 31);
     const mime = detectImageMime(head32);
     if (mime === null) return { ok: false, reason: 'invalid', message: '对象内容非支持图片格式' };
+    // 扩展名一致（spec §5.3/§11 与 relay 双重承诺）：direct 通道 PUT 的字节格式须与 init 名字匹配；
+    // 不删云对象（行 pending 可重传覆盖），无 refs 悬挂由 GC 兜底回收
+    const ext = row.name.split('.').pop()?.toLowerCase() ?? '';
+    if (!extsForMime(mime).includes(ext)) {
+        return { ok: false, reason: 'invalid', message: `扩展名 .${ext} 与实际格式 ${mime} 不一致，请改名重传` };
+    }
     if (head.etag !== undefined && head.etag !== row.contentMd5) {
         try { await store.delete(row.storageKey); } catch { /* 留孤儿，无害 */ }
         return { ok: false, reason: 'invalid', message: '内容 md5 与 init 报称不符（ETag 校验失败）' };
@@ -196,4 +217,43 @@ export function resolveImageByName(ownerId: string, name: string): { id: string;
     }).from(schema.images)
         .where(and(eq(schema.images.ownerId, ownerId), eq(schema.images.name, name), eq(schema.images.status, 'ready')))
         .get() ?? null;
+}
+
+/** 图片代理响应（/s/[token]/i/[name] 与 /d/[id]/i/[name] 的公共段，调用方只负责各自鉴权）：
+ *  refs 白名单（spec #8：该 md 必须引用此图——share token 不能枚举 owner 其他图）→
+ *  no-cache 协商（spec #26：ETag=content_hash，If-None-Match 命中 → 304 无 body，头在 Response 上）→
+ *  取字节 → 错误三分类（blob 缺失 404 / 后端未注册 503 / 存储不可达 503）。 */
+export async function serveImageResponse({ request, setHeaders, ownerId, documentId, name }: {
+    request: Request;
+    setHeaders: (headers: Record<string, string>) => void;
+    ownerId: string;
+    documentId: string;
+    name: string;
+}): Promise<Response> {
+    const img = resolveImageByName(ownerId, name);
+    if (!img) error(404, 'Not Found');
+    const refed = db.select({ x: schema.imageRefs.documentId }).from(schema.imageRefs)
+        .where(eq(schema.imageRefs.imageId, img.id)).all().some((r) => r.x === documentId);
+    if (!refed) error(404, 'Not Found');
+    const etag = `"${img.contentHash}"`;
+    if (request.headers.get('if-none-match') === etag) {
+        return new Response(null, { status: 304, headers: { ETag: etag, 'Cache-Control': 'no-cache' } });
+    }
+    const store = getBlobStore(img.storageBackend);
+    if (!store) error(503, 'image backend unavailable');
+    let data: Buffer;
+    try {
+        data = await store.get(img.storageKey);
+    } catch (e) {
+        if (e instanceof ObjectNotFoundError) error(404, 'Not Found');
+        if (e instanceof ArchiveUnavailableError) error(503, 'image storage unreachable');
+        throw e;
+    }
+    setHeaders({
+        'Content-Type': img.mimeType,
+        'X-Content-Type-Options': 'nosniff',
+        'Cache-Control': 'no-cache',
+        ETag: etag
+    });
+    return new Response(new Uint8Array(data));
 }

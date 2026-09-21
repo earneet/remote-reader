@@ -1,7 +1,21 @@
-import { and, eq, inArray, lt, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, lt, sql } from 'drizzle-orm';
 import { db, schema } from './db';
 import { getBlobStore } from './blobstore';
-import { extractImageNames } from '@remote-reader/shared/image-extract';
+import { extractImageNames, MAX_IMAGE_REFS } from '@remote-reader/shared/image-extract';
+
+// 上传侧图片引用数量超限（路由层 → 413；语义同 ImageInputError 的 size 超限档）
+export class TooManyImageRefsError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = 'TooManyImageRefsError';
+    }
+}
+
+export function assertImageRefsWithinLimit(content: string): void {
+    if (extractImageNames(content).length > MAX_IMAGE_REFS) {
+        throw new TooManyImageRefsError(`文档图片引用超过上限 ${MAX_IMAGE_REFS}，请拆分文档`);
+    }
+}
 
 /** 声明式登记（文档创建/覆盖统一入口，R1 集合差原子重算，spec §9.2）。
  *  绝不允许"先删后判再插"的分步序列——不变量 R1。 */
@@ -90,47 +104,66 @@ export function snapshotRefsForDocuments(docIds: string[]): string[] {
 }
 
 /** 周期回收（tiering tick 挂载，spec §9.3 触发三 + P1-2：无对象存储也必须运行）。
- *  分批 LIMIT；全部条件式；删 blob 反查。返回处理的行数（日志用）。 */
+ *  分批 LIMIT 循环至清空（单轮单段上限 CYCLE_LIMIT，防长事务占事件循环——better-sqlite3 同步
+ *  无让出点；回收吞吐须追平 init 产速，否则恶意/高峰 init 零成本产行快过回收，行无限堆积）；
+ *  全部条件式；删 blob 反查。返回处理的行数（日志用）。 */
 export async function runImageGcCycle(): Promise<{ pendingReaped: number; readyReaped: number; danglingRefs: number }> {
     const now = Date.now();
-    const BATCH = 200;
+    const BATCH = 500;
+    const CYCLE_LIMIT = 10_000;
     // 0) 悬空 ref 清理【必须最先跑——P1-3】：image_refs.image_id FK 是 ON DELETE no action 且
     //    pragma foreign_keys=ON——若悬空 ref 指向某 pending 行（防御对象正是这种历史坏态），
     //    后续物理删行会抛 SQLITE_CONSTRAINT_FOREIGNKEY 且中断整轮 GC；清理放在删除之前，
     //    收敛器才不会在坏态面前自杀
     const danglingRefs = sqlite_exec_dangling_cleanup();
     // 1) pending 超 1h：物理删行（条件式）+ 反查删 blob
-    const stalePending = db.select({ id: schema.images.id }).from(schema.images)
-        .where(and(eq(schema.images.status, 'pending'), lt(schema.images.createdAt, now - 3_600_000)))
-        .limit(BATCH).all();
     let pendingReaped = 0;
-    for (const p of stalePending) {
-        const row = db.select({ storageBackend: schema.images.storageBackend, storageKey: schema.images.storageKey })
-            .from(schema.images).where(eq(schema.images.id, p.id)).get();
-        const deleted = db.delete(schema.images)
-            .where(and(eq(schema.images.id, p.id), eq(schema.images.status, 'pending'))).run().changes > 0;
-        if (deleted) { pendingReaped++; if (row) void deleteBlobIfOrphaned(row.storageBackend, row.storageKey); }
+    let pendingScanned = 0;
+    while (pendingScanned < CYCLE_LIMIT) {
+        const stalePending = db.select({ id: schema.images.id }).from(schema.images)
+            .where(and(eq(schema.images.status, 'pending'), lt(schema.images.createdAt, now - 3_600_000)))
+            // ORDER BY 主键：批间确定性分页——无序 LIMIT 在批间 DELETE 后扫描位置漂移会跳行
+            .orderBy(asc(schema.images.id))
+            .limit(Math.min(BATCH, CYCLE_LIMIT - pendingScanned)).all();
+        if (stalePending.length === 0) break;
+        let reapedInBatch = 0;
+        for (const p of stalePending) {
+            const row = db.select({ storageBackend: schema.images.storageBackend, storageKey: schema.images.storageKey })
+                .from(schema.images).where(eq(schema.images.id, p.id)).get();
+            const deleted = db.delete(schema.images)
+                .where(and(eq(schema.images.id, p.id), eq(schema.images.status, 'pending'))).run().changes > 0;
+            if (deleted) { pendingReaped++; reapedInBatch++; if (row) void deleteBlobIfOrphaned(row.storageBackend, row.storageKey); }
+        }
+        pendingScanned += stalePending.length;
+        if (reapedInBatch === 0) break; // 防自旋：批内全被条件式拦下（单线程同步下理论不可达）
     }
     // 2) ready 无 refs 超 24h：软删墓碑 + 反查删 blob
-    const staleReady = db.select({ id: schema.images.id }).from(schema.images)
-        .where(and(eq(schema.images.status, 'ready'), lt(schema.images.readyAt, now - 24 * 3_600_000)))
-        .limit(BATCH).all();
     let readyReaped = 0;
-    const candidateIds = staleReady.map((r) => r.id);
-    if (candidateIds.length > 0) {
+    let readyScanned = 0;
+    while (readyScanned < CYCLE_LIMIT) {
+        const staleReady = db.select({ id: schema.images.id }).from(schema.images)
+            .where(and(eq(schema.images.status, 'ready'), lt(schema.images.readyAt, now - 24 * 3_600_000)))
+            .orderBy(asc(schema.images.id)) // 同上：批间确定性分页
+            .limit(Math.min(BATCH, CYCLE_LIMIT - readyScanned)).all();
+        if (staleReady.length === 0) break;
+        const candidateIds = staleReady.map((r) => r.id);
         const refed = new Set(db.select({ imageId: schema.imageRefs.imageId }).from(schema.imageRefs)
             .where(inArray(schema.imageRefs.imageId, candidateIds)).all().map((r) => r.imageId));
+        let reapedInBatch = 0;
         for (const id of candidateIds) {
             if (refed.has(id)) continue;
             const flipped = db.update(schema.images).set({ status: 'deleted' })
                 .where(and(eq(schema.images.id, id), eq(schema.images.status, 'ready'))).run().changes > 0;
             if (flipped) {
                 readyReaped++;
+                reapedInBatch++;
                 const r = db.select({ storageBackend: schema.images.storageBackend, storageKey: schema.images.storageKey })
                     .from(schema.images).where(eq(schema.images.id, id)).get();
                 if (r) void deleteBlobIfOrphaned(r.storageBackend, r.storageKey);
             }
         }
+        readyScanned += staleReady.length;
+        if (reapedInBatch === 0) break; // 批内全被 refs 挡住（无新可收行）→ 留给下轮，防对同批行自旋
     }
     return { pendingReaped, readyReaped, danglingRefs };
 }

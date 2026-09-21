@@ -7,8 +7,9 @@ import { S3BlobStore } from './blobstore-s3';
 // 契约：插件只认 key 与字节——mime/size/hash 等元数据全在 DB 行，存储层不理解内容。
 // 演进纪律（#27）：只能加可选成员，禁止加必选、禁止删改既有签名；能力用运行时探测（if (store.presign)）。
 // key 由核心分配传入：local '<ownerId>/blobs/<h2>/<hash>' / s3 'images/<ownerId>/<hash>'（per-owner 内容寻址）。
-// ⚠️ 依赖方向约束：blobstore-local.ts / blobstore-s3.ts 对本文件必须 `import type`（type-only）——
-//    值导入会形成 blobstore → blobstore-s3 → blobstore 运行时循环。
+// ⚠️ 依赖方向约束（单向，无运行时环）：插件实现对 blobstore.ts / object-store.ts 只能 `import type`；
+//    存储错误类与 mapGetError 统一在 object-store-errors.ts（叶子模块）——插件值导入它不构成环。
+//    运行时链：object-store → object-store-s3 → blobstore-s3 → object-store-errors。
 export interface BlobStore {
     readonly id: string;
     /** presigned PUT URL 的建议有效期（秒）；慢后端可自声明更长。默认 600 */

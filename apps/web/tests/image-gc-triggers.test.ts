@@ -31,8 +31,11 @@ const pngBytes = (seed: number): Buffer => Buffer.concat([PNG_MAGIC, Buffer.allo
 const sha256 = (b: Buffer): string => createHash('sha256').update(b).digest('hex');
 const md5 = (b: Buffer): string => createHash('md5').update(b).digest('hex');
 
-// fire-and-forget 的 void promise（refs 事务后的 GC / blob unlink 挂微任务）刷新后再断言文件系统终态
-const flush = (): Promise<void> => new Promise((r) => setImmediate(r));
+// fire-and-forget 的 void promise（refs 事务后的 GC / blob unlink 走线程池）沉降后再断言文件系统终态：
+// 全量联跑高负载下单轮 setImmediate 可能先于 fs 回调执行——多轮轮询（每轮含 poll 阶段）兜住
+const flush = async (): Promise<void> => {
+    for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r));
+};
 
 function mkUser(id: string): void {
     sqlite.exec(`INSERT INTO users (id, email, password_hash, role, created_at) VALUES ('${id}', '${id}@t.local', 'x', 'member', 0)`);

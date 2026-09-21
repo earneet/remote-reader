@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { detectImageMime, expectedExtFor, sanitizeImageName, SUPPORTED_IMAGE_EXTS } from './image-mime';
+import { detectImageMime, extsForMime, sanitizeImageName } from './image-mime';
 
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2]);
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2]);
@@ -17,9 +17,11 @@ describe('image-mime', () => {
         expect(detectImageMime(Buffer.from('<svg>'))).toBeNull();
         expect(detectImageMime(Buffer.alloc(2))).toBeNull();
     });
-    it('扩展名映射与清单', () => {
-        expect(expectedExtFor('image/png')).toBe('png');
-        expect([...SUPPORTED_IMAGE_EXTS].sort()).toEqual(['gif', 'jpeg', 'jpg', 'png', 'webp']);
+    it('extsForMime：mime → 合法扩展名（jpeg 双写法）', () => {
+        expect(extsForMime('image/png')).toEqual(['png']);
+        expect(extsForMime('image/jpeg')).toEqual(['jpg', 'jpeg']);
+        expect(extsForMime('image/gif')).toEqual(['gif']);
+        expect(extsForMime('image/webp')).toEqual(['webp']);
     });
     it('sanitize：空格→连字符，其余保留', () => {
         expect(sanitizeImageName('my shot 1.png')).toBe('my-shot-1.png');

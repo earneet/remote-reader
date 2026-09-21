@@ -1,15 +1,17 @@
 <script lang="ts">
     import { onMount } from 'svelte';
-    import { nextZoom, formatZoom, ZOOM_STEP, clampZoom } from '$lib/shared/zoom';
+    import { nextZoom, formatZoom, ZOOM_STEP, clampZoom, ZOOM_WHEEL_FACTOR } from '$lib/shared/zoom';
     import { overlayOnMount } from '$lib/shared/overlay-mount';
     import { overlayGestures } from '$lib/shared/overlay-gestures';
     import type { GestureOpts } from '$lib/shared/overlay-gestures';
     import { trapTabKey } from '$lib/shared/focus-trap';
+    import { browserFullscreen, type BrowserFullscreenCtl } from '$lib/shared/browser-fullscreen';
 
     let { container, html }: { container: HTMLDivElement | undefined; html: string } = $props();
 
     let fullscreen = $state<{ svg: string; zoom: number; x: number; y: number } | null>(null);
-    let browserFs = $state(false);
+    // 挂载时由 use:browserFullscreen 装入实现（组件侧零全屏状态）
+    let fsCtl: BrowserFullscreenCtl = { toggle: () => {}, exit: () => {} };
     let themeObserver: MutationObserver | null = null;
 
     function currentTheme(): 'light' | 'dark' {
@@ -100,31 +102,8 @@
         fullscreen.y = 0;
     }
 
-    function fsToggleBrowserFullscreen(): void {
-        // 用 class 驱动视觉全屏（跨平台，iOS 无 Fullscreen API 也生效）；
-        // 同时尝试 requestFullscreen 让桌面/Android 隐藏浏览器 UI。
-        // 返回值经变量中转再 ?.catch：旧 WebKit（<16.4）方法存在但返回 undefined，
-        // 直接链 .catch 会抛 TypeError
-        browserFs = !browserFs;
-        const el = document.querySelector('.rr-mermaid-overlay');
-        if (browserFs) {
-            const p = el?.requestFullscreen?.();
-            p?.catch(() => {
-                // 不支持（iOS 等）：browserFs 已 true，靠 CSS class 模拟全屏布局
-            });
-        } else if (document.fullscreenElement) {
-            const p2 = document.exitFullscreen?.();
-            p2?.catch(() => {});
-        }
-    }
-
     function onKey(e: KeyboardEvent): void {
         if (e.key === 'Escape' && fullscreen) fullscreen = null;
-    }
-
-    // 浏览器退出全屏（Esc）时同步 class 状态
-    function onFsChange(): void {
-        browserFs = !!document.fullscreenElement;
     }
 
     // 手势快照（overlay-gestures 上报增量/累计比，消费方组合绝对值）：
@@ -152,7 +131,7 @@
         },
         onWheelZoom: (deltaY) => {
             if (!fullscreen) return;
-            fullscreen.zoom = clampZoom(fullscreen.zoom - deltaY * 0.0015);
+            fullscreen.zoom = clampZoom(fullscreen.zoom - deltaY * ZOOM_WHEEL_FACTOR);
         }
     };
 
@@ -165,11 +144,9 @@
             attributeFilter: ['data-theme']
         });
         window.addEventListener('keydown', onKey);
-        document.addEventListener('fullscreenchange', onFsChange);
         return () => {
             themeObserver?.disconnect();
             window.removeEventListener('keydown', onKey);
-            document.removeEventListener('fullscreenchange', onFsChange);
         };
     });
 </script>
@@ -177,11 +154,11 @@
 {#if fullscreen}
     <div
         class="rr-mermaid-overlay"
-        class:rr-fs={browserFs}
         role="dialog"
         aria-modal="true"
         tabindex="-1"
         use:overlayOnMount
+        use:browserFullscreen={fsCtl}
         onclick={(e) => {
             if (e.target === e.currentTarget) fullscreen = null;
         }}
@@ -198,7 +175,7 @@
                     <button type="button" class="rr-mermaid-btn" onclick={() => fsZoom(-ZOOM_STEP)} title="缩小">−</button>
                     <button type="button" class="rr-mermaid-btn" onclick={() => fsReset()} title="重置 100%">⊙</button>
                     <button type="button" class="rr-mermaid-btn" onclick={() => fsZoom(ZOOM_STEP)} title="放大">+</button>
-                    <button type="button" class="rr-mermaid-btn" onclick={() => fsToggleBrowserFullscreen()} title="全屏">⛶</button>
+                    <button type="button" class="rr-mermaid-btn" onclick={() => fsCtl.toggle()} title="全屏">⛶</button>
                     <button
                         type="button"
                         class="rr-mermaid-btn"
@@ -319,20 +296,21 @@
     }
 
     /* 全屏（⛶）：去标题栏、控件浮右上角、图表占满视口。
-       class 驱动（.rr-fs）跨平台，:fullscreen 兜底桌面/Android 浏览器全屏。 */
-    .rr-mermaid-overlay.rr-fs {
+       class 由 use:browserFullscreen 运行时添加（模板静态分析不可见）→ rr-fs 选择器须 :global，
+       :fullscreen 兜底桌面/Android 浏览器全屏。 */
+    :global(.rr-mermaid-overlay.rr-fs) {
         background: var(--rr-bg);
         padding: 0;
         align-items: stretch;
         justify-content: stretch;
     }
-    .rr-mermaid-overlay.rr-fs .rr-mermaid-overlay-inner {
+    :global(.rr-mermaid-overlay.rr-fs .rr-mermaid-overlay-inner) {
         max-width: none;
         max-height: none;
         border: none;
         border-radius: 0;
     }
-    .rr-mermaid-overlay.rr-fs .rr-mermaid-bar {
+    :global(.rr-mermaid-overlay.rr-fs .rr-mermaid-bar) {
         position: absolute;
         top: 8px;
         right: 8px;
@@ -341,15 +319,11 @@
         border: none;
         padding: 0;
     }
-    .rr-mermaid-overlay.rr-fs .rr-mermaid-label {
+    :global(.rr-mermaid-overlay.rr-fs .rr-mermaid-label) {
         display: none;
     }
-    .rr-mermaid-overlay.rr-fs .rr-mermaid-svg-wrap :global(svg) {
+    :global(.rr-mermaid-overlay.rr-fs .rr-mermaid-svg-wrap svg) {
         max-height: 100vh;
-    }
-    :global(.rr-mermaid-overlay.rr-fs) {
-        background: var(--rr-bg);
-        padding: 0;
     }
     :global(.rr-mermaid-overlay:fullscreen) {
         background: var(--rr-bg);

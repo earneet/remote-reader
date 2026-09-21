@@ -3,6 +3,7 @@ import type { RequestHandler } from './$types';
 import { authenticateApiToken } from '$server/apitoken-auth';
 import { checkRateLimit } from '$server/ratelimit';
 import { uploadDocument, NameConflictError } from '$server/documents';
+import { TooManyImageRefsError } from '$server/image-refs';
 import { parsePath } from '@remote-reader/shared/paths';
 import { envInt } from '$server/env';
 
@@ -62,6 +63,8 @@ export const POST: RequestHandler = async ({ request, getClientAddress }) => {
     } catch (e) {
         // P1-4：跨类型同名冲突 → 409（此前是 EISDIR/EEXIST 裸 500）
         if (e instanceof NameConflictError) error(409, e.message);
+        // 图片引用数量超限 → 413（与 content 超限同档语义）
+        if (e instanceof TooManyImageRefsError) error(413, e.message);
         throw e;
     }
     return json(result);
