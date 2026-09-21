@@ -1,11 +1,30 @@
 <script lang="ts">
     import MermaidViewer from '$components/MermaidViewer.svelte';
     import TableFullscreen from '$components/TableFullscreen.svelte';
+    import ImageLightbox from '$components/ImageLightbox.svelte';
     let { html }: { html: string } = $props();
     let container: HTMLDivElement | undefined = $state(undefined);
 
     $effect(() => {
         if (container && html) enhanceKatex(container);
+    });
+
+    // 正文图片点击 → 图集 lightbox（spec §10.2）：事件委托收集全部 <img>（不含 .rr-img-missing
+    // 裂图占位——它是 span 天然不命中 img 选择器）
+    let lightbox = $state<{ images: Array<{ src: string; alt: string }>; start: number } | null>(null);
+    $effect(() => {
+        const root = container;
+        if (!root) return;
+        const onClick = (e: Event): void => {
+            const img = e.target;
+            if (!(img instanceof HTMLImageElement)) return;
+            const all = Array.from(root.querySelectorAll<HTMLImageElement>('.markdown-body img, img'));
+            const list = all.map((el) => ({ src: el.getAttribute('src') ?? '', alt: el.alt }));
+            const i = all.indexOf(img);
+            if (i >= 0) lightbox = { images: list, start: i };
+        };
+        root.addEventListener('click', onClick);
+        return () => root.removeEventListener('click', onClick);
     });
 
     // 直连图客户端兜底（spec §7.5）：CDN 失败/签名过期的运行时错误 → 统一 rr-img-missing 占位（带原因 title）
@@ -53,6 +72,9 @@
 </div>
 <MermaidViewer {container} {html} />
 <TableFullscreen {container} {html} />
+{#if lightbox}
+    <ImageLightbox images={lightbox.images} start={lightbox.start} onClose={() => (lightbox = null)} />
+{/if}
 
 <style>
     @font-face {
@@ -193,6 +215,8 @@
     }
     .markdown-body :global(img) {
         max-width: 100%;
+        border-radius: 6px;
+        cursor: zoom-in;
     }
     .markdown-body :global(.rr-img-missing) {
         display: inline-block;

@@ -348,7 +348,12 @@ bun --filter remote-reader-web db:migrate    # 应用（生产在停服/维护�
 | `BASE_URL` | `http://localhost:5173` | 生成分享链接的外链前缀 |
 | `BRIDGE_REPO_URL` | `https://github.com/earneet/remote-reader` | 登录页 Agent 指引块展示的桥源码克隆地址（自定义 fork 时修改） |
 | `MAX_UPLOAD_BYTES` | `5242880`（5MB） | 单文档大小上限 |
-| `BODY_SIZE_LIMIT` | adapter-node 默认 512K | **字节数（数字）**，网关层 body 上限，须 > `MAX_UPLOAD_BYTES` |
+| `BODY_SIZE_LIMIT` | adapter-node 默认 512K | **字节数（数字）**，网关层 body 上限。生产启动校验（fail-fast）：须 ≥ **max**(`MAX_UPLOAD_BYTES`×1.5, `MAX_IMAGE_BYTES`×1.37×1.5)——图片 relay 的 body 是 base64（约原字节 ×1.37）再留 JSON 包装余量 |
+| `IMAGE_STORE_BACKEND` | `local` | 图片存储后端：`local`（DATA_DIR 下 blobs 目录，查看走 `/s/<token>/i/<name>` 免登录代理）/ `s3`（与冷热分层共用 `OBJECT_STORE_*` 五项配置，init 返回 presigned PUT 直传 CDN，查看走 presigned GET 直连） |
+| `MAX_IMAGE_BYTES` | `10485760`（10MB） | 单图大小上限（init 预检 + relay 实测双重校验） |
+| `IMAGE_SIGNED_URL_TTL` | `3600`（秒） | s3 后端 presigned 查看 URL 的最短有效期（桶对齐缓存复用，同桶内 URL 逐字节相同以命中浏览器缓存） |
+| `IMAGE_PROXY_ALL` | `0` | `1` = s3 后端也强制走服务端代理（不出站直连 CDN 的内网部署场景）；`local` 后端本就恒走代理 |
+| `IMAGES_META_RATE_LIMIT_MAX` | `120` | init/confirm 元数据端点独立轻桶（每 token，同 `RATE_LIMIT_WINDOW_MS` 窗口）；图片字节中转 relay 走 `RATE_LIMIT_MAX` 同额独立桶 |
 | `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW_MS` | `60` / `60000` | 每 token 上传速率 |
 | `LOGIN_RATE_LIMIT_MAX` | `10` | 每 (IP,邮箱) 精确桶登录尝试次数（同窗口） |
 | `LOGIN_IP_RATE_LIMIT_MAX` | `30` | 每 IP 聚合登录桶（防密码喷洒；反代部署须配 `ADDRESS_HEADER` 才按真实 IP 分桶） |

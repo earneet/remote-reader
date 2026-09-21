@@ -1,6 +1,6 @@
 # scripts/ · 自动化脚本
 
-五个脚本，对应五类任务：
+六个脚本，对应六类任务：
 
 | 脚本 | 用途 | 何时用 | 调用方 |
 |---|---|---|---|
@@ -8,7 +8,8 @@
 | [`uninstall.sh`](./uninstall.sh) | 一键卸载 systemd 服务（install 逆操作） | 停服 / 清代码 / 可选删数据 | 部署者（root） |
 | [`update.sh`](./update.sh) | 一键原地升级已部署服务（保留配置 + 数据） | 升级已部署的 systemd 实例 | 部署者（root） |
 | [`seed-token.mjs`](./seed-token.mjs) | 免 UI 为已存在用户生成 API token | 自动化初始化 / UI 不可用时 | 部署者 / 运维 |
-| [`e2e-check.sh`](./e2e-check.sh) | 端到端冒烟测试 | 升级后回归 / 验证部署是否正常 | 开发者 / CI |
+| [`e2e-check.sh`](./e2e-check.sh) | 端到端冒烟测试（含图片全链路） | 升级后回归 / 验证部署是否正常 | 开发者 / CI |
+| [`e2e-images.mjs`](./e2e-images.mjs) | ImageLightbox Playwright 验收（一次性脚本） | 改动 lightbox / 手势基建后手动回归 | 开发者 |
 
 ---
 
@@ -405,7 +406,7 @@ sudo DATABASE_PATH=/var/lib/remote-reader/app.db \
 
 ## e2e-check.sh · 端到端冒烟测试
 
-**用途**：在已起服务的环境（dev 或生产）跑一系列 curl，验证关键路径符合预期：上传、免登录查看、401/413/404、路径穿越防护、登录页 Agent 指引块、Agent 自助注册全链路。
+**用途**：在已起服务的环境（dev 或生产）跑一系列 curl，验证关键路径符合预期：上传、免登录查看、401/413/404、路径穿越防护、图片全链路、登录页 Agent 指引块、Agent 自助注册全链路。
 
 **用法**：
 
@@ -430,10 +431,35 @@ API_TOKEN=rr_xxx E2E_INVITE_CODE=<邀请码> BASE_URL=http://localhost:3000 ./sc
 - path 含 `../escape` → 400
 - name 单段 300B 超长 → 400（parsePath NAME_MAX 拦截）
 - 路径段撞同名文件（跨类型同名）→ 409 + message 透传
+- 图片全链路（重跑幂等，墓碑复活/pending 复用路径均覆盖）：
+  - `POST /api/v1/images/init` 新图 → `{status:"relay", name, imageId}`；relay 后同 hash 再 init → `{status:"exists"}`（内容寻址去重）
+  - `POST /api/v1/images` relay 真实 PNG（魔数 + sha256 字节绑定）→ `{name}`
+  - 带图 md 上传（content 用注册名裸引用）→ 查看页 SSR HTML 含 `/i/<name>` 代理 URL
+  - `GET /s/<token>/i/<name>` → 200 + `Content-Type: image/png` + 字节与原图逐字节一致
+  - 未注册图名 → 404（refs 白名单，防 share token 枚举）
+  - 覆盖上传无图版 → 代理 URL **立即** 404（gcImagesIfUnreferenced 软删墓碑同步完成；文档删除走 FM form action 无 API token 通道，覆盖 refs 重算触发同一同步 GC 不变量）
+  - SVG 字节 relay → 400 `status:"invalid"`；谎报 hash（init 报 A、relay 送 B 字节）→ 400 `status:"invalid"`
 - `GET /login` SSR HTML 含 `id="agent-guide"` 指引块
 - （提供 `E2E_INVITE_CODE` 时）`POST /api/v1/auth/register` → 200 + session cookie → `POST /api/v1/auth/api-token` 返回 token → 用新 token 上传 → 200
 
-成功输出：`✓ 端到端通过（上传→免登录查看→错误场景→agent-guide 指引块[→自助注册全链路]）`。
+成功输出：`✓ 端到端通过（上传→免登录查看→错误场景→图片全链路→agent-guide 指引块[→自助注册全链路]）`。
+
+---
+
+## e2e-images.mjs · ImageLightbox Playwright 验收（一次性手跑）
+
+**用途**：验收查看页图片 Lightbox 的完整交互（curl 冒烟测不到的客户端行为）。脚本自动上传两张 8×8 真实 PNG + 带图 md（内部手写最小 PNG 编码，无第三方依赖），然后逐项断言。**不进 CI**——改动 lightbox / 手势基建（`overlay-gestures.ts` / `zoom.ts` / `ImageLightbox.svelte`）后手动跑一轮。
+
+**前置**：dev server 已起 + API token；playwright 不在项目依赖内，经 `NODE_PATH` 指向任意含 playwright 的 node_modules（如 `bunx playwright` 的缓存目录）。
+
+```bash
+NODE_PATH=<含 playwright 的 node_modules> API_TOKEN=rr_xxx BASE_URL=http://localhost:5173 \
+    node scripts/e2e-images.mjs
+```
+
+**断言集**（11 项）：正文图渲染 → 点击开 lightbox（序号/工具栏）→ 滚轮缩放（100%→130%）→ >1x 拖动平移 → **pinch 合成双指事件（factor 基准式——断言 factor 3 → 300%，累积式错误实现会到 600%）** → Esc 关闭 → 点击第二张重开（start 索引）→ 双击 250% → ← 切图每图独立重置 → 全屏按钮 → 关闭按钮。重跑幂等（同 hash 图直接 exists 复用）。
+
+> 备注：脚本点击正文图前有 networkidle + 点击-验证-重试循环——`waitForSelector` 会被 SSR HTML 满足（不等 hydration），真实点击必须等事件委托挂载完成。
 
 ---
 

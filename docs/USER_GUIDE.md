@@ -153,7 +153,35 @@ claude mcp add remote-reader bun "$(pwd)/apps/mcp-bridge/src/index.ts" \
 
 > 调试：`npx @modelcontextprotocol/inspector bun apps/mcp-bridge/src/index.ts`，或 `bun apps/mcp-bridge/scripts/smoke-client.ts <url> <token>`（需 Web 应用在跑）。
 
-### 2.2 备选：直接调 HTTP API ✅
+### 2.2 带图文档：本地图片自动上传 ✅
+
+`content` 里的**本地图片引用**会被自动上传并改写，Agent 无需额外参数：
+
+```markdown
+# 周报
+![架构图](./assets/arch.png)   ← 相对路径按桥工作目录解析，自动上传
+![外链图](https://cdn.example.com/x.png) ← 外链不动，原样保留
+```
+
+**规则与限制**：
+
+- **路径解析**：`![alt](路径)` 中的相对路径按桥进程工作目录解析（含 Windows 盘符绝对路径）；外链（`http(s)://`）、`data:` URI、含 `/` `\` 的多段路径**不视为本地图**，原样保留。
+- **格式**：支持 png / jpeg / gif / webp（魔数检测，扩展名须与真实格式一致——`.png` 里装 JPEG 会被拒）。**SVG 不支持**（可携带脚本，安全考虑），改用 png/webp 导出。
+- **大小**：单图 ≤ `MAX_IMAGE_BYTES`（默认 10MB，init 预检 + relay 实测双重校验）；单文档建议 ≤50 张图（服务端限流约束，超量会被 429 限流）。
+- **去重与回收**：图片按 sha256 内容寻址，同字节的图全库只存一份（重传直接复用）；图片一旦不被任何文档引用即自动回收（覆盖更新去掉引用 / 删除文档后），无需手动清理。
+- **预检**：上传前一次性列出全部问题（文件不存在 / 格式不支持 / 超大），不会传一半才失败。
+
+走 MCP 桥时以上全自动；直接调 HTTP API 时需自行编排三端点：
+
+| 端点 | 作用 | 返回 |
+|---|---|---|
+| `POST /api/v1/images/init` | 按 `{name, content_hash, content_md5, size_bytes}` 登记/查询 | `{status:"relay"\|"exists"\|"direct", name, imageId?}` |
+| `POST /api/v1/images` | relay 中转字节 `{image_id, content_base64}`（hash 绑定校验） | `{name}` |
+| `POST /api/v1/images/confirm` | s3 直传后确认 `{image_id}`（ETag/魔数校验） | `{status:"ok", name}` |
+
+上传 md 时 `content` 用 init/relay 返回的**注册名**裸引用（如 `![截图](shot.png)`），服务端登记引用关系（refs）——只有被引用的图才对查看页可见（refs 白名单，防 share token 枚举 owner 其他图）。
+
+### 2.3 备选：直接调 HTTP API ✅
 
 不用桥时可直接调用上传 API：
 
@@ -172,7 +200,7 @@ Response 200: { "id": "...", "url": "https://<host>/s/<share-token>" }
 - `content`（必填）：markdown 正文（UTF-8 字符串）。
 - `path`（可选）：POSIX 风格目录前缀，如 `reports/2026-07`。同样过滤。
 
-### 2.3 幂等语义（重要）
+### 2.4 幂等语义（重要）
 
 按 `(owner, path, name)` 定位文档，按 content 的 sha256 判断：
 
@@ -184,15 +212,15 @@ Response 200: { "id": "...", "url": "https://<host>/s/<share-token>" }
 
 → **同一份文档的查看链接长期稳定**；内容更新后链接不变、自动指向最新版本。Agent 可放心重复上传。
 
-### 2.4 错误码
+### 2.5 错误码
 
 | HTTP | 含义 | 处理 |
 |---|---|---|
 | 200 | 上传成功 | 把 `url` 发给用户 |
 | 400 | 请求体非法 / JSON 解析失败 / `name` 或 `path` 含非法字符（含 `..` 穿越） | 修正参数重试，**不要**当服务器故障重试 |
 | 401 | 缺 token 或 token 无效/已撤销 | 检查 `Authorization: Bearer` |
-| 413 | 内容超 `MAX_UPLOAD_BYTES`（默认 5MB） | 拆分或精简文档 |
-| 429 | 触发速率限制（每 token 默认 60/min） | 退避后重试 |
+| 413 | 内容超 `MAX_UPLOAD_BYTES`（默认 5MB）/ 图片超 `MAX_IMAGE_BYTES`（默认 10MB） | 拆分或精简文档 |
+| 429 | 触发速率限制（文档上传每 token 默认 60/min；图片中转独立同额；init/confirm 轻桶默认 120/min） | 退避后重试 |
 
 ---
 
@@ -201,6 +229,8 @@ Response 200: { "id": "...", "url": "https://<host>/s/<share-token>" }
 ### 3.1 查看分享文档 ✅
 
 收到 Agent 发来的链接（形如 `https://<host>/s/<token>`），**直接点击**——无需注册、登录，立刻看到渲染好的文档（标题、加粗、列表、GFM 表格、Shiki 代码高亮、Mermaid 流程图、KaTeX 公式）。链接可反复访问，内容随 Agent 更新自动刷新（同一链接指向最新版本）。
+
+文档内的图片直接随页面渲染（免登录）。**点击任意图片**打开 Lightbox 图集查看器：滚轮/pinch 缩放（0.2–10x）、放大后拖动平移、双击快速放大/还原、`←`/`→` 切换图集内其他图片、`⛶` 全屏、`Esc` 或 `✕` 关闭。
 
 ### 3.2 自行管理文档 ✅
 

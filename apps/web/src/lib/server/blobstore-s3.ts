@@ -9,7 +9,7 @@ import { mapGetError } from './object-store-s3';
 import type { BlobStore } from './blobstore';
 
 // s3 插件（spec §8）：Buffer 语义 + head/getRange/presign。
-// 与现有 S3ObjectStore（string 语义）并存——Phase 5 冷却收敛时迁移消费者后删除旧实现。
+// S3Client 构建/超时/重试配置的单源——S3ObjectStore（冷档 string 语义）以适配器转调本类（Phase 5 收敛）。
 // ⚠️ 七牛部署注意（spec §14）：presign 的 Bucket 必须用「S3 空间名」（空间名全局不唯一时七牛自动生成，控制台查）。
 export class S3BlobStore implements BlobStore {
     readonly id = 's3';
@@ -26,7 +26,7 @@ export class S3BlobStore implements BlobStore {
                 accessKeyId: config.accessKeyId,
                 secretAccessKey: config.secretAccessKey
             },
-            // 同 S3ObjectStore 先例：挂起端点快速失败交给 503 语义
+            // 挂起端点快速失败交给 503 语义（冷档与图片 blob 共用此单源配置）
             requestHandler: new NodeHttpHandler({ requestTimeout: 5_000 }),
             maxAttempts: 2
         });

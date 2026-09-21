@@ -153,7 +153,35 @@ If configuration is missing (neither env nor file), the bridge exits at startup 
 
 > Debugging: `npx @modelcontextprotocol/inspector bun apps/mcp-bridge/src/index.ts`, or `bun apps/mcp-bridge/scripts/smoke-client.ts <url> <token>` (requires the Web app to be running).
 
-### 2.2 Alternative: Direct HTTP API ✅
+### 2.2 Documents with images: local images auto-uploaded ✅
+
+**Local image references** in `content` are auto-uploaded and rewritten; the Agent needs no extra parameters:
+
+```markdown
+# Weekly report
+![Architecture](./assets/arch.png)   ← relative paths resolved against the bridge working directory, auto-uploaded
+![Remote](https://cdn.example.com/x.png) ← remote URLs are left untouched
+```
+
+**Rules and limits**:
+
+- **Path resolution**: relative paths in `![alt](path)` are resolved against the bridge process working directory (Windows drive-letter absolute paths included); remote URLs (`http(s)://`), `data:` URIs, and multi-segment paths containing `/` `\` are **not** treated as local images and are preserved as-is.
+- **Formats**: png / jpeg / gif / webp (magic-number detection; the extension must match the real format — a JPEG named `.png` is rejected). **SVG is not supported** (can carry scripts; security decision) — export as png/webp instead.
+- **Size**: ≤ `MAX_IMAGE_BYTES` per image (default 10MB; double-checked at init preflight and by relay byte measurement); ≤50 images per document recommended (server rate-limit constraint).
+- **Dedup and reclamation**: images are content-addressed by sha256 — identical bytes are stored once per library (re-uploads reuse directly); an image no longer referenced by any document is reclaimed automatically (after an overwrite drops the reference / the document is deleted). No manual cleanup needed.
+- **Preflight**: all problems (missing files / unsupported formats / oversize) are listed up front in one pass, never mid-upload.
+
+Via the MCP bridge all of the above is automatic; when calling the HTTP API directly you orchestrate the three endpoints yourself:
+
+| Endpoint | Purpose | Return |
+|---|---|---|
+| `POST /api/v1/images/init` | Register/query by `{name, content_hash, content_md5, size_bytes}` | `{status:"relay"\|"exists"\|"direct", name, imageId?}` |
+| `POST /api/v1/images` | Relay bytes `{image_id, content_base64}` (hash-bound check) | `{name}` |
+| `POST /api/v1/images/confirm` | Confirm after s3 direct upload `{image_id}` (ETag/magic check) | `{status:"ok", name}` |
+
+When uploading the md, reference images by their **registered name** in `content` (e.g. `![Screenshot](shot.png)`); the server records the reference set (refs) — only referenced images are visible to the view page (refs whitelist prevents share tokens from enumerating the owner's other images).
+
+### 2.3 Alternative: Direct HTTP API ✅
 
 If you don't use the bridge, you can call the upload API directly:
 
@@ -172,7 +200,7 @@ Response 200: { "id": "...", "url": "https://<host>/s/<share-token>" }
 - `content` (required): markdown body (UTF-8 string).
 - `path` (optional): POSIX-style directory prefix, e.g. `reports/2026-07`. Filtered the same way.
 
-### 2.3 Idempotent semantics (important)
+### 2.4 Idempotent semantics (important)
 
 Documents are located by `(owner, path, name)`, and the sha256 of `content` decides the action:
 
@@ -184,15 +212,15 @@ Documents are located by `(owner, path, name)`, and the sha256 of `content` deci
 
 → **The view link for the same document remains stable over time**; when the content updates, the link stays the same and points to the latest version automatically. Agents can safely re-upload.
 
-### 2.4 Error codes
+### 2.5 Error codes
 
 | HTTP | Meaning | Handling |
 |---|---|---|
 | 200 | Upload succeeded | Send the `url` to the user |
 | 400 | Invalid request body / JSON parse failure / `name` or `path` contains illegal characters (including `..` traversal) | Fix parameters and retry; do **not** retry as a server fault |
 | 401 | Missing token, or token invalid/revoked | Check `Authorization: Bearer` |
-| 413 | Content exceeds `MAX_UPLOAD_BYTES` (default 5MB) | Split or trim the document |
-| 429 | Rate limit triggered (default 60/min per token) | Retry with backoff |
+| 413 | Content exceeds `MAX_UPLOAD_BYTES` (default 5MB) / image exceeds `MAX_IMAGE_BYTES` (default 10MB) | Split or trim the document |
+| 429 | Rate limit triggered (document upload default 60/min per token; image relay has an independent same-size bucket; init/confirm light bucket default 120/min) | Retry with backoff |
 
 ---
 
@@ -201,6 +229,8 @@ Documents are located by `(owner, path, name)`, and the sha256 of `content` deci
 ### 3.1 View shared document ✅
 
 When you receive a link from an Agent (e.g. `https://<host>/s/<token>`), **just click it** — no registration or login required, you'll see the rendered document immediately (headings, bold, lists, GFM tables, Shiki code highlighting, Mermaid diagrams, KaTeX formulas). The link can be visited repeatedly and the content auto-refreshes as the Agent updates it (the same link always points to the latest version).
+
+Images inside the document render inline (login-free). **Click any image** to open the Lightbox gallery viewer: wheel/pinch zoom (0.2–10x), pan by dragging when zoomed in, double-click to quickly zoom in/reset, `←`/`→` to move across the gallery, `⛶` fullscreen, `Esc` or `✕` to close.
 
 ### 3.2 Manage your own documents ✅
 

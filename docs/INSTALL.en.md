@@ -251,7 +251,12 @@ Docker deployments: migrations are already executed at image build time; a schem
 | `BASE_URL` | `http://localhost:5173` | External URL prefix used when generating share links |
 | `BRIDGE_REPO_URL` | `https://github.com/earneet/remote-reader` | Bridge source repo URL shown in the login-page agent guide (change for custom forks) |
 | `MAX_UPLOAD_BYTES` | `5242880` (5MB) | Per-document size cap |
-| `BODY_SIZE_LIMIT` | adapter-node default 512K | **Bytes (numeric)**, gateway-layer body cap; must be > `MAX_UPLOAD_BYTES` |
+| `BODY_SIZE_LIMIT` | adapter-node default 512K | **Bytes (numeric)**, gateway-layer body cap. Production startup check (fail-fast): must be ≥ **max**(`MAX_UPLOAD_BYTES`×1.5, `MAX_IMAGE_BYTES`×1.37×1.5) — image relay bodies are base64 (~×1.37) plus JSON wrapping |
+| `IMAGE_STORE_BACKEND` | `local` | Image storage backend: `local` (blobs under DATA_DIR, served via the `/s/<token>/i/<name>` login-free proxy) / `s3` (shares the `OBJECT_STORE_*` config with cold tiering; init returns a presigned PUT for direct CDN upload, viewing uses presigned GET links) |
+| `MAX_IMAGE_BYTES` | `10485760` (10MB) | Per-image size cap (double-checked at init preflight and by relay byte measurement) |
+| `IMAGE_SIGNED_URL_TTL` | `3600` (seconds) | Minimum validity of presigned viewing URLs on the s3 backend (bucket-aligned cache reuse; URLs are byte-identical within a bucket to hit browser cache) |
+| `IMAGE_PROXY_ALL` | `0` | `1` = force server-side proxying even on the s3 backend (for intranet deployments with no outbound CDN access); the `local` backend always proxies |
+| `IMAGES_META_RATE_LIMIT_MAX` | `120` | Independent light bucket for the init/confirm metadata endpoints (per token, same `RATE_LIMIT_WINDOW_MS` window); image byte relay uses an independent bucket sized like `RATE_LIMIT_MAX` |
 | `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW_MS` | `60` / `60000` | Per-token upload rate limit |
 | `LOGIN_RATE_LIMIT_MAX` | `10` | Login attempts per email (same window) |
 | `SESSION_MAX_AGE` | `2592000` (30 days, seconds) | Session lifetime |

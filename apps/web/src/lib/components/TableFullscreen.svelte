@@ -1,7 +1,9 @@
 <script lang="ts">
-    import { clampZoom, nextZoom, formatZoom, ZOOM_STEP } from '$lib/shared/mermaid-zoom';
+    import { clampZoom, nextZoom, formatZoom, ZOOM_STEP } from '$lib/shared/zoom';
+    import { overlayOnMount } from '$lib/shared/overlay-mount';
+    import { overlayGestures } from '$lib/shared/overlay-gestures';
+    import type { GestureOpts } from '$lib/shared/overlay-gestures';
     import { trapTabKey } from '$lib/shared/focus-trap';
-    import { lockBodyScroll, unlockBodyScroll } from '$lib/shared/body-scroll';
 
     let { container, html }: { container: HTMLDivElement | undefined; html: string } = $props();
 
@@ -61,67 +63,15 @@
         browserFs = !!document.fullscreenElement;
     }
 
-    // overlay 打开时聚焦、锁 body 滚动（顶栏/边距区的滚轮会穿透滚动背景），关闭时解锁 + 焦点归还
-    function overlayOnMount(node: HTMLElement) {
-        const prev = document.activeElement as HTMLElement | null;
-        node.focus();
-        lockBodyScroll();
-        return {
-            destroy() {
-                unlockBodyScroll();
-                if (prev && typeof prev.focus === 'function') prev.focus();
-            }
-        };
-    }
-
-    function gestures(node: HTMLElement) {
-        let pointers = new Map<number, { x: number; y: number }>();
-        let pinchDist = 0;
-        let zoomStart = 1;
-        const down = (e: PointerEvent) => {
-            pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-            try { node.setPointerCapture(e.pointerId); } catch {}
-            if (pointers.size === 2) {
-                const [a, b] = [...pointers.values()];
-                pinchDist = Math.hypot(a.x - b.x, a.y - b.y);
-                zoomStart = zoom;
-            }
-        };
-        const move = (e: PointerEvent) => {
-            if (!pointers.has(e.pointerId)) return;
-            pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-            if (pointers.size >= 2 && pinchDist > 0) {
-                const [a, b] = [...pointers.values()];
-                const d = Math.hypot(a.x - b.x, a.y - b.y);
-                zoom = clampZoom(zoomStart * (d / pinchDist));
-            }
-        };
-        const up = (e: PointerEvent) => {
-            pointers.delete(e.pointerId);
-            try { node.releasePointerCapture(e.pointerId); } catch {}
-            if (pointers.size < 2) pinchDist = 0;
-        };
-        const wheel = (e: WheelEvent) => {
-            // H1: 仅 Ctrl/Meta+滚轮缩放，普通滚轮/触控板平移放行给原生滚动
-            if (!(e.ctrlKey || e.metaKey)) return;
-            e.preventDefault();
-            zoom = clampZoom(zoom - e.deltaY * 0.0015);
-        };
-        node.addEventListener('pointerdown', down);
-        node.addEventListener('pointermove', move);
-        node.addEventListener('pointerup', up);
-        node.addEventListener('pointercancel', up);
-        node.addEventListener('wheel', wheel, { passive: false });
-        return {
-            destroy() {
-                node.removeEventListener('pointerdown', down);
-                node.removeEventListener('pointermove', move);
-                node.removeEventListener('pointerup', up);
-                node.removeEventListener('pointercancel', up);
-                node.removeEventListener('wheel', wheel);
-            }
-        };
-    }
+    // 手势快照：pinch 基准式（onPinchStart 快照 → onZoom 里 zoomStart * factor）；
+    // wheel 仅 Ctrl/Meta（H1：普通滚轮放行原生滚动）；不传 onPan/onSwipe（表格 overlay 无拖动/切页）
+    let pinchZoomStart = 1;
+    const gesturesOpts: GestureOpts = {
+        onPinchStart: () => { pinchZoomStart = zoom; },
+        onZoom: (factor) => { zoom = clampZoom(pinchZoomStart * factor); },
+        onWheelZoom: (deltaY) => { zoom = clampZoom(zoom - deltaY * 0.0015); },
+        wheelRequiresCtrl: true
+    };
 
     $effect(() => {
         const _ = html;
@@ -275,7 +225,7 @@
                 <button type="button" title="关闭" onclick={closeOverlay}>✕</button>
             </div>
         </div>
-        <div class="rr-tbl-stage" class:rotated={rotated} use:gestures>
+        <div class="rr-tbl-stage" class:rotated={rotated} use:overlayGestures={gesturesOpts}>
             <div class="rr-tbl-scroll" style={`transform: scale(${zoom})`}>{@html fs.html}</div>
         </div>
     </div>

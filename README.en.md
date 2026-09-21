@@ -11,6 +11,7 @@ Remote Reader is the "document delivery window" for agents — MCP on the write 
 - **Native MCP upload** —— The agent uploads by calling a single `upload_document` tool; the local bridge holds the API token and never exposes it to the agent
 - **Login-free one-step viewing** —— `/s/<token>` renders on click; readers need no account or sign-in
 - **Complete Markdown rendering** —— GFM tables, [Shiki](https://shiki.style) code highlighting (39 languages), Mermaid flowcharts, KaTeX math (lazy-loaded on demand; zero downloads for plain text)
+- **Image support** —— Local image references in `content` are auto-uploaded and rewritten (png/jpeg/gif/webp; SVG rejected); sha256 content-addressed dedup with automatic reclamation once unreferenced; presigned-URL CDN delivery on the s3 backend, login-free proxy on the local backend; clicking an image in the view page opens a **Lightbox gallery** (wheel/pinch zoom, pan, double-click, fullscreen, ←/→ navigation)
 - **Idempotent uploads** —— Same path + same content never duplicates; on content update the **link stays the same** and auto-points to the latest version
 - **Management UI** —— File manager (directory tree / move / rename / delete; private/shared state icons, copy share link, make private), API token management (create / revoke / one-time reveal), share link revocation
 - **Multi-user isolation** —— Documents live in per-owner directory trees; SQLite foreign-key constraints enforce integrity
@@ -27,13 +28,14 @@ sequenceDiagram
     participant User as Human user
 
     Agent->>Bridge: upload_document(name, content, path)
+    Note over Bridge: When content has local image references:<br/>per image init → relay/direct upload →<br/>references rewritten to registered names (sha256 dedup, existing images reused)
     Bridge->>Web: POST /api/v1/documents (Bearer Token)
     Web->>Web: persist to disk + write DB + generate share token
     Web-->>Bridge: { id, url }
     Bridge-->>Agent: Uploaded, view link: /s/{token}
     Agent->>User: IM: Doc is ready 👉 /s/{token}
     User->>Web: Click link (login-free)
-    Web-->>User: SSR-rendered Markdown
+    Web-->>User: SSR-rendered Markdown + images
 ```
 
 Three components:
@@ -73,6 +75,27 @@ Then:
 
 4. Open the returned `url` (of the form `/s/<token>`) —— view the rendered result with no login
 
+With images (optional): register the image first (`content_hash`/`content_md5` are the byte-level sha256/md5, 64/32 lowercase hex), relay the bytes, then reference it by registered name in the md:
+
+```bash
+# (1) init → {status:"relay", name, imageId} (re-init of a known hash returns {status:"exists"})
+curl -X POST http://localhost:5173/api/v1/images/init \
+  -H "Authorization: Bearer <TOKEN>" -H "Content-Type: application/json" \
+  -d '{"name":"shot.png","content_hash":"<sha256-hex64>","content_md5":"<md5-hex32>","size_bytes":12345}'
+
+# (2) relay the bytes (base64) → {name}
+curl -X POST http://localhost:5173/api/v1/images \
+  -H "Authorization: Bearer <TOKEN>" -H "Content-Type: application/json" \
+  -d '{"image_id":"<imageId>","content_base64":"<base64>"}'
+
+# (3) upload the md referencing the returned name → images render login-free (click to open the Lightbox gallery)
+curl -X POST http://localhost:5173/api/v1/documents \
+  -H "Authorization: Bearer <TOKEN>" -H "Content-Type: application/json" \
+  -d '{"name":"report.md","content":"# Report\\n\\n![Screenshot](shot.png)","path":"demo"}'
+```
+
+(Via the MCP bridge, steps (1)–(2) are automatic — `upload_document` consumes local image references directly; see the next section.)
+
 For full deployment (reverse proxy, HTTPS, backup, upgrade migrations), see [Installation](./docs/INSTALL.en.md).
 
 ## Agent self-service onboarding (one message to your agent)
@@ -86,6 +109,8 @@ The agent reads the `<details id="agent-guide">` block in the login page's SSR H
 ## Upload via MCP (Agent)
 
 The local MCP bridge lets an agent upload via an MCP tool call; the bridge holds the token locally and never exposes it to the agent. Once configured, the agent just calls `upload_document({ name, content, path? })` to get the view link.
+
+**Image documents need zero extra parameters**: local image references in `content` (`![alt](local path)`, relative paths resolved against the bridge working directory) are auto-uploaded and rewritten — png/jpeg/gif/webp (SVG not supported), ≤10MB per image and ≤50 per document recommended (server rate-limit constraints); identical bytes dedup by sha256, and preflight problems (missing files / unsupported formats / oversize) are all reported at once.
 
 Install the bridge (choose one):
 

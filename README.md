@@ -11,6 +11,7 @@ Remote Reader 是 Agent 的「文档交付窗口」——写入侧用 MCP，阅�
 - **MCP 原生上传** —— Agent 调一个 `upload_document` 工具即可上传；本地桥持有 API token，不暴露给 Agent
 - **免登录一步查看** —— `/s/<token>` 点开即渲染，阅读者无需注册登录
 - **完整 Markdown 渲染** —— GFM 表格、[Shiki](https://shiki.style) 代码高亮（39 种语言）、Mermaid 流程图、KaTeX 数学公式（按需懒加载，纯文本零下载）
+- **图片支持** —— `content` 里的本地图片引用自动上传并改写（png/jpeg/gif/webp，SVG 拒收）；sha256 内容寻址去重、无引用自动回收；s3 后端 presigned URL CDN 直连，本地后端走免登录代理；查看页点击图片打开 **Lightbox 图集**（滚轮/pinch 缩放、拖动、双击、全屏、←/→ 切图）
 - **幂等上传** —— 同路径同内容不重复生成；内容更新时**链接不变**、自动指向最新版本
 - **管理 UI** —— 文件管理器（目录树 / 移动 / 重命名 / 删除；行首私有/共享状态图标、复制分享链接、转为私有）、API token 管理（创建 / 撤销 / 一次性 reveal）、分享链接撤销
 - **多用户隔离** —— 文档按 owner 存于独立目录树，SQLite 外键约束保证完整
@@ -27,13 +28,14 @@ sequenceDiagram
     participant User as 人类用户
 
     Agent->>Bridge: upload_document(name, content, path)
+    Note over Bridge: content 含本地图片引用时：<br/>逐图 init → relay/direct 上传 →<br/>引用改写为注册名（sha256 去重，已传图直接复用）
     Bridge->>Web: POST /api/v1/documents (Bearer Token)
     Web->>Web: 落盘 + 写库 + 生成 share token
     Web-->>Bridge: { id, url }
     Bridge-->>Agent: 已上传，查看链接：/s/{token}
     Agent->>User: IM: 文档写好了 👉 /s/{token}
     User->>Web: 点链接（免登录）
-    Web-->>User: SSR 渲染的 Markdown
+    Web-->>User: SSR 渲染的 Markdown + 图片
 ```
 
 三大组件：
@@ -73,6 +75,27 @@ bun --filter remote-reader-web dev          # http://localhost:5173（被占会�
 
 4. 打开返回的 `url`（形如 `/s/<token>`）—— 免登录查看渲染结果
 
+带图文档（可选）：先注册图片（`content_hash`/`content_md5` 为字节的真实 sha256/md5，各 64/32 位小写 hex），再中转字节，md 里用注册名引用：
+
+```bash
+# ① init 登记 → 返回 {status:"relay", name, imageId}（同 hash 重复 init 返回 {status:"exists"}）
+curl -X POST http://localhost:5173/api/v1/images/init \
+  -H "Authorization: Bearer <TOKEN>" -H "Content-Type: application/json" \
+  -d '{"name":"shot.png","content_hash":"<sha256-hex64>","content_md5":"<md5-hex32>","size_bytes":12345}'
+
+# ② relay 上传字节（base64）→ 返回 {name}
+curl -X POST http://localhost:5173/api/v1/images \
+  -H "Authorization: Bearer <TOKEN>" -H "Content-Type: application/json" \
+  -d '{"image_id":"<imageId>","content_base64":"<base64>"}'
+
+# ③ 上传 md，content 用返回的注册名引用 → 查看页图片免登录可见（点击进 Lightbox 图集）
+curl -X POST http://localhost:5173/api/v1/documents \
+  -H "Authorization: Bearer <TOKEN>" -H "Content-Type: application/json" \
+  -d '{"name":"report.md","content":"# 报告\n\n![截图](shot.png)","path":"demo"}'
+```
+
+（走 MCP 桥时 ①② 是自动的——`upload_document` 直接吃本地图片引用，见下节。）
+
 完整部署（systemd 一键 / Docker / 手动 / 反向代理 / HTTPS / 备份 / 升级迁移）见 [安装指导](./docs/INSTALL.md)。
 
 ## Agent 自助接入（发给 Agent 一句话即可）
@@ -86,6 +109,8 @@ Agent 读取登录页 SSR 输出的 `<details id="agent-guide">` 指引块（对
 ## 通过 MCP 上传（Agent）
 
 本地 MCP 桥让 Agent 以 MCP 工具调用上传，桥在本地持有 token、不暴露给 Agent。配置好后 Agent 调 `upload_document({ name, content, path? })` 即可拿到查看链接。
+
+**带图文档零额外参数**：`content` 里的本地图片引用（`![alt](本地路径)`，相对路径按桥工作目录解析）会被自动上传并改写——png/jpeg/gif/webp（SVG 不支持），单图建议 ≤10MB、单文档 ≤50 张（服务端限流约束）；同字节图片 sha256 去重复用，预检问题（文件不存在/格式不支持/超大）一次性全部列出。
 
 安装桥（二选一）：
 
