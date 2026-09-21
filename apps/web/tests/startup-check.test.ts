@@ -1,4 +1,4 @@
-import { test, expect, beforeEach, afterEach } from 'vitest';
+import { test, describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { validateStartupConfig } from '../src/lib/server/startup-check';
 
 const ORIG: NodeJS.ProcessEnv = { ...process.env };
@@ -60,7 +60,7 @@ test('prod 强配置通过', () => {
         SESSION_SECRET: 'a'.repeat(64),
         INITIAL_INVITE_CODE: 'goodcode123',
         BASE_URL: 'https://reader.example.com',
-        BODY_SIZE_LIMIT: '8M'
+        BODY_SIZE_LIMIT: '24M'
     });
     expect(() => validateStartupConfig()).not.toThrow();
 });
@@ -115,7 +115,8 @@ test('prod BODY_SIZE_LIMIT 带单位后缀按 1024 进制解析（512K ≥ 1KB×
         INITIAL_INVITE_CODE: 'goodcode123',
         BASE_URL: 'https://reader.example.com',
         BODY_SIZE_LIMIT: '512K',
-        MAX_UPLOAD_BYTES: '1024'
+        MAX_UPLOAD_BYTES: '1024',
+        MAX_IMAGE_BYTES: '1024'
     });
     expect(() => validateStartupConfig()).not.toThrow();
 });
@@ -173,4 +174,30 @@ test('OBJECT_STORE_* 完整配置 → 不抛', () => {
         OBJECT_STORE_SECRET_ACCESS_KEY: 'sk'
     });
     expect(() => validateStartupConfig()).not.toThrow();
+});
+
+describe('图片支持启动校验', () => {
+    it('IMAGE_STORE_BACKEND=s3 但 OBJECT_STORE_* 缺失 → fail-fast（全环境）', () => {
+        process.env.IMAGE_STORE_BACKEND = 's3';
+        for (const k of ['OBJECT_STORE_ENDPOINT', 'OBJECT_STORE_REGION', 'OBJECT_STORE_BUCKET',
+            'OBJECT_STORE_ACCESS_KEY_ID', 'OBJECT_STORE_SECRET_ACCESS_KEY']) delete process.env[k];
+        expect(() => validateStartupConfig()).toThrow(/IMAGE_STORE_BACKEND.*s3/);
+        delete process.env.IMAGE_STORE_BACKEND;
+    });
+
+    it('生产：BODY_SIZE_LIMIT 须 ≥ max(文档×1.5, 图片×1.37×1.5)', () => {
+        process.env.NODE_ENV = 'production';
+        process.env.SESSION_SECRET = 'a'.repeat(48);
+        process.env.INITIAL_INVITE_CODE = 'strong-code-1';
+        process.env.BASE_URL = 'https://reader.example.top';
+        process.env.ORIGIN = 'https://reader.example.top';
+        process.env.BODY_SIZE_LIMIT = '8M';       // 8M < 10MB×1.37×1.5 ≈ 21.5MB → 须拒
+        process.env.IMAGE_STORE_BACKEND = 'local'; // s3 校验不触发
+        expect(() => validateStartupConfig()).toThrow(/MAX_IMAGE_BYTES/);
+        process.env.BODY_SIZE_LIMIT = '24M';       // 24M ≥ 21.5MB → 过
+        expect(() => validateStartupConfig()).not.toThrow();
+        delete process.env.NODE_ENV;
+        delete process.env.SESSION_SECRET; delete process.env.INITIAL_INVITE_CODE;
+        delete process.env.BASE_URL; delete process.env.ORIGIN; delete process.env.BODY_SIZE_LIMIT;
+    });
 });

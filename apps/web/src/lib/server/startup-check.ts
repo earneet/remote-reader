@@ -17,6 +17,10 @@ function parseBodySizeLimitBytes(raw: string): number {
 export function validateStartupConfig(): void {
     // 冷热分层：任一 OBJECT_STORE_* 已配置但组合不完整 → fail-fast（全环境；确定性配置错误，spec §12）
     const objectStore = parseObjectStoreEnv();
+    // 图片支持（spec §12）：IMAGE_STORE_BACKEND=s3 需要 OBJECT_STORE_* 齐全——确定性配置错误，全环境 fail-fast
+    if (process.env.IMAGE_STORE_BACKEND === 's3' && objectStore === null) {
+        throw new Error('IMAGE_STORE_BACKEND=s3 需 OBJECT_STORE_* 五项配置齐全（endpoint/region/bucket/accessKeyId/secretAccessKey）');
+    }
     // 存量冷文档 + 未配置对象存储 → 这些文档将 503 直至恢复配置（数据仍在桶中，可恢复）：warn 不阻塞
     if (objectStore === null) {
         const cold = (sqlite.prepare("SELECT COUNT(*) AS c FROM documents WHERE storage_tier = 'cold'")
@@ -76,15 +80,16 @@ export function validateStartupConfig(): void {
     if (originUrl.origin !== new URL(baseUrl).origin) {
         throw new Error(`ORIGIN "${origin}" 与 BASE_URL "${baseUrl}" 不同源，须一致（如均为 https://your-host）`);
     }
-    // adapter-node BODY_SIZE_LIMIT 默认仅 512K：不足 MAX_UPLOAD_BYTES×1.5 时超限上传在路由前
-    // 就被 adapter 拦截，且错误会被误报为 400 invalid json（JSON 转义还会使 body 大于 content 本身）
+    // adapter-node BODY_SIZE_LIMIT 默认仅 512K：须覆盖文档 JSON 与图片 base64（×1.37）两类上限（spec §12 双下限取 max）
     const rawLimit = process.env.BODY_SIZE_LIMIT;
     const limit = parseBodySizeLimitBytes(rawLimit ?? '512K');
     const maxUpload = envInt('MAX_UPLOAD_BYTES', 5 * 1024 * 1024);
-    if (!Number.isFinite(limit) || limit < maxUpload * 1.5) {
+    const maxImage = envInt('MAX_IMAGE_BYTES', 10 * 1024 * 1024);
+    const need = Math.max(maxUpload * 1.5, Math.ceil(maxImage * 1.37 * 1.5));
+    if (!Number.isFinite(limit) || limit < need) {
         throw new Error(
-            `BODY_SIZE_LIMIT "${rawLimit ?? '512K'}"(${limit}B) 须 ≥ MAX_UPLOAD_BYTES(${maxUpload}B)×1.5——` +
-            '否则超限上传会被 adapter 在路由前拦成 400/413，排障方向被带偏；如 5M 上限配 8M（8388608）'
+            `BODY_SIZE_LIMIT "${rawLimit ?? '512K'}"(${limit}B) 须 ≥ max(MAX_UPLOAD_BYTES×1.5, MAX_IMAGE_BYTES×1.37×1.5)=${need}B——` +
+                '否则超限上传会被 adapter 在路由前拦成 400/413，排障方向被带偏；如 5M 文档+10M 图片配 24M（25165824）'
         );
     }
 }
