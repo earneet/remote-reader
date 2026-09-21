@@ -51,9 +51,12 @@ export function getImageSignedUrlTtl(): number {
     return envInt('IMAGE_SIGNED_URL_TTL', 3600);
 }
 
-// 强制全代理（隐蔽优先：不向读者暴露云存储域名；默认 0 = 直连，spec #10）
+// 强制全代理（隐蔽优先：不向读者暴露云存储域名；默认 0 = 直连，spec #10）。
+// 空串视同未设置（与 envInt 口径对齐）：本函数在每次文档渲染路径上调用，
+// env_file 空赋值若 throw 会让含无图文档在内的全部渲染 500（终审 N1）
 export function getImageProxyAll(): boolean {
-    const raw = process.env.IMAGE_PROXY_ALL ?? '0';
+    const raw = process.env.IMAGE_PROXY_ALL ?? '';
+    if (raw === '') return false;
     if (raw !== '0' && raw !== '1') {
         throw new Error(`env IMAGE_PROXY_ALL 须为 0 或 1，实际值: ${JSON.stringify(raw)}`);
     }

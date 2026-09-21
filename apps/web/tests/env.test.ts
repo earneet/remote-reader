@@ -117,4 +117,9 @@ describe('getImageSignedUrlTtl / getImageProxyAll', () => {
         delete process.env.IMAGE_SIGNED_URL_TTL;
         delete process.env.IMAGE_PROXY_ALL;
     });
+    it('IMAGE_PROXY_ALL 空串视同未设置（env_file 空赋值不让全部渲染 500——终审 N1）', () => {
+        process.env.IMAGE_PROXY_ALL = '';
+        expect(getImageProxyAll()).toBe(false);
+        delete process.env.IMAGE_PROXY_ALL;
+    });
 });
