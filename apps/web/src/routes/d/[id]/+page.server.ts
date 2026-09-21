@@ -4,6 +4,7 @@ import { getOwnedDocument, readDocumentContent } from '$server/documents';
 import { FileNotFoundError } from '$server/storage';
 import { ArchiveUnavailableError, ObjectNotFoundError } from '$server/object-store';
 import { renderMarkdown } from '$server/markdown';
+import { resolveImages } from '$server/images-resolve';
 import { listTagsForDoc, setDocTags, SetTagsError } from '$server/tags';
 
 export const load: PageServerLoad = async ({ locals, params, setHeaders }) => {
@@ -20,7 +21,10 @@ export const load: PageServerLoad = async ({ locals, params, setHeaders }) => {
         if (e instanceof ArchiveUnavailableError) error(503, '归档存储暂时不可达，请稍后重试');
         throw e;
     }
-    const html = (await renderMarkdown(content)).html;
+    const { html: rawHtml, names, contentHash } = await renderMarkdown(content);
+    const html = await resolveImages(rawHtml, names, {
+        kind: 'owner', ownerId: locals.user.id, docId: doc.id, contentHash
+    });
     const tags = listTagsForDoc(doc.id, locals.user.id);
     setHeaders({ 'cache-control': 'no-store' });
     return { id: doc.id, title: doc.name, html, tags, updatedAt: doc.updatedAt, sizeBytes: doc.sizeBytes };
