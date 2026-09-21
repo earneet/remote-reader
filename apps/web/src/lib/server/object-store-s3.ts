@@ -1,16 +1,8 @@
 import type { ObjectStore, ObjectStoreConfig } from './object-store';
-import { ObjectNotFoundError, ArchiveUnavailableError } from './object-store';
 import { S3BlobStore } from './blobstore-s3';
 
-// GET 错误映射：NoSuchKey / HTTP 404 → 对象缺失（404 语义）；其余 → 不可达（503 语义）
-// 404 兜底：部分 S3 兼容网关对缺失对象返回非标准错误体（无 NoSuchKey Code），按状态码归类
-export function mapGetError(key: string, e: unknown): Error {
-    if ((e as { name?: string }).name === 'NoSuchKey') return new ObjectNotFoundError(key);
-    if ((e as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode === 404) {
-        return new ObjectNotFoundError(key);
-    }
-    return new ArchiveUnavailableError(`get ${key} 失败`, { cause: e });
-}
+// mapGetError 已迁 object-store-errors.ts（叶子模块），此处 re-export 保持既有 import 零改动
+export { mapGetError } from './object-store-errors';
 
 // 冷档存储适配器（Phase 5 收敛）：string 语义（markdown 文本）转调 S3BlobStore 的字节语义，
 // string↔Buffer 转换收在本层；S3Client 构建/NodeHttpHandler 超时/重试配置单源在 S3BlobStore。

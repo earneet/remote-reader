@@ -2,7 +2,7 @@ import { mkdir, readFile, stat, unlink, open, writeFile as fsWrite, rename } fro
 import { dirname, join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { getDataDir } from './env';
-import { ObjectNotFoundError } from './object-store';
+import { ObjectNotFoundError } from './object-store-errors';
 import type { BlobStore } from './blobstore';
 
 // local 插件（spec §8）：DATA_DIR/<ownerId>/blobs/<hash前2>/<hash> 内容寻址布局。

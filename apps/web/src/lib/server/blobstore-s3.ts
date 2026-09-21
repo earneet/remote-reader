@@ -4,8 +4,7 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { NodeHttpHandler } from '@smithy/node-http-handler';
 import type { ObjectStoreConfig } from './object-store';
-import { ObjectNotFoundError, ArchiveUnavailableError } from './object-store';
-import { mapGetError } from './object-store-s3';
+import { ObjectNotFoundError, ArchiveUnavailableError, mapGetError } from './object-store-errors';
 import type { BlobStore } from './blobstore';
 
 // s3 插件（spec §8）：Buffer 语义 + head/getRange/presign。

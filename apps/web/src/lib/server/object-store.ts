@@ -1,28 +1,13 @@
 import { S3ObjectStore } from './object-store-s3';
+import { ObjectNotFoundError, ArchiveUnavailableError } from './object-store-errors';
+
+// 错误类已迁 object-store-errors.ts（叶子模块），此处 re-export 保持既有 import 零改动
+export { ObjectNotFoundError, ArchiveUnavailableError } from './object-store-errors';
 
 export interface ObjectStore {
     put(key: string, content: string): Promise<void>;
     get(key: string): Promise<string>;
     delete(key: string): Promise<void>;
-}
-
-// 远端对象缺失（语义对齐 storage.ts 的 FileNotFoundError → 路由层 404）
-export class ObjectNotFoundError extends Error {
-    readonly code = 'ARCHIVE_OBJECT_NOT_FOUND' as const;
-    constructor(key: string) {
-        super(`archived object not found: ${key}`);
-        this.name = 'ObjectNotFoundError';
-    }
-}
-
-// 远端不可达/未配置（路由层 → 503）
-export class ArchiveUnavailableError extends Error {
-    readonly code = 'ARCHIVE_UNAVAILABLE' as const;
-    constructor(message: string, options?: { cause: unknown }) {
-        super(message);
-        this.name = 'ArchiveUnavailableError';
-        if (options && 'cause' in options) this.cause = options.cause;
-    }
 }
 
 // 对象 key：docId 维度（删除无引用计数）+ contentHash 后缀（覆盖上传换 key、同内容重传幂等）
