@@ -410,6 +410,6 @@ style 区追加（裂图占位——服务器侧与客户端同款观感）：
 ## Self-Review 记录
 
 1. **Spec 覆盖**：§7.1 两函数分离 ✓ / §7.2 占位符+两段管线+补录接线 ✓ / §7.3 决策树+桶对齐（结果缓存方案）+referrerpolicy（渲染期预置——执行注修正）✓ / §7.4 裂图占位 ✓ / §7.5 onerror ✓ / §12 两 env ✓。Phase 2 遗留的 lazyRegisterRefs 消费者接线本批完成 ✓。
-2. **无占位符**：Task 4 的"易读版 useProxy"死代码行在执行注后删除（执行者收敛）；两处执行注均为明确修正指令非含糊占位。
+2. **无占位符**：全部代码块为终态（自审轮已将 referrerpolicy 落点修正为渲染期预置并删除 extraAttrs 死代码机制）；Task 3 的执行注仅为 renderer 竞态说明（非修正指令）。
 3. **类型一致性**：ResolveCtx 联合与两 load 构造一致；renderMarkdown 返回结构在 Task 3 定义、Task 5 消费、__resetMarkdownCacheForTest 清 Map（value 类型变——签名不变 ✓）。
 4. **风险点**：markdown.test.ts 适配量（~15 处 .html 取用）机械但需细心；presignCache 模块级（测试需清——导出 __resetPresignCacheForTest）。
