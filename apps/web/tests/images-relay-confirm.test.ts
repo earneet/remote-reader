@@ -151,6 +151,18 @@ describe('confirmImage（spec §5.3）', () => {
         expect(r.ok).toBe(false);
         expect(fake.deleted).toContain(key); // invalid 时删云对象
     });
+    it('扩展名不一致（与 relay 校验对齐，spec §5.3/§11 双重承诺）：init 名 x.png + PUT jpeg 字节 → invalid', async () => {
+        const fake = new FakeS3();
+        __setBlobStoresForTest({ local: new LocalBlobStore(), s3: fake });
+        mkUser('u1');
+        const init = await initImage('u1', { name: 'x.png', contentHash: sha256(JPG), contentMd5: md5(JPG), sizeBytes: JPG.length });
+        if (init.status !== 'direct') throw new Error('unreachable');
+        await fake.put(init.uploadUrl.split('/put/')[1]!.split('?')[0], JPG); // 桥直传 jpeg 字节
+        const r = await confirmImage('u1', init.imageId);
+        expect(r).toEqual({ ok: false, reason: 'invalid', message: expect.stringContaining('不一致') });
+        const row = db.select().from(schema.images).where(eq(schema.images.id, init.imageId)).get()!;
+        expect(row.status).toBe('pending'); // 未 ready
+    });
 });
 
 describe('initImage exists 分支 head 自愈（交叉审查 P1：blob 丢失 → exists 永续 → 裂图永续）', () => {

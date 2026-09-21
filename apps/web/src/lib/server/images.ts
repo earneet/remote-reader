@@ -5,7 +5,7 @@ import { db, schema } from './db';
 import { generateId } from './auth';
 import { getBlobStore, getActiveImageStore } from './blobstore';
 import { getMaxImageBytes } from './env';
-import { sanitizeImageName, detectImageMime } from '@remote-reader/shared/image-mime';
+import { sanitizeImageName, detectImageMime, extsForMime } from '@remote-reader/shared/image-mime';
 import { ObjectNotFoundError, ArchiveUnavailableError } from './object-store';
 
 const HEX64 = /^[0-9a-f]{64}$/;
@@ -151,10 +151,7 @@ export async function relayImage(ownerId: string, imageId: string, data: Buffer)
         return { ok: false, reason: 'invalid', message: isSvg ? '不支持的图片格式（SVG 可携脚本，安全考虑不支持；支持 png/jpeg/gif/webp）' : '无法识别的图片格式（支持 png/jpeg/gif/webp）' };
     }
     const ext = row.name.split('.').pop()?.toLowerCase() ?? '';
-    const allowedExts: Record<string, string[]> = {
-        'image/png': ['png'], 'image/jpeg': ['jpg', 'jpeg'], 'image/gif': ['gif'], 'image/webp': ['webp']
-    };
-    if (!(allowedExts[mime] ?? []).includes(ext)) {
+    if (!extsForMime(mime).includes(ext)) {
         return { ok: false, reason: 'invalid', message: `扩展名 .${ext} 与实际格式 ${mime} 不一致，请改名重传` };
     }
     const store = getBlobStore(row.storageBackend);
@@ -191,6 +188,12 @@ export async function confirmImage(ownerId: string, imageId: string): Promise<Co
     const head32 = await store.getRange(row.storageKey, 0, 31);
     const mime = detectImageMime(head32);
     if (mime === null) return { ok: false, reason: 'invalid', message: '对象内容非支持图片格式' };
+    // 扩展名一致（spec §5.3/§11 与 relay 双重承诺）：direct 通道 PUT 的字节格式须与 init 名字匹配；
+    // 不删云对象（行 pending 可重传覆盖），无 refs 悬挂由 GC 兜底回收
+    const ext = row.name.split('.').pop()?.toLowerCase() ?? '';
+    if (!extsForMime(mime).includes(ext)) {
+        return { ok: false, reason: 'invalid', message: `扩展名 .${ext} 与实际格式 ${mime} 不一致，请改名重传` };
+    }
     if (head.etag !== undefined && head.etag !== row.contentMd5) {
         try { await store.delete(row.storageKey); } catch { /* 留孤儿，无害 */ }
         return { ok: false, reason: 'invalid', message: '内容 md5 与 init 报称不符（ETag 校验失败）' };

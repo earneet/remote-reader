@@ -1,7 +1,5 @@
 // 图片魔数检测单源（spec #6）：桥预检（Phase 4）与 Web 服务端（relay/confirm 验证链）共用。
 // SVG 不支持（XSS 面，spec §14）——拒绝文案由调用方给出。
-export const SUPPORTED_IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'gif', 'webp'] as const;
-
 export function detectImageMime(b: Buffer): 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp' | null {
     if (b.length >= 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47
         && b[4] === 0x0d && b[5] === 0x0a && b[6] === 0x1a && b[7] === 0x0a) return 'image/png';
@@ -13,8 +11,14 @@ export function detectImageMime(b: Buffer): 'image/png' | 'image/jpeg' | 'image/
     return null;
 }
 
-export function expectedExtFor(mime: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'): string {
-    return mime === 'image/png' ? 'png' : mime === 'image/jpeg' ? 'jpg' : mime === 'image/gif' ? 'gif' : 'webp';
+/** mime → 合法扩展名（jpeg 双写法 .jpg/.jpeg）；relay/confirm 扩展名一致性校验单源（spec §5.3 双重承诺） */
+export function extsForMime(mime: 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'): string[] {
+    switch (mime) {
+        case 'image/png': return ['png'];
+        case 'image/jpeg': return ['jpg', 'jpeg'];
+        case 'image/gif': return ['gif'];
+        case 'image/webp': return ['webp'];
+    }
 }
 
 /** 稳定名 sanitize（spec #2）：仅空格→`-`（引用/URL 编码链路边角），其余字符由单段校验拦截 */
