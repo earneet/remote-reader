@@ -1,5 +1,5 @@
 import { test, expect, afterEach, describe, it } from 'vitest';
-import { envInt, getBaseUrl, getBridgeRepoUrl, getImageStoreBackend, getMaxImageBytes, getSessionMaxAgeSeconds } from '../src/lib/server/env';
+import { envInt, getBaseUrl, getBridgeRepoUrl, getImageProxyAll, getImageSignedUrlTtl, getImageStoreBackend, getMaxImageBytes, getSessionMaxAgeSeconds } from '../src/lib/server/env';
 
 afterEach(() => {
     delete process.env.TEST_ENV_INT;
@@ -8,6 +8,8 @@ afterEach(() => {
     delete process.env.BRIDGE_REPO_URL;
     delete process.env.IMAGE_STORE_BACKEND;
     delete process.env.MAX_IMAGE_BYTES;
+    delete process.env.IMAGE_SIGNED_URL_TTL;
+    delete process.env.IMAGE_PROXY_ALL;
 });
 
 test('envInt undefined/空串 → 默认', () => {
@@ -87,5 +89,37 @@ describe('getImageStoreBackend / getMaxImageBytes', () => {
         process.env.IMAGE_STORE_BACKEND = 'ftp';
         expect(() => getImageStoreBackend()).toThrow('IMAGE_STORE_BACKEND');
         delete process.env.IMAGE_STORE_BACKEND;
+    });
+});
+
+describe('getImageSignedUrlTtl / getImageProxyAll', () => {
+    it('默认 3600 / 关闭', () => {
+        delete process.env.IMAGE_SIGNED_URL_TTL;
+        delete process.env.IMAGE_PROXY_ALL;
+        expect(getImageSignedUrlTtl()).toBe(3600);
+        expect(getImageProxyAll()).toBe(false);
+    });
+    it('自定义值 / 开启', () => {
+        process.env.IMAGE_SIGNED_URL_TTL = '7200';
+        process.env.IMAGE_PROXY_ALL = '1';
+        expect(getImageSignedUrlTtl()).toBe(7200);
+        expect(getImageProxyAll()).toBe(true);
+        delete process.env.IMAGE_SIGNED_URL_TTL;
+        delete process.env.IMAGE_PROXY_ALL;
+    });
+    it('非法值 fail-fast', () => {
+        process.env.IMAGE_SIGNED_URL_TTL = '0';
+        expect(() => getImageSignedUrlTtl()).toThrow();
+        process.env.IMAGE_SIGNED_URL_TTL = 'abc';
+        expect(() => getImageSignedUrlTtl()).toThrow();
+        process.env.IMAGE_PROXY_ALL = 'yes';
+        expect(() => getImageProxyAll()).toThrow(/IMAGE_PROXY_ALL/);
+        delete process.env.IMAGE_SIGNED_URL_TTL;
+        delete process.env.IMAGE_PROXY_ALL;
+    });
+    it('IMAGE_PROXY_ALL 空串视同未设置（env_file 空赋值不让全部渲染 500——终审 N1）', () => {
+        process.env.IMAGE_PROXY_ALL = '';
+        expect(getImageProxyAll()).toBe(false);
+        delete process.env.IMAGE_PROXY_ALL;
     });
 });

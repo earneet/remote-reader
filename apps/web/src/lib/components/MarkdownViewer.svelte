@@ -8,6 +8,24 @@
         if (container && html) enhanceKatex(container);
     });
 
+    // 直连图客户端兜底（spec §7.5）：CDN 失败/签名过期的运行时错误 → 统一 rr-img-missing 占位（带原因 title）
+    $effect(() => {
+        const root = container;
+        if (!root) return;
+        const onError = (e: Event): void => {
+            const img = e.target as HTMLElement | null;
+            if (!(img instanceof HTMLImageElement) || img.dataset.rrImgFallback === '1') return;
+            img.dataset.rrImgFallback = '1';
+            const span = document.createElement('span');
+            span.className = 'rr-img-missing';
+            span.title = '图片加载失败：CDN 不可达或链接已过期，刷新页面重试';
+            span.textContent = `🖼 [${img.alt || '图片'}]`;
+            img.replaceWith(span);
+        };
+        root.addEventListener('error', onError, true); // error 不冒泡——capture 必需
+        return () => root.removeEventListener('error', onError, true);
+    });
+
     async function enhanceKatex(root: HTMLElement): Promise<void> {
         const nodes = Array.from(root.querySelectorAll<HTMLElement>('.math.inline, .math.block'));
         if (nodes.length === 0) return;
@@ -175,6 +193,15 @@
     }
     .markdown-body :global(img) {
         max-width: 100%;
+    }
+    .markdown-body :global(.rr-img-missing) {
+        display: inline-block;
+        padding: 0.6em 1em;
+        border: 1px dashed var(--rr-border);
+        border-radius: 8px;
+        background: var(--rr-code-bg);
+        color: var(--rr-text-muted);
+        font-size: 0.9em;
     }
     .markdown-body :global(.math.block) {
         margin: 1rem 0;

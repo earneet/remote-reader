@@ -3,6 +3,7 @@ import { createHighlighter } from 'shiki';
 import type { Highlighter } from 'shiki';
 import { createHash } from 'node:crypto';
 import { registerMathRules, registerMathRenderers } from '$shared/markdown-math';
+import { extractImageNames, normalizeImageRef } from '@remote-reader/shared/image-extract';
 
 // 双主题：一份 HTML 携带两套取色变量，data-theme 切换纯 CSS，RENDER_CACHE 不受影响
 const THEMES = { light: 'github-light', dark: 'github-dark' } as const;
@@ -106,21 +107,50 @@ async function getMarkdown(): Promise<MarkdownIt> {
 }
 
 // M13: 渲染结果按内容 hash 缓存（热文档重复访问跳过渲染）。FIFO 上限防无界增长。
-const RENDER_CACHE = new Map<string, string>();
+// RENDER_CACHE value 两段式：渲染阶段产物（占位符 HTML + names + 内容 hash）——替换阶段每请求执行
+const RENDER_CACHE = new Map<string, { html: string; names: string[]; contentHash: string }>();
 const RENDER_CACHE_MAX = 128;
 
-export async function renderMarkdown(src: string): Promise<string> {
-    const md = await getMarkdown();
-    const key = createHash('sha256').update(src, 'utf8').digest('hex');
-    const hit = RENDER_CACHE.get(key);
+export async function renderMarkdown(src: string): Promise<{ html: string; names: string[]; contentHash: string }> {
+    const contentHash = createHash('sha256').update(src, 'utf8').digest('hex');
+    const hit = RENDER_CACHE.get(contentHash);
     if (hit !== undefined) return hit;
-    const html = md.render(src);
+    const md = await getMarkdown();
+    // names 单源来自 extractImageNames（P1-3）；renderer 的归一化用同一 normalizeImageRef（防索引错位）
+    const names = extractImageNames(src);
+    const stub = contentHash.slice(0, 8);
+    const defaultImage = md.renderer.rules.image; // 保留默认渲染器语义（alt/title/attr 转义由它兜底）
+    md.renderer.rules.image = (tokens, idx, options, env, self) => {
+        const token = tokens[idx];
+        const raw = token.attrGet('src') ?? '';
+        const norm = normalizeImageRef(raw);
+        if (norm !== null) {
+            const n = names.indexOf(norm);
+            if (n >= 0) {
+                token.attrSet('src', `%%RR:IMG:${stub}:${n}%%`);
+                // referrerpolicy 渲染期预置（spec §7.3/§16）：仅裸名图（将占位符化者）。
+                // 替换阶段只换 URL 字符串，无法向 <img> 标签追加属性——presign 直连图发 origin 供
+                // 七牛 Referer 白名单；代理路径同属性无害（同源请求不受影响）
+                token.attrSet('referrerpolicy', 'strict-origin-when-cross-origin');
+            }
+        }
+        token.attrSet('loading', 'lazy');
+        token.attrSet('decoding', 'async');
+        return defaultImage!(tokens, idx, options, env, self);
+    };
+    let html: string;
+    try {
+        html = md.render(src);
+    } finally {
+        md.renderer.rules.image = defaultImage; // 实例单例——渲染后恢复（占位符 stub 逐次不同）
+    }
+    const result = { html, names, contentHash };
     if (RENDER_CACHE.size >= RENDER_CACHE_MAX) {
         const first = RENDER_CACHE.keys().next().value;
         if (first !== undefined) RENDER_CACHE.delete(first);
     }
-    RENDER_CACHE.set(key, html);
-    return html;
+    RENDER_CACHE.set(contentHash, result);
+    return result;
 }
 
 // 仅供测试：清空缓存与单例，验证缓存命中/重建逻辑
