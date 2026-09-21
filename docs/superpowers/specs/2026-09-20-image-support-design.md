@@ -97,6 +97,7 @@ sequenceDiagram
 | 25 | 图片定位原则 | **图片是文档的内嵌内容，不是一等公民资产**——精细管理（去重/存根/GC）动机是控制存储成本，不提供图片管理能力；一切可见性/操作需求除非来自真实场景不进 v1（列表 API 备案） |
 | 26 | 取图缓存 | 代理路由 `no-cache` + `ETag="<content_hash>"`（协商复用，撤销即时性与 no-store 等价）；直连路径**签名时间桶对齐**（TTL/6 一桶，桶内 URL 稳定 → 浏览器缓存命中）；代理路由 v1 不支持 Range（img 全量加载 + Safari bytes=0-1 探测对 200 兼容）；直连图客户端 `onerror` 兜底占位（带原因，§7.5） |
 | 27 | 插件接口定形 | 能力域窄定制（只认 key+字节，元数据在 DB 行 → 图片/冷档共用）+ 消费者横向复用 + 极简硬编码 Map 注册（不做 manifest/运行时加载/版本协商）；**演进纪律：只能加可选成员，禁止加必选/删改签名**，能力用运行时探测（§8） |
+| 28 | 单文档引用数上限 | `MAX_IMAGE_REFS`（shared 常量，=500）：refs 登记时拦截（413 语义）——防超大文档拖垮 R1 集合差重算与补录事务；上限值调优等真实痛点再说（交叉审查修复批） |
 
 ## 4. 数据模型（完备版，经 Oracle 审查修复）
 
@@ -135,7 +136,7 @@ ALTER TABLE documents ADD COLUMN storage_backend TEXT;  -- NULL=hot；非空=col
 ```
 
 - **storage_key 为 per-owner 内容寻址**（`<owner>/<hash>`）——同 owner 同 hash 必同一行（UNIQUE 保证），无跨行/跨 owner blob 共享，删除无连带风险
-- **documents 双列纪律**：`storage_tier` 与 `storage_backend` 由归档/回热路径**单点写入**（归档写 backend、回热清 NULL），一致性由测试锁定（防双真相源漂移）
+- **documents 双列纪律（实现现状勘误，交叉审查 B P2-3）**：`storage_tier` 与 `storage_backend` 由归档/回热路径**单点写入**（归档写 backend、回热清 NULL）。v1 读冷档实际走**全局单例** `getObjectStore()`（不按行路由）——`storage_backend` 列为**写入溯源备案**（换后端时定位旧对象的依据），按行路由待第二个后端真实启用时再上；双列单点写入一致性由测试锁定（防双真相源漂移）
 - 迁移：Drizzle migration + `ensureSchema` 兜底（`ensureImagesTables()` / `ensureDocumentsStorageBackendColumn()`）；schema↔ensureSchema 等价性守卫测试同步
 
 ### 4.2 状态机
@@ -192,9 +193,11 @@ stateDiagram-v2
 
 - 认证 Bearer token + authfail IP 桶；限流轻桶 `images-meta:${tokenId}`（默认 120/min）
 - Body `{name, content_hash, content_md5, size_bytes}`；校验链（**P0-1，顺序不可变**）：**`content_hash` 须匹配 `/^[0-9a-f]{64}$/`、`content_md5` 须匹配 `/^[0-9a-f]{32}$/`，否则 400——hash 未经格式校验直接拼入 local 写盘路径（`blobs/<h2>/<hash>`），`..` 可穿越 DATA_DIR 任意写**；name 单段合法；size≤上限（413 预检）
-- 逻辑（按序）：查 `(owner,hash)`——ready → `{status:"exists", name}`；pending → `{status:"direct"|relay 视后端, name, image_id, upload_url?}`（共享行）；deleted 墓碑 → 复活（全字段重置：status→pending、created_at=now、ready_at=NULL、backend=当前、key 新生成、md5/size 按新报值）→ 同新行响应；无行 → 插 pending → 同上
+- 逻辑（按序）：查 `(owner,hash)`——ready → `{status:"exists", name}`；pending → `{status:"direct"|relay 视后端, name, imageId, uploadUrl?}`（共享行，响应字段 **camelCase**——`image_id`/`upload_url` 为设计期笔误勘误）；deleted 墓碑 → 复活（全字段重置：status→pending、created_at=now、ready_at=NULL、backend=当前、key 新生成、md5/size 按新报值）→ 同新行响应；无行 → 插 pending → 同上
+- **exists 分支 head 自愈（交叉审查修复批 P1）**：ready 行命中 exists 前先 `store.head(storageKey)` 探测——blob 丢失（磁盘损坏/误删）时降级墓碑（复用 GC 软删语义）走复活重传，封死"重传永远命中 exists → 裂图永续"；head 自身不可达（503 语义）不阻断幂等快路径
 - 后端为 s3 → `direct` + presigned PUT（key=`images/<owner>/<hash>`，TTL=`store.uploadUrlTtlSeconds ?? 600`）；后端为 local → `relay`
 - 名字冲突（不同内容）→ 后缀循环（§4.4）
+- **单文档引用数上限（交叉审查修复批 #28）**：refs 登记（上传/覆盖）时校验 `extractImageNames(content).length > MAX_IMAGE_REFS`（=500，shared 常量）→ 413 语义拒绝（`TooManyImageRefsError`），防超大文档拖垮 R1 集合差重算与补录事务
 
 ### 5.2 `POST /api/v1/images`（relay）
 
@@ -298,7 +301,7 @@ interface BlobStore {
 - 能力分级：L0（put/get/delete/head[+getRange]）全功能——上传 relay、取图代理；L1（+presign）直传直连。**代理路由是万能兜底，presign 永远是加速项**
 - 插件独有功能：存储侧行为（生命周期/防盗链/快照）厂商侧自配核心无感；业务感知功能（imageView2 等）v1 不做，`opts` 不透明透传缝预留
 - NAS 接入：挂载（复用 local，零代码）/ WebDAV（新插件 ~100 行）/ S3 网关（复用 s3）
-- 冷却通用化：tiering 注入 BlobStore；documents 冷档行记录 backend；读冷档按行路由
+- 冷却通用化：tiering 注入 BlobStore；documents 冷档行记录 backend；读冷档按行路由（v1 实现为全局单例读、列作溯源备案——见 §4.1 双列纪律勘误）
 - 数据结构不为未来预留 `backend_meta` 列（YAGNI；SQLite 加列廉价，等真实消费者）
 
 ## 9. 引用关系管理与 GC
@@ -318,6 +321,7 @@ interface BlobStore {
 - **文档删除**：删除事务内 SELECT 快照该 md（含子树全部 file 行，deleteNode 先例）的 refs 清单 → 删文档（CASCADE 清 refs）→ 逐图终态检查归零 → 条件式软删墓碑 → 事务后按 §4.3-2 反查删 blob
 - **覆盖上传**：§9.2 的集合差重算；toRemove 触发同款归零检查
 - **周期兜底**（分批 LIMIT）：pending 超 1h 物理删；ready 无 refs 超 24h 软删；**顺带清理悬空 ref**（`refs JOIN images WHERE status≠'ready'` 的行删除）。**P1-2（代码实证）：`startTieringScheduler` 须改为无条件启动**——现状 `tiering.ts` 在 `getObjectStore()` 为 null 时直接 return（未配对象存储则调度器不存在），而默认部署恰是 local 后端无对象存储 → 图片 GC 将永不运行（pending 名永不释放、存储无界增长）；修正后归档循环保留 store 判空 no-op，图片回收循环无外部依赖
+- **单轮循环至清空（交叉审查修复批 P1）**：每 tick 的图片回收在单轮内 while 循环（上限 10000 防呆）直至无新回收行——固定批次大小会让回收吞吐追不上 init 产速（压力场景 pending 无界堆积），循环清空保证每 tick 结束时队列见底
 
 ### 9.4 不一致态的收敛（发现者 + 收敛器）
 
@@ -325,7 +329,7 @@ interface BlobStore {
 |---|---|---|---|
 | 悬空 ref（指向非 ready 图） | 渲染占位不炸（替换只认 ready） | 渲染层天然防御 | 周期任务清行（§9.3） |
 | 幽灵图（无 refs 该死未死） | 仅存储浪费 | 无需防御 | **24h 周期回收 = 全局收敛器** |
-| 行 ready 但 blob 丢失（仅顺序写反的 bug 可致；正确序 = 先软删行后删 blob） | 裂图 + exists 复用坏行 | 顺序不变量 + serve 失败日志 | 不变量测试锁定；人工修复备案 |
+| 行 ready 但 blob 丢失（磁盘损坏/误删；仅顺序写反的 bug 亦可致） | 裂图 + exists 复用坏行 | **init exists 分支 head 探测（交叉审查修复批 P1：降级墓碑复活重传）** + serve 失败日志 | head 自愈（自动）；不变量测试锁定顺序 |
 | 墓碑复活竞态残留 | 多余对象 | —— | 24h 收敛器 |
 
 **总原则（不对称设计）：宁可晚删，绝不早删。** 晚删最坏代价 = 一份资源多占 24h（周期回收收敛）；早删 = 丢数据且部分不可自愈。全部机制（R1/终态判定/删 blob 反查/条件式写）服务于"早删不可能"，晚删交给常转的清洁工。
@@ -380,6 +384,7 @@ pending 超时释放；ready 墓碑永不释放（90d 物理清理备案）。
 - 代理路由缓存：no-cache+ETag 协商 304 / 撤销 token 后协商 404（即时性验证）/ onerror 兜底（Playwright 拦截请求模拟 CDN 失败）
 - 桥：六类错误/两阶段/双通道/进度摘要/token 解析不误伤/**429 退避重试**
 - 冷档溯源回归；startup-check；schema↔ensureSchema 等价性
+- **测试基建（交叉审查修复批）**：vitest 4 下 `pool/poolOptions` 必须置于 config 顶层（test 级字段被静默忽略）且 `pool: 'forks', poolOptions: { singleFork: true }`——better-sqlite3 原生 addon + 单 DB 文件的测试隔离前提；fire-and-forget 轮询断言须多轮 flush 沉降（高负载下线程池回调可晚于单轮 setImmediate）
 - Playwright：relay+direct 双模式全链路 + lightbox 交互 + 删文档图 404
 
 ## 14. 已知权衡与备案
@@ -399,7 +404,9 @@ pending 超时释放；ready 墓碑永不释放（90d 物理清理备案）。
 | **换后端须保留旧后端 env**（P2-7） | `IMAGE_STORE_BACKEND` 切到 local 且删除 OBJECT_STORE_* → 旧 s3 图行查无实现 503——与冷档现状行为一致；INSTALL 写明：切换后保留旧后端 env 直至旧行清空/迁移完成 |
 | CSP 转 enforcing 时 | img-src 须放行 CDN 域名（当前 report-only/未设不受影响） |
 | 占位符离线碰撞 | 2^32 sha256 前缀离线可碰撞，但伪造者只能命中自己文档的 names[]（owner 作用域），无跨用户影响——接受 |
+| 桥 resolveLocal 相对路径（交叉审查备案） | 预检的本地路径解析以桥 cwd 为基准——Agent 本就能在宿主机任意读文件（既有能力面，非新增暴露）；Web 侧 storage_key 恒 hex 内容寻址 + 魔数限四种格式，无穿越落盘路径 |
+| confirm ETag 缺失网关的 md5 降级（交叉审查备案） | 网关 head 不返回 ETag 时（`head.etag === undefined`）跳过 md5 诚实性比对，仅余 magic+size+扩展名三重——key 为 per-owner 内容寻址，毒害面限于 owner 自己的池（无跨 owner 路径），且主流 S3 网关（含七牛）单段 PUT ETag=MD5 可用 |
 
 ## 15. 实现现状
 
-待实现。
+**已全量交付（2026-09-21）**：五批实现（P1 存储层 / P2 Web API+GC / P3 渲染管线 / P4 桥编排 / P5 前端收官）+ 两批交叉审查修复（批 A：relay/confirm 路由 503 映射、GC 单轮循环至清空、initImage exists 分支 head 探测自愈、vitest singleFork 配置补正等；批 B：存储错误类迁独立模块解循环依赖、双代理路由收敛 `serveImageResponse`、浏览器全屏 `use:browserFullscreen` 三组件收敛、confirm 补扩展名一致校验 + `extsForMime` 上移 shared 单源、并发墓碑复活测试、spec 备案补录）。测试 703 全绿 + svelte-check 0 错 + 桥 tsc 0 错 + e2e-check.sh 图片七段冒烟 + e2e-images.mjs Lightbox 11 断言。实现细节与各修复的完整记录以 `AGENTS.md` 为权威（本 spec 保留设计决策与备案）。已知 v1 从简偏离（swipe 非跟手/双击锚定近似/超界平移无阻尼）见 §10 与 AGENTS.md。
