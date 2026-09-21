@@ -53,6 +53,6 @@ export function getActiveImageStore(): BlobStore {
 }
 
 // 仅供测试：覆写/重置注册表（undefined = 下次访问重算）
-export function __setBlobStoresForTest(stores: { local: BlobStore } | undefined): void {
+export function __setBlobStoresForTest(stores: { local: BlobStore; s3?: BlobStore } | undefined): void {
     registry = stores === undefined ? undefined : new Map(Object.entries(stores));
 }
