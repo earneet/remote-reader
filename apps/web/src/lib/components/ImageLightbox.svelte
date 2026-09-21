@@ -2,8 +2,9 @@
     import { overlayOnMount } from '$lib/shared/overlay-mount';
     import { overlayGestures } from '$lib/shared/overlay-gestures';
     import type { GestureOpts } from '$lib/shared/overlay-gestures';
-    import { nextZoom, formatZoom, ZOOM_STEP, clampZoom } from '$lib/shared/zoom';
+    import { nextZoom, formatZoom, ZOOM_STEP, clampZoom, ZOOM_WHEEL_FACTOR } from '$lib/shared/zoom';
     import { trapTabKey } from '$lib/shared/focus-trap';
+    import { browserFullscreen, type BrowserFullscreenCtl } from '$lib/shared/browser-fullscreen';
 
     // props：图集（当前文档全部正文 <img> 的 src/alt 列表——MarkdownViewer 收集传入）+ 初始索引
     let { images, start, onClose }: {
@@ -18,8 +19,8 @@
     let zoom = $state(1);
     let x = $state(0);
     let y = $state(0);
-    let browserFs = $state(false);
-    let overlayEl: HTMLDivElement | undefined = $state(undefined);
+    // 挂载时由 use:browserFullscreen 装入实现（组件侧零全屏状态）
+    let fsCtl: BrowserFullscreenCtl = { toggle: () => {}, exit: () => {} };
     let stageEl: HTMLDivElement | undefined = $state(undefined);
     // 双击锚定 v1 从简：transform-origin 定双击点 + 位移归零（可感知的中心放大，非精确反向平移）；
     // null = 中心。任何其他缩放路径先 normalizeOrigin 归一回中心（纯表示变换，视觉不动）
@@ -91,7 +92,7 @@
             //   内容点 c = (P - pan - C) / prevZoom 不变 → pan' = P - c * zoom' - C
             normalizeOrigin();
             const prev = zoom;
-            const next = clampZoom(zoom - deltaY * 0.0015, RANGE);
+            const next = clampZoom(zoom - deltaY * ZOOM_WHEEL_FACTOR, RANGE);
             if (next === prev) return;
             const el = stageEl;
             if (!el) {
@@ -133,34 +134,10 @@
         loading = false;
     }
 
-    function toggleBrowserFs(): void {
-        // 与 mermaid 同款：class 驱动视觉全屏（iOS 无 Fullscreen API 也生效）+
-        // requestFullscreen 让桌面/Android 隐藏浏览器 UI；旧 WebKit 返回值变量中转再 ?.catch
-        browserFs = !browserFs;
-        const el = overlayEl;
-        if (browserFs) {
-            const p = el?.requestFullscreen?.();
-            p?.catch(() => {});
-        } else if (document.fullscreenElement) {
-            const p2 = document.exitFullscreen?.();
-            p2?.catch(() => {});
-        }
-    }
-
     function close(): void {
-        if (document.fullscreenElement) document.exitFullscreen()?.catch(() => {});
-        browserFs = false;
+        fsCtl.exit();
         onClose();
     }
-
-    // 浏览器退出全屏（Esc）时同步 class 状态
-    $effect(() => {
-        const onFsChange = (): void => {
-            browserFs = !!document.fullscreenElement;
-        };
-        document.addEventListener('fullscreenchange', onFsChange);
-        return () => document.removeEventListener('fullscreenchange', onFsChange);
-    });
 
     function handleKey(e: KeyboardEvent): boolean {
         if (e.key === 'Escape') {
@@ -189,13 +166,12 @@
 
 <div
     class="rr-imglb-overlay"
-    class:rr-fs={browserFs}
-    bind:this={overlayEl}
     role="dialog"
     aria-modal="true"
     aria-label="图片查看器"
     tabindex="-1"
     use:overlayOnMount
+    use:browserFullscreen={fsCtl}
     onkeydown={(e) => {
         if (handleKey(e)) return;
         trapTabKey(e, e.currentTarget);
@@ -207,7 +183,7 @@
             <button type="button" title="缩小" onclick={() => zoomBy(-ZOOM_STEP)}>−</button>
             <button type="button" title="重置 100%" onclick={() => resetView()}>⊙</button>
             <button type="button" title="放大" onclick={() => zoomBy(ZOOM_STEP)}>+</button>
-            <button type="button" title="全屏" onclick={() => toggleBrowserFs()}>⛶</button>
+            <button type="button" title="全屏" onclick={() => fsCtl.toggle()}>⛶</button>
             <button type="button" title="关闭" onclick={() => close()}>✕</button>
         </div>
     </div>
@@ -332,8 +308,8 @@
         border-radius: 50%;
         animation: rr-imglb-spin 0.8s linear infinite;
     }
-    /* 全屏（⛶）：去标题栏、控件浮右上角、图片占满视口（class 驱动，:fullscreen 兜底桌面/Android） */
-    .rr-imglb-overlay.rr-fs .rr-imglb-bar {
+    /* 全屏（⛶）：去标题栏、控件浮右上角、图片占满视口（class 由 use:browserFullscreen 运行时添加 → :global，:fullscreen 兜底桌面/Android） */
+    :global(.rr-imglb-overlay.rr-fs .rr-imglb-bar) {
         position: absolute;
         top: 8px;
         right: 8px;
@@ -342,7 +318,7 @@
         border: none;
         padding: 0;
     }
-    .rr-imglb-overlay.rr-fs .rr-imglb-label {
+    :global(.rr-imglb-overlay.rr-fs .rr-imglb-label) {
         display: none;
     }
     :global(.rr-imglb-overlay:fullscreen) {

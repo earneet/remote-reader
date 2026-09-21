@@ -3,6 +3,8 @@
 export const MIN_ZOOM = 0.5;
 export const MAX_ZOOM = 3;
 export const ZOOM_STEP = 0.2;
+/** 滚轮缩放的像素增量→zoom 换算系数（三浮层组件同款手感） */
+export const ZOOM_WHEEL_FACTOR = 0.0015;
 
 export function clampZoom(z: number, range: { min?: number; max?: number } = {}): number {
     const min = range.min ?? MIN_ZOOM;
