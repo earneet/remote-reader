@@ -58,13 +58,16 @@ export interface ImageTokenLine { src: string; line: number }
 export function imageTokenLines(src: string): ImageTokenLine[] {
     const out: ImageTokenLine[] = [];
     const lines = src.split('\n');
+    // 双形态匹配（Task 1 遗留边界）：md 原文写中文/空格、token src 是 normalizeLink 编码形态——
+    // 只试编码形态会 miss → line=-1 → 改写丢失；decode 形态也须参与命中
     const lineOf = (raw: string, range: [number, number] | null): number => {
+        const hit = (l: string): boolean => l.includes(raw) || l.includes(decodeLocalSrc(raw));
         if (range) {
             for (let i = range[0]; i < range[1] && i < lines.length; i++) {
-                if (lines[i].includes(raw)) return i;
+                if (hit(lines[i])) return i;
             }
         }
-        return lines.findIndex((l) => l.includes(raw)); // null 或范围未命中：全文找（首现行）
+        return lines.findIndex(hit); // null 或范围未命中：全文找（首现行）
     };
     const walk = (toks: MdToken[], parentMap: [number, number] | null): void => {
         for (const t of toks) {

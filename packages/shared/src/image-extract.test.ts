@@ -78,4 +78,10 @@ describe('imageTokenLines / extractLocalImageSrcs（桥编排单源）', () => {
         // line 为图片实际行（实现：表格内 inline.map=null → 扫描含 src 的行取首个；改写安全由 split/join 天然保证）
         expect(toks[0].line).toBe(2);
     });
+    it('行定位双形态匹配（Task 1 遗留边界）：md 原文写中文、token src 是编码形态 → 行不丢', () => {
+        // lineOf 用编码形态 includes 匹配 md 原文会 miss → line=-1 → 改写丢失；decode 形态也须命中
+        expect(imageTokenLines('![截图](截图.png)')).toEqual([{ src: '%E6%88%AA%E5%9B%BE.png', line: 0 }]);
+        // 范围内未命中后的全文兜底同样双形态；空格编码形态同理
+        expect(imageTokenLines('![a](<a b.png>)')).toEqual([{ src: 'a%20b.png', line: 0 }]);
+    });
 });
