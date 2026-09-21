@@ -26,6 +26,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1126.0",
+    "@aws-sdk/s3-request-presigner": "^3.1136.0",
     "@node-rs/argon2": "^2.0.2",
     "@remote-reader/shared": "workspace:*",
     "@smithy/node-http-handler": "^4.12.1",
