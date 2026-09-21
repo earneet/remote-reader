@@ -15,19 +15,26 @@ function parser(): MarkdownIt {
     return cached;
 }
 
+/** 图片引用归一化（单源）：query/fragment 剥离 → URL decode → ./ 剥离 → 非裸名（分隔符/scheme）判 null。
+ *  extractImageNames 与 web 渲染 image renderer 共用——两处漂移会造成占位符索引错位。 */
+export function normalizeImageRef(raw: string): string | null {
+    let s = raw;
+    const hashAt = s.search(/[?#]/);
+    if (hashAt >= 0) s = s.slice(0, hashAt);
+    try { s = decodeURIComponent(s); } catch { /* 非法编码按原样 */ }
+    if (s.startsWith('./')) s = s.slice(2);
+    if (!s || s.includes('/') || s.includes('\\')) return null;
+    if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(s)) return null;
+    return s;
+}
+
 /** 提取 md 中本地图片引用的裸名（去重保序）。外链/data:/绝对路径/含分隔符路径/math 内/code 内不提取 */
 export function extractImageNames(src: string): string[] {
     const out: string[] = [];
     const seen = new Set<string>();
     const push = (raw: string): void => {
-        let s = raw;
-        const hashAt = s.search(/[?#]/);
-        if (hashAt >= 0) s = s.slice(0, hashAt);
-        try { s = decodeURIComponent(s); } catch { /* 非法编码按原样 */ }
-        if (s.startsWith('./')) s = s.slice(2);
-        if (!s || s.includes('/') || s.includes('\\')) return;    // 含分隔符：非裸名
-        if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(s)) return;          // scheme（http/data/…）
-        if (!seen.has(s)) { seen.add(s); out.push(s); }
+        const n = normalizeImageRef(raw);
+        if (n && !seen.has(n)) { seen.add(n); out.push(n); }
     };
     const tokens = parser().parse(src, {});
     const walk = (toks: MdToken[]): void => {

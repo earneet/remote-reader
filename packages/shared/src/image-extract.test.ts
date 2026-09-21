@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { extractImageNames } from './image-extract';
+import { extractImageNames, normalizeImageRef } from './image-extract';
 
 describe('extractImageNames（裸名提取单源）', () => {
     it('本地裸名提取', () => {
@@ -26,4 +26,18 @@ describe('extractImageNames（裸名提取单源）', () => {
     it('重复引用去重保序', () => {
         expect(extractImageNames('![a](x.png)![b](x.png)![c](y.png)')).toEqual(['x.png', 'y.png']);
     });
+});
+
+describe('normalizeImageRef（归一化单源——渲染 renderer 与提取器共用）', () => {
+    it('裸名原样', () => { expect(normalizeImageRef('shot.png')).toBe('shot.png'); });
+    it('./ 前缀剥离 + query/fragment 剥离 + decode', () => {
+        expect(normalizeImageRef('./my%20shot.png?w=1#x')).toBe('my shot.png');
+    });
+    it('外链/站内绝对/data: → null（渲染原样输出的判定）', () => {
+        expect(normalizeImageRef('https://x.com/a.png')).toBeNull();
+        expect(normalizeImageRef('/abs.png')).toBeNull();
+        expect(normalizeImageRef('data:image/png;base64,x')).toBeNull();
+    });
+    it('含路径分隔符 → null', () => { expect(normalizeImageRef('sub/dir.png')).toBeNull(); });
+    it('非法百分号编码 → 原样返回（不炸）', () => { expect(normalizeImageRef('a%zz.png')).toBe('a%zz.png'); });
 });
