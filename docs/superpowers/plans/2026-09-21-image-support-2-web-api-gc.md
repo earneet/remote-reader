@@ -1067,6 +1067,8 @@ export const GET: RequestHandler = async ({ params, request, setHeaders }) => {
 
 ---
 
+**执行期经验（Phase 2 实录，Phase 3+ 派发带上）**：① SvelteKit `json(body, 400)` 数字第二参被**静默忽略**（状态码回落 200）——必须 `json(body, { status: 400 })` 对象形式（Task 8 三处已按此修正）；② dev 冒烟进程与测试共享 `data/app.db`——**全量测试须在 dev 冒烟前跑或确认进程退净**（残留 WAL 锁会造成 1 例间歇性失败，复跑即绿）；③ shared 新 TS 文件首次被 web `$shared` alias 引用时 svelte-check 才真正检查它——`@types/markdown-it` 需在 shared 的 devDependencies（`a3a96c8`）；④ 测试覆盖 `tests/**/*.ts`，联合类型上的属性访问需 narrow helper（TS2339）。
+
 ## Self-Review 记录
 
 1. **Spec 覆盖**：§5.1-5.5 全部（init 四分支/relay 校验链/confirm 三重验证/双代理路由）✓；§6.3 提取器单源 ✓（math 抽取是 P1-3 的完整解）；§9.1-9.5 全部（R1/三触发点/安全包/收敛/名字语义）✓；§4.3 五不变量逐条有测试场景 ✓；P1-2 调度器 ✓；P0-1 hash 校验 ✓；P1-1 字节绑定 ✓；P2-1 owner 作用域 ✓；P2-6 续期 ✓。**不在本批**：IMAGE_SIGNED_URL_TTL/IMAGE_PROXY_ALL（Phase 3 渲染消费）、presign GET（Phase 3）、onerror（Phase 5 前端）。
