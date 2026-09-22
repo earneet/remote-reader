@@ -249,6 +249,72 @@ test('putImageBytes 非 2xx → ApiError 图片直传失败', async () => {
         .rejects.toMatchObject({ status: 403, message: expect.stringContaining('图片直传失败') });
 });
 
+test('userAgent 提供时 uploadDocument 携带 User-Agent；未提供时无该头（向后兼容）', async () => {
+    const headersList: Record<string, string>[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (_u: string, init: RequestInit) => {
+        headersList.push(init.headers as Record<string, string>);
+        return new Response(JSON.stringify({ id: 'd', url: 'u' }), { status: 200 });
+    }));
+    await createApiClient({ baseUrl: 'http://x', token: 't', userAgent: 'remote-reader-bridge/0.2.0' })
+        .uploadDocument({ name: 'n', content: 'c' });
+    await createApiClient({ baseUrl: 'http://x', token: 't' }).uploadDocument({ name: 'n', content: 'c' });
+    expect(headersList[0]['User-Agent']).toBe('remote-reader-bridge/0.2.0');
+    expect(headersList[1]['User-Agent']).toBeUndefined();
+});
+
+test('userAgent 提供时图片 JSON 方法（init/relay/confirm）也携带 User-Agent', async () => {
+    let headers: Record<string, string> = {};
+    vi.stubGlobal('fetch', vi.fn(async (_u: string, init: RequestInit) => {
+        headers = init.headers as Record<string, string>;
+        return new Response(JSON.stringify({ status: 'relay', name: 'a.png', imageId: 'i1' }), { status: 200 });
+    }));
+    const api = createApiClient({ baseUrl: 'http://x', token: 't', userAgent: 'remote-reader-bridge/0.2.0' });
+    await api.initImage({ name: 'a.png', contentHash: 'h', contentMd5: 'm', sizeBytes: 1 });
+    expect(headers['User-Agent']).toBe('remote-reader-bridge/0.2.0');
+    await api.relayImage({ imageId: 'i1', contentBase64: 'QQ==' });
+    expect(headers['User-Agent']).toBe('remote-reader-bridge/0.2.0');
+    await api.confirmImage({ imageId: 'i1' });
+    expect(headers['User-Agent']).toBe('remote-reader-bridge/0.2.0');
+});
+
+test('putImageBytes 即使配置 userAgent 也不携带（presigned 第三方 URL 不外泄信息）', async () => {
+    let captured: { init?: RequestInit } = {};
+    vi.stubGlobal('fetch', vi.fn(async (_u: string, init: RequestInit) => {
+        captured = { init };
+        return new Response(null, { status: 204 });
+    }));
+    await createApiClient({ baseUrl: 'http://x', token: 't', userAgent: 'remote-reader-bridge/0.2.0' })
+        .putImageBytes('https://cloud/u?sig', Buffer.from('x'));
+    const headers = (captured.init!.headers ?? {}) as Record<string, string>;
+    expect(headers['User-Agent'] ?? headers['user-agent']).toBeUndefined();
+});
+
+test('uploadDocument 透传 body.warnings（字符串数组）与 x-remote-reader-min-bridge 头', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+        JSON.stringify({ id: 'd1', url: 'http://s/t', warnings: ['检测到 1 处本地图片引用未上传'] }),
+        { status: 200, headers: { 'x-remote-reader-min-bridge': '0.2.0' } }
+    )));
+    const r = await createApiClient({ baseUrl: 'http://x', token: 't' }).uploadDocument({ name: 'n', content: 'c' });
+    expect(r).toEqual({
+        id: 'd1',
+        url: 'http://s/t',
+        warnings: ['检测到 1 处本地图片引用未上传'],
+        minBridgeVersion: '0.2.0'
+    });
+});
+
+test('uploadDocument 无 warnings/头时返回形状不变（{id,url} 无多余键）', async () => {
+    mockFetch(200, { id: 'd1', url: 'u' });
+    const r = await createApiClient({ baseUrl: 'http://x', token: 't' }).uploadDocument({ name: 'n', content: 'c' });
+    expect(r).toEqual({ id: 'd1', url: 'u' });
+});
+
+test('uploadDocument body.warnings 非字符串数组 → 不透传（防脏数据）', async () => {
+    mockFetch(200, { id: 'd1', url: 'u', warnings: [1, 2] });
+    const r = await createApiClient({ baseUrl: 'http://x', token: 't' }).uploadDocument({ name: 'n', content: 'c' });
+    expect(r).toEqual({ id: 'd1', url: 'u' });
+});
+
 test('图片方法超时 = IMAGE_TIMEOUT_MS 300s（spec §6.2 慢链路常量锁定）', async () => {
     expect(IMAGE_TIMEOUT_MS).toBe(300_000);
 });

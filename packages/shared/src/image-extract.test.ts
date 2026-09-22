@@ -70,6 +70,31 @@ describe('imageTokenLines / extractLocalImageSrcs（桥编排单源）', () => {
     it('去重保序', () => {
         expect(extractLocalImageSrcs('![a](x.png)![b](x.png)')).toEqual(['x.png']);
     });
+    it('混合 md 对照快照：表格/多段落/重复引用/盘符/scheme 的完整提取序列（免行号重构的行为锁定）', () => {
+        // 表格内图片是行定位最贵的路径（父 inline map 为 null → 全文扫描）；本用例锁定
+        // extractLocalImageSrcs 只依赖 token 遍历序（与 imageTokenLines 同构 DFS）的输出序列，
+        // 内部实现改为免行号 walk 后此序列必须逐字节不变
+        const md = [
+            '# 标题',
+            '',
+            '![首段](first.png)',
+            '',
+            '| a | b |',
+            '|---|---|',
+            '| ![表内](imgs/t%20o.png) | ![重复](first.png) |',
+            '',
+            '尾段 ![尾](last.png) 与外链 ![外](https://x.com/e.png)',
+            '',
+            '盘符 ![win](C:\\Users\\me\\w.png) 和 ![win2](D:/pics/w2.png)'
+        ].join('\n');
+        expect(extractLocalImageSrcs(md)).toEqual([
+            'first.png',
+            'imgs/t%20o.png',
+            'last.png',
+            'C:\\Users\\me\\w.png',
+            'D:/pics/w2.png'
+        ]);
+    });
     it('表格内图片：父 inline 无 map → 降级返回该 src 的全部出现行（改写走全文逐行）', () => {
         const md = '| a | b |\n|---|---|\n| ![x](t.png) | y |';
         const toks = imageTokenLines(md);

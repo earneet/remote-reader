@@ -155,6 +155,8 @@ Documents are located by `(owner, path, name)`; the sha256 of the content decide
 | Exists, same content | **No disk write, no timestamp change** | `{ id, url }` (same) |
 | Exists, different content | Overwrite on disk + update hash/size | `{ id, url }` (**id and url unchanged**) |
 
+> All cases return `{ id, url }`; `warnings?: string[]` is a conditional field (present when unuploaded local image references are detected, hinting at an outdated bridge), and the response header `X-Remote-Reader-Min-Bridge` carries the recommended minimum bridge version.
+
 → The view link for a given document stays stable long-term; after a content update the link is unchanged and auto-points to the latest version. Agents can safely re-upload.
 
 ## Tech Stack

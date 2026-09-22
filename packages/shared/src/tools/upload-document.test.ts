@@ -108,3 +108,37 @@ test('预检失败：throw ImageValidationError（多行问题清单），零上
     expect(m.initImage).toHaveBeenCalledTimes(0);
     expect(m.uploadDocument).toHaveBeenCalledTimes(0);
 });
+
+test('服务端 warnings → 追加 ⚠️ 服务端警告 到结果文本', async () => {
+    const m = mockApi();
+    m.uploadDocument.mockResolvedValue({
+        id: 'd1', url: 'http://s/t',
+        warnings: ['检测到 1 处本地图片引用未随文档上传（查看页将显示裂图）：imgs/red.png']
+    });
+    const r = await uploadDocumentHandler({ name: 'a.md', content: '# 旧桥风格' }, asApi(m));
+    expect(r.content[0].text).toContain('⚠️ 服务端警告：检测到 1 处本地图片引用未随文档上传（查看页将显示裂图）：imgs/red.png');
+});
+
+test('clientVersion 低于 minBridgeVersion → 追加升级提示（含 npm/源码两路线指引）', async () => {
+    const m = mockApi();
+    m.uploadDocument.mockResolvedValue({ id: 'd1', url: 'http://s/t', minBridgeVersion: '0.2.0' });
+    const r = await uploadDocumentHandler({ name: 'a.md', content: 'c' }, asApi(m), { clientVersion: '0.1.0' });
+    expect(r.content[0].text).toContain('当前桥版本 0.1.0 低于服务端建议的最低版本 0.2.0');
+    expect(r.content[0].text).toContain('npx -y remote-reader-bridge@latest');
+});
+
+test('clientVersion 等于/高于 minBridgeVersion → 不追加升级提示', async () => {
+    const m = mockApi();
+    m.uploadDocument.mockResolvedValue({ id: 'd1', url: 'http://s/t', minBridgeVersion: '0.2.0' });
+    for (const v of ['0.2.0', '0.3.1']) {
+        const r = await uploadDocumentHandler({ name: 'a.md', content: 'c' }, asApi(m), { clientVersion: v });
+        expect(r.content[0].text).not.toContain('低于服务端建议的最低版本');
+    }
+});
+
+test('opts 省略 → 即使响应带 minBridgeVersion 也不追加升级提示（向后兼容）', async () => {
+    const m = mockApi();
+    m.uploadDocument.mockResolvedValue({ id: 'd1', url: 'http://s/t', minBridgeVersion: '0.2.0' });
+    const r = await uploadDocumentHandler({ name: 'a.md', content: 'c' }, asApi(m));
+    expect(r.content[0].text).not.toContain('低于服务端建议的最低版本');
+});

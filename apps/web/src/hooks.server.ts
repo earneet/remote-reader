@@ -39,7 +39,17 @@ export const handle: Handle = async ({ event, resolve }) => {
         } catch {
             ip = '?';
         }
-        console.log(`[access] ${new Date().toISOString()} ${event.request.method} ${event.url.pathname} ${response.status} ip=${ip}${origin ? ` origin=${origin}` : ''}`);
+        // /api/ 路径追加 User-Agent 首个空白分隔 token（截 64 字符）：排障时识别桥版本
+        // （remote-reader-bridge/0.2.0）；非 API 路径不记（浏览器 UA 噪音）
+        let ua = '';
+        if (event.url.pathname.startsWith('/api/')) {
+            const uaRaw = event.request.headers.get('user-agent');
+            if (uaRaw) {
+                const uaToken = uaRaw.split(/\s+/)[0].slice(0, 64);
+                if (uaToken) ua = ` ua=${uaToken}`;
+            }
+        }
+        console.log(`[access] ${new Date().toISOString()} ${event.request.method} ${event.url.pathname} ${response.status} ip=${ip}${origin ? ` origin=${origin}` : ''}${ua}`);
     }
     return response;
 };

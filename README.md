@@ -155,6 +155,8 @@ Agent 读取登录页 SSR 输出的 `<details id="agent-guide">` 指引块（对
 | 有，内容相同 | **不写盘、不改时间戳** | `{ id, url }`（同） |
 | 有，内容不同 | 覆盖磁盘 + 更新 hash/size | `{ id, url }`（**id 与 url 不变**） |
 
+> 返回恒为 `{ id, url }`；`warnings?: string[]` 为条件字段（检测到未上传的本地图片引用时出现，提示桥版本过旧），响应头 `X-Remote-Reader-Min-Bridge` 下发建议的最低桥版本。
+
 → 同一份文档的查看链接长期稳定；内容更新后链接不变、自动指向最新版本。Agent 可放心重复上传。
 
 ## 技术栈

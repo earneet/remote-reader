@@ -65,6 +65,16 @@ S_BODY=$(echo "$S" | head -1)
 [ "$S_CODE" = "409" ] || { echo "FAIL: 路径段撞同名文件应 409，实际 $S_CODE"; exit 1; }
 echo "$S_BODY" | grep -q "已被同名文件占用" || { echo "FAIL: 409 响应应携带冲突原因 message，实际 $S_BODY"; exit 1; }
 
+echo "→ 验证旧桥风格上传（本地图片引用未上传）→ 响应含 warnings + min-bridge 头"
+WARN_HDR=$(mktemp)
+S=$(curl -s -D "$WARN_HDR" -X POST "$BASE/api/v1/documents" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"name":"old-bridge.md","content":"# 旧桥风格\n\n![x](imgs/red.png)","path":"checks"}')
+echo "$S" | grep -q '"warnings"' || { echo "FAIL: 旧桥风格上传响应应含 warnings，实际 $S"; rm -f "$WARN_HDR"; exit 1; }
+echo "$S" | grep -q 'imgs/red.png' || { echo "FAIL: warnings 应提及未上传引用 imgs/red.png，实际 $S"; rm -f "$WARN_HDR"; exit 1; }
+grep -qi '^x-remote-reader-min-bridge: 0.2.0' "$WARN_HDR" || { echo "FAIL: 响应应携带 x-remote-reader-min-bridge: 0.2.0 头"; rm -f "$WARN_HDR"; exit 1; }
+rm -f "$WARN_HDR"
+
 echo "→ 验证图片支持全链路（init 三态/relay 真实 PNG/带图 md/代理 URL/引用回收/错误场景）"
 # node -e 一站式生成真实 PNG（魔数 + payload，字节落盘供比对）与 SVG/第二张 PNG 的 hash/base64 元数据
 IMG_PNG=$(mktemp); IMG_META=$(mktemp); IMG_GET=$(mktemp); IMG_HDR=$(mktemp)

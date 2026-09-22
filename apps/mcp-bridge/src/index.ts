@@ -7,19 +7,23 @@ import {
     uploadDocumentHandler
 } from '@remote-reader/shared/tools/upload-document';
 import { loadConfig } from './config';
+import { getBridgeVersion } from './version';
 
 async function main() {
     const cfg = loadConfig();
-    const api = createApiClient(cfg);
+    const bridgeVersion = getBridgeVersion();
+    // UA 声明桥版本（Layer ①）：服务端 access log 与兼容判断据此识别调用方
+    const api = createApiClient({ ...cfg, userAgent: `remote-reader-bridge/${bridgeVersion}` });
 
-    const server = new McpServer({ name: 'remote-reader', version: '0.1.0' });
+    const server = new McpServer({ name: 'remote-reader', version: bridgeVersion });
 
     server.registerTool(
         'upload_document',
         { description: uploadDocumentDescription, inputSchema: uploadDocumentSchema },
         async (args) => {
             try {
-                return await uploadDocumentHandler(args, api);
+                // clientVersion 供 Layer ③ 自检：服务端建议的最低版本更高时在结果文本提示升级
+                return await uploadDocumentHandler(args, api, { clientVersion: bridgeVersion });
             } catch (e) {
                 return {
                     isError: true as const,

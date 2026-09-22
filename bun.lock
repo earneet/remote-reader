@@ -10,7 +10,7 @@
     },
     "apps/mcp-bridge": {
       "name": "remote-reader-bridge",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "bin": {
         "remote-reader-bridge": "dist/index.js",
       },

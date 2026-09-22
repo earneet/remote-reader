@@ -4,6 +4,8 @@ import { authenticateApiToken } from '$server/apitoken-auth';
 import { checkRateLimit } from '$server/ratelimit';
 import { uploadDocument, NameConflictError } from '$server/documents';
 import { TooManyImageRefsError } from '$server/image-refs';
+import { detectUnuploadedLocalImageRefs } from '$server/upload-warnings';
+import { MIN_BRIDGE_VERSION } from '$server/bridge-compat';
 import { parsePath } from '@remote-reader/shared/paths';
 import { envInt } from '$server/env';
 
@@ -67,5 +69,15 @@ export const POST: RequestHandler = async ({ request, getClientAddress }) => {
         if (e instanceof TooManyImageRefsError) error(413, e.message);
         throw e;
     }
-    return json(result);
+    // Layer ③：最低桥版本建议随响应头下发（桥 compareVersions 自检）；无 warnings 时响应形状零变化
+    const headers = { 'X-Remote-Reader-Min-Bridge': MIN_BRIDGE_VERSION };
+    // Layer ②：内容兜底检测（旧桥不发 UA）——本地图片引用未随文档上传 → warnings 提示升级
+    const { total, listed } = detectUnuploadedLocalImageRefs(auth.userId, result.id, content);
+    if (total > 0) {
+        return json({
+            ...result,
+            warnings: [`检测到 ${total} 处本地图片引用未随文档上传（查看页将显示裂图）：${listed.join('、')}${total > listed.length ? '（仅列前 5 处）' : ''}——这通常意味着桥版本过旧（≥0.2.0 起支持图片自动上传），请升级桥后重新上传`]
+        }, { headers });
+    }
+    return json(result, { headers });
 };
