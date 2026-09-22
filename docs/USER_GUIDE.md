@@ -45,7 +45,8 @@ TOKEN="rr_xxxxxxxx..."
 curl -X POST http://localhost:3000/api/v1/documents \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"name":"hello.md","content":"# 你好\n\n这是 **Remote Reader**。\n\n```ts\nconst x: number = 1;\n```","path":"demo"}'
-# 返回 {"id":"...","url":"http://localhost:3000/s/<token>"}
+# 返回 {"id":"...","url":"http://localhost:3000/s/<token>"}（若检测到未上传的本地图片引用，
+# 另含 "warnings": ["..."] 提示；响应头 X-Remote-Reader-Min-Bridge 下发建议的最低桥版本）
 
 # 4) 打开返回的 url —— 免登录，直接看到渲染（标题/加粗/代码高亮）
 ```
@@ -194,6 +195,8 @@ Body:   { "name": "<文件名>", "content": "<markdown 正文>", "path": "<可�
 Response 200: { "id": "...", "url": "https://<host>/s/<share-token>" }
 ```
 
+条件字段 `warnings?: string[]`：检测到本地图片引用未随文档上传（通常是桥版本过旧）时出现，Agent 应按提示升级桥后重新上传；成功响应均带 `X-Remote-Reader-Min-Bridge` 头，下发建议的最低桥版本。
+
 **参数**：
 
 - `name`（必填）：文件名，如 `weekly.md`。经路径安全过滤（禁 `..` / 绝对路径 / `\` / `:` 等）。
@@ -209,6 +212,8 @@ Response 200: { "id": "...", "url": "https://<host>/s/<share-token>" }
 | 该位置无文档 | 新建 + 落盘 + 生成 share link | `{ id, url }`（新） |
 | 有，内容相同 | **不写盘、不改时间戳** | `{ id, url }`（同） |
 | 有，内容不同 | 覆盖磁盘 + 更新 hash/size | `{ id, url }`（**id 与 url 不变**） |
+
+> 三种情况返回恒为 `{ id, url }`；`warnings?: string[]` 为条件字段（检测到未上传的本地图片引用时出现，见 §2.3）。
 
 → **同一份文档的查看链接长期稳定**；内容更新后链接不变、自动指向最新版本。Agent 可放心重复上传。
 
