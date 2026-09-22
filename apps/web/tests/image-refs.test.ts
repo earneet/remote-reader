@@ -298,4 +298,61 @@ describe('runImageGcCycle（周期回收，spec §9.3）', () => {
         expect(r.pendingReaped).toBe(0);
         expect(imageRow(raced)!.status).toBe('ready'); // 快照 status 条件 + 删除 status 条件双重拦下
     });
+
+    // 直插造 ready 老行（列清单同上 img-reuse 先例，绕开 init/relay 真实路径换速度）：
+    // 以 id 为种子派生 hash/name 绕开 content_hash 与 (owner_id, name) 两个 UNIQUE；
+    // 分块拼多行 VALUES 防单条 SQL 文本过长
+    const insertReadyRows = (rows: Array<{ id: string; name: string; key: string }>): void => {
+        for (let b = 0; b < rows.length; b += 1000) {
+            const chunk = rows.slice(b, b + 1000).map(({ id, name, key }) =>
+                `('${id}', 'u1', '${name}', '${sha256(Buffer.from(id))}', '${md5(Buffer.from(id))}', 'image/png', 1, 'ready', 'local', '${key}', 0, 0)`);
+            sqlite.exec(`INSERT INTO images (id, owner_id, name, content_hash, content_md5, mime_type, size_bytes, status, storage_backend, storage_key, created_at, ready_at)
+                VALUES ${chunk.join(', ')}`);
+        }
+    };
+
+    it('扫描窗口饥饿回归：600 个 refed 老 ready 行堵满首个 500 窗口 → 窗口外无引用幽灵图仍被收', async () => {
+        mkUser('u1');
+        mkDoc('d1', 'u1');
+        // 600 个 ready 且 ready_at=0（超 24h）且被 d1 合法引用的行，id 字典序 img-ref-* 全部
+        // 小于幽灵的 img-zzz-* → 首个 LIMIT 500 窗口全为 refed 行。旧实现下 reapedInBatch===0
+        // 即 break（refed 行不改状态、无游标推进）→ 幽灵永久漏收，违背 §9.4 周期回收=全局收敛器
+        const refed = Array.from({ length: 600 }, (_, i) => {
+            const id = `img-ref-${i.toString().padStart(3, '0')}`;
+            return { id, name: `ref${i}.png`, key: `ref-blob-${i}.bin` };
+        });
+        insertReadyRows(refed);
+        sqlite.exec(`INSERT INTO image_refs (document_id, image_id, created_at) VALUES ${refed.map((r) => `('d1', '${r.id}', 0)`).join(', ')}`);
+        insertReadyRows([{ id: 'img-zzz-ghost', name: 'ghost.png', key: 'ghost-blob.bin' }]);
+        fs.writeFileSync(path.join(DIR, 'ghost-blob.bin'), 'x');
+        const r = await runImageGcCycle();
+        await flush();
+        expect(r.readyReaped).toBe(1);                                 // 候选查询下推 refs 判定：批次恒为可收行
+        expect(imageRow('img-zzz-ghost')!.status).toBe('deleted');     // 窗口推进越过 refed 行
+        expect(fs.existsSync(path.join(DIR, 'ghost-blob.bin'))).toBe(false);
+        expect(db.select({ id: schema.images.id }).from(schema.images)
+            .where(eq(schema.images.status, 'ready')).all()).toHaveLength(600); // refed 全保持 ready，无一误删
+    });
+
+    it('扫描预算回归：refed 行数超 CYCLE_LIMIT(10000) 也不吞噬预算——幽灵一轮被收', async () => {
+        mkUser('u1');
+        mkDoc('d1', 'u1');
+        const N = 10_001;
+        const refed = Array.from({ length: N }, (_, i) => {
+            const id = `img-ref-${i.toString().padStart(5, '0')}`;
+            return { id, name: `ref${i}.png`, key: `ref-blob-${i}.bin` };
+        });
+        insertReadyRows(refed);
+        for (let b = 0; b < N; b += 1000) {
+            sqlite.exec(`INSERT INTO image_refs (document_id, image_id, created_at) VALUES ${refed.slice(b, b + 1000).map((r) => `('d1', '${r.id}', 0)`).join(', ')}`);
+        }
+        insertReadyRows([{ id: 'img-zzz-ghost', name: 'ghost.png', key: 'ghost-blob.bin' }]);
+        fs.writeFileSync(path.join(DIR, 'ghost-blob.bin'), 'x');
+        const r = await runImageGcCycle();
+        await flush();
+        expect(r.readyReaped).toBe(1);
+        expect(imageRow('img-zzz-ghost')!.status).toBe('deleted'); // NOT EXISTS 后候选不含 refed 行 → 预算不被重扫吞噬
+        expect(db.select({ id: schema.images.id }).from(schema.images)
+            .where(eq(schema.images.status, 'ready')).all()).toHaveLength(N);
+    });
 });

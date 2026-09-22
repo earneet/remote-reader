@@ -132,6 +132,19 @@ async function directOrRelay(imageId: string): Promise<InitImageResult> {
     return { status: 'relay', name: row.name, imageId: row.id };
 }
 
+/** 条件式删除注定无法 ready 的 pending 行（relay 的 magic/ext 失败、confirm 的 magic/ext 失败且 ETag 已证内容诚实）。
+ *  不变量：sha256（relay）/ ETag==md5（confirm）已绑定内容真值，其后 magic/ext 失败对 (name,content) 是永久性的
+ *  （内容 hash 不可变、校验确定性）——该行永远无法 ready，占着 (owner,hash) 唯一键与名字只会制造改名重传死锁
+ *  （initImage 复用 pending 行返回行内注册名，spec §4.4）。删行释放 (owner,hash) 与名字，下次 init 走新建
+ *  分支用修正后的名字。pending 行正常路径无 refs 指向（refs 只登记 ready 行），DELETE image_refs 仅防历史
+ *  悬空坏态（image_refs.image_id FK 是 no action 且 foreign_keys=ON，不先清会让 DELETE 抛 FK 错误）。 */
+function dropDoomedPendingRow(rowId: string): void {
+    db.transaction((tx) => {
+        tx.delete(schema.imageRefs).where(eq(schema.imageRefs.imageId, rowId)).run();
+        tx.delete(schema.images).where(and(eq(schema.images.id, rowId), eq(schema.images.status, 'pending'))).run();
+    });
+}
+
 export type RelayResult = { ok: true; name: string } | { ok: false; reason: 'missing' } | { ok: false; reason: 'invalid'; message: string };
 
 export async function relayImage(ownerId: string, imageId: string, data: Buffer): Promise<RelayResult> {
@@ -148,10 +161,14 @@ export async function relayImage(ownerId: string, imageId: string, data: Buffer)
     const mime = detectImageMime(data);
     if (mime === null) {
         const isSvg = data.subarray(0, 5).toString('latin1').startsWith('<');
+        // sha256 已绑定内容真值：非支持格式对该内容永久成立 → 删行释放 (owner,hash)，封死改名重传死锁
+        dropDoomedPendingRow(row.id);
         return { ok: false, reason: 'invalid', message: isSvg ? '不支持的图片格式（SVG 可携脚本，安全考虑不支持；支持 png/jpeg/gif/webp）' : '无法识别的图片格式（支持 png/jpeg/gif/webp）' };
     }
     const ext = row.name.split('.').pop()?.toLowerCase() ?? '';
     if (!extsForMime(mime).includes(ext)) {
+        // 同上：字节真值已定且格式可辨，(name,content) 错配永久成立 → 删行，下次 init 用修正后的名字
+        dropDoomedPendingRow(row.id);
         return { ok: false, reason: 'invalid', message: `扩展名 .${ext} 与实际格式 ${mime} 不一致，请改名重传` };
     }
     const store = getBlobStore(row.storageBackend);
@@ -187,11 +204,17 @@ export async function confirmImage(ownerId: string, imageId: string): Promise<Co
     if (head.size > getMaxImageBytes()) return { ok: false, reason: 'invalid', message: '对象超过大小上限' };
     const head32 = await store.getRange(row.storageKey, 0, 31);
     const mime = detectImageMime(head32);
-    if (mime === null) return { ok: false, reason: 'invalid', message: '对象内容非支持图片格式' };
+    if (mime === null) {
+        // ETag==md5 已证字节诚实 → 非支持格式对该内容永久成立 → 删 pending 行防死锁；ETag 缺失/不符 → 行可能是无辜的，不删
+        if (head.etag !== undefined && head.etag === row.contentMd5) dropDoomedPendingRow(row.id);
+        return { ok: false, reason: 'invalid', message: '对象内容非支持图片格式' };
+    }
     // 扩展名一致（spec §5.3/§11 与 relay 双重承诺）：direct 通道 PUT 的字节格式须与 init 名字匹配；
-    // 不删云对象（行 pending 可重传覆盖），无 refs 悬挂由 GC 兜底回收
+    // 不删云对象（key 内容寻址，重传覆盖消化——与「无行孤儿 blob」备案一致）。
+    // ETag==md5 已证字节诚实 → (name,content) 错配永久成立 → 同款删行封死死锁；ETag 缺失/不符不删（行可能是无辜的）
     const ext = row.name.split('.').pop()?.toLowerCase() ?? '';
     if (!extsForMime(mime).includes(ext)) {
+        if (head.etag !== undefined && head.etag === row.contentMd5) dropDoomedPendingRow(row.id);
         return { ok: false, reason: 'invalid', message: `扩展名 .${ext} 与实际格式 ${mime} 不一致，请改名重传` };
     }
     if (head.etag !== undefined && head.etag !== row.contentMd5) {
