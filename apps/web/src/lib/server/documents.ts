@@ -723,7 +723,8 @@ export function deleteNode(ownerId: string, id: string): void {
         }
     }
 
-    void gcImagesIfUnreferenced(imageIdsForGc);
+    // .catch 兜 unhandledRejection（tiering tick 同款先例）——函数自身已 per-id 容错，双保险
+    void gcImagesIfUnreferenced(imageIdsForGc).catch((e) => console.warn('[img-gc] 删除文档后图片回收失败', e));
 }
 
 // 冷热分层：访问时间戳（推迟冷却判定；只动 last_viewed_at，不动 updated_at 避免影响排序语义）

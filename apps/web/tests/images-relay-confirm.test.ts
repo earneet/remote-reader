@@ -159,9 +159,10 @@ describe('confirmImage（spec §5.3）', () => {
         if (init.status !== 'direct') throw new Error('unreachable');
         await fake.put(init.uploadUrl.split('/put/')[1]!.split('?')[0], JPG); // 桥直传 jpeg 字节
         const r = await confirmImage('u1', init.imageId);
-        expect(r).toEqual({ ok: false, reason: 'invalid', message: expect.stringContaining('不一致') });
-        const row = db.select().from(schema.images).where(eq(schema.images.id, init.imageId)).get()!;
-        expect(row.status).toBe('pending'); // 未 ready
+        expect(r.ok).toBe(false);
+        if (!r.ok && r.reason === 'invalid') expect(r.message).toContain('不一致');
+        // ETag==md5（FakeS3 head 即内容 md5）已证字节诚实 → (name,content) 错配永久 → 行删防死锁
+        expect(db.select().from(schema.images).where(eq(schema.images.id, init.imageId)).get()).toBeUndefined();
     });
 });
 
@@ -207,5 +208,100 @@ describe('resolveImageByName', () => {
         expect(resolveImageByName('u1', 'a.png')).toBeNull(); // pending
         await relayImage('u1', idOf(init), PNG);
         expect(resolveImageByName('u1', 'a.png')?.id).toBe(idOf(init));
+    });
+});
+
+describe('改名重传死锁修复（QA 实测：sha256 绑定后的 magic/ext 永久性失败 → 条件式删 pending 行）', () => {
+    it('relay 主用例：.jpg 名 + PNG 字节 invalid → 同 hash 改名 .png 重传 → 新名生效 → ready', async () => {
+        __setBlobStoresForTest({ local: new LocalBlobStore() });
+        mkUser('u1');
+        const init1 = await initImage('u1', { name: 'photo.jpg', contentHash: sha256(PNG), contentMd5: md5(PNG), sizeBytes: PNG.length });
+        expect((await relayImage('u1', idOf(init1), PNG)).ok).toBe(false); // ext-mismatch invalid
+        // 死锁核心：旧实现 pending 复用返回行内旧注册名 photo.jpg，用户按错误指引改名永远无效
+        const init2 = await initImage('u1', { name: 'photo.png', contentHash: sha256(PNG), contentMd5: md5(PNG), sizeBytes: PNG.length });
+        expect(init2.status).toBe('relay');
+        expect(init2.name).toBe('photo.png');
+        const r2 = await relayImage('u1', idOf(init2), PNG);
+        expect(r2.ok).toBe(true);
+        if (r2.ok) expect(r2.name).toBe('photo.png');
+        expect(resolveImageByName('u1', 'photo.png')?.id).toBe(idOf(init2));
+    });
+
+    it('relay magic-null（文本字节）invalid → 行删，同 hash 新名 init 得新行新名', async () => {
+        __setBlobStoresForTest({ local: new LocalBlobStore() });
+        mkUser('u1');
+        const txt = Buffer.from('plain text, not an image');
+        const init1 = await initImage('u1', { name: 'note.png', contentHash: sha256(txt), contentMd5: md5(txt), sizeBytes: txt.length });
+        expect((await relayImage('u1', idOf(init1), txt)).ok).toBe(false); // magic-null invalid
+        expect(db.select().from(schema.images).where(eq(schema.images.id, idOf(init1))).get()).toBeUndefined(); // 行已删
+        const init2 = await initImage('u1', { name: 'renamed.png', contentHash: sha256(txt), contentMd5: md5(txt), sizeBytes: txt.length });
+        expect(init2.status).toBe('relay');
+        expect(init2.name).toBe('renamed.png'); // 不再复用旧名
+        expect(idOf(init2)).not.toBe(idOf(init1)); // 新建分支，非旧行复活
+    });
+
+    it('负面对照：sha256 谎报 invalid 不删行（字节可能非真值内容，行可能是无辜的）→ 再 init 同 hash 复用同一 pending 行', async () => {
+        __setBlobStoresForTest({ local: new LocalBlobStore() });
+        mkUser('u1');
+        const init1 = await initImage('u1', { name: 'a.png', contentHash: 'a'.repeat(64), contentMd5: md5(PNG), sizeBytes: PNG.length });
+        expect((await relayImage('u1', idOf(init1), PNG)).ok).toBe(false); // hash 不符 invalid
+        const init2 = await initImage('u1', { name: 'a.png', contentHash: 'a'.repeat(64), contentMd5: md5(PNG), sizeBytes: PNG.length });
+        expect(idOf(init2)).toBe(idOf(init1)); // 同一 pending 行，imageId 不变
+        expect(db.select().from(schema.images).where(eq(schema.images.id, idOf(init1))).get()!.status).toBe('pending');
+    });
+
+    it('relay invalid 删行后：再次 relay 同 imageId → missing（行已删）', async () => {
+        __setBlobStoresForTest({ local: new LocalBlobStore() });
+        mkUser('u1');
+        const init = await initImage('u1', { name: 'y.jpg', contentHash: sha256(PNG), contentMd5: md5(PNG), sizeBytes: PNG.length });
+        expect((await relayImage('u1', idOf(init), PNG)).ok).toBe(false);
+        expect(await relayImage('u1', idOf(init), PNG)).toEqual({ ok: false, reason: 'missing' });
+    });
+});
+
+describe('confirm 改名重传死锁修复（s3 直传侧：ETag==md5 证诚实才删）', () => {
+    beforeEach(() => { process.env.IMAGE_STORE_BACKEND = 's3'; }); // active 后端切 s3 → init 走 direct 分支
+    afterEach(() => { delete process.env.IMAGE_STORE_BACKEND; });
+
+    it('ext-mismatch 且 ETag==md5（内容诚实=永久错配）→ 行删，再 init 同 hash 得新名', async () => {
+        const fake = new FakeS3();
+        __setBlobStoresForTest({ local: new LocalBlobStore(), s3: fake });
+        mkUser('u1');
+        const init1 = await initImage('u1', { name: 'photo.jpg', contentHash: sha256(PNG), contentMd5: md5(PNG), sizeBytes: PNG.length });
+        if (init1.status !== 'direct') throw new Error('unreachable');
+        await fake.put(init1.uploadUrl.split('/put/')[1]!.split('?')[0], PNG); // 直传 PNG 字节到 .jpg 名
+        const r = await confirmImage('u1', init1.imageId);
+        expect(r.ok).toBe(false); // ext-mismatch invalid
+        expect(db.select().from(schema.images).where(eq(schema.images.id, init1.imageId)).get()).toBeUndefined(); // 行已删
+        const init2 = await initImage('u1', { name: 'photo.png', contentHash: sha256(PNG), contentMd5: md5(PNG), sizeBytes: PNG.length });
+        expect(init2.status).toBe('direct');
+        expect(init2.name).toBe('photo.png'); // 新名生效
+    });
+
+    it('magic-null 且 ETag==md5（内容诚实）→ 行删（文本对象非支持格式，永久性）', async () => {
+        const fake = new FakeS3();
+        __setBlobStoresForTest({ local: new LocalBlobStore(), s3: fake });
+        mkUser('u1');
+        const txt = Buffer.from('plain text, not an image');
+        const init1 = await initImage('u1', { name: 'note.png', contentHash: sha256(txt), contentMd5: md5(txt), sizeBytes: txt.length });
+        if (init1.status !== 'direct') throw new Error('unreachable');
+        await fake.put(init1.uploadUrl.split('/put/')[1]!.split('?')[0], txt);
+        const r = await confirmImage('u1', init1.imageId);
+        expect(r.ok).toBe(false); // magic-null invalid
+        expect(db.select().from(schema.images).where(eq(schema.images.id, init1.imageId)).get()).toBeUndefined(); // 行已删
+    });
+
+    it('ext-mismatch 但 ETag!=md5（内容未证诚实，行可能是无辜的）→ 行保留 pending', async () => {
+        const fake = new FakeS3();
+        __setBlobStoresForTest({ local: new LocalBlobStore(), s3: fake });
+        mkUser('u1');
+        const tampered = Buffer.concat([PNG.subarray(0, 8), Buffer.alloc(120, 9)]); // PNG 魔数 + 篡改体 → head.etag != 行内 md5
+        const init1 = await initImage('u1', { name: 'photo.jpg', contentHash: sha256(PNG), contentMd5: md5(PNG), sizeBytes: PNG.length });
+        if (init1.status !== 'direct') throw new Error('unreachable');
+        await fake.put(init1.uploadUrl.split('/put/')[1]!.split('?')[0], tampered);
+        const r = await confirmImage('u1', init1.imageId);
+        expect(r.ok).toBe(false); // ext-mismatch（校验链先于 ETag 判定命中）
+        const row = db.select().from(schema.images).where(eq(schema.images.id, init1.imageId)).get()!;
+        expect(row.status).toBe('pending'); // 行保留
     });
 });

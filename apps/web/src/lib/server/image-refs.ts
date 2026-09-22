@@ -49,33 +49,48 @@ export function registerDocumentRefs(ownerId: string, docId: string, mdContent: 
         return { toRemove };
     });
     // GC 检查只对 toRemove、只在事务提交后、按终态（§4.3-4）
-    void gcImagesIfUnreferenced(toRemove);
+    // .catch 双保险兜 unhandledRejection（tiering tick 同款先例）——gcImagesIfUnreferenced
+    // 自身已 per-id 容错，此处防的是进入循环前的同步抛错路径
+    void gcImagesIfUnreferenced(toRemove).catch((e) => console.warn('[img-gc] refs 重算后回收失败', e));
 }
 
-/** 归零检查 → 条件式软删墓碑 → 事务后按 key 反查删 blob（§4.3-1/2/4）。fire-and-forget。 */
+/** 归零检查 → 条件式软删墓碑 → 事务后按 key 反查删 blob（§4.3-1/2/4）。fire-and-forget。
+ *  per-id 容错：单个 id 的 DB 错误（SQLITE_FULL/IOERR/超 busy_timeout）只 warn 不中断整批，
+ *  且函数不因 DB 错误 reject——调用点为 void fire-and-forget，reject 会变 Node ≥15 默认
+ *  进程崩溃（unhandledRejection）。失败只影响本轮，宁可晚删绝不早删，下轮收敛。 */
 export async function gcImagesIfUnreferenced(imageIds: string[]): Promise<void> {
     for (const id of imageIds) {
-        db.transaction((tx) => {
-            const refCount = tx.select({ n: sql<number>`count(*)` }).from(schema.imageRefs)
-                .where(eq(schema.imageRefs.imageId, id)).get()?.n ?? 0;
-            if (refCount > 0) return;
-            tx.update(schema.images).set({ status: 'deleted' })
-                .where(and(eq(schema.images.id, id), eq(schema.images.status, 'ready'))).run();
-        });
-        const row = db.select({ storageBackend: schema.images.storageBackend, storageKey: schema.images.storageKey })
-            .from(schema.images).where(eq(schema.images.id, id)).get();
-        if (row) void deleteBlobIfOrphaned(row.storageBackend, row.storageKey);
+        try {
+            db.transaction((tx) => {
+                const refCount = tx.select({ n: sql<number>`count(*)` }).from(schema.imageRefs)
+                    .where(eq(schema.imageRefs.imageId, id)).get()?.n ?? 0;
+                if (refCount > 0) return;
+                tx.update(schema.images).set({ status: 'deleted' })
+                    .where(and(eq(schema.images.id, id), eq(schema.images.status, 'ready'))).run();
+            });
+            const row = db.select({ storageBackend: schema.images.storageBackend, storageKey: schema.images.storageKey })
+                .from(schema.images).where(eq(schema.images.id, id)).get();
+            if (row) void deleteBlobIfOrphaned(row.storageBackend, row.storageKey);
+        } catch (e) {
+            console.warn('[img-gc] 单图回收失败（下轮收敛）', id, e);
+        }
     }
 }
 
-/** §4.3-2：物理删 blob 前反查同 key 活行——封死"行删后重传同 key 新行 → 延迟 DELETE 误删活图" */
+/** §4.3-2：物理删 blob 前反查同 key 活行——封死"行删后重传同 key 新行 → 延迟 DELETE 误删活图"。
+ *  反查的 DB 查询也纳入 try：本函数全部调用点为 void fire-and-forget，开头同步抛错会变
+ *  unhandledRejection → Node ≥15 默认进程崩溃；失败无害（blob 残留为孤儿，下轮再看）。 */
 async function deleteBlobIfOrphaned(backend: string, key: string): Promise<void> {
-    const active = db.select({ id: schema.images.id }).from(schema.images)
-        .where(and(eq(schema.images.storageKey, key), inArray(schema.images.status, ['pending', 'ready']))).all();
-    if (active.length > 0) return; // 有活行复用同 key（重传场景）：跳过，下轮再看
-    const store = getBlobStore(backend);
-    if (!store) return;
-    try { await store.delete(key); } catch (e) { console.warn('[img-gc] blob 删除失败（孤儿，无害）', key, e); }
+    try {
+        const active = db.select({ id: schema.images.id }).from(schema.images)
+            .where(and(eq(schema.images.storageKey, key), inArray(schema.images.status, ['pending', 'ready']))).all();
+        if (active.length > 0) return; // 有活行复用同 key（重传场景）：跳过，下轮再看
+        const store = getBlobStore(backend);
+        if (!store) return;
+        await store.delete(key);
+    } catch (e) {
+        console.warn('[img-gc] blob 孤儿反查/删除失败（无害，下轮收敛）', key, e);
+    }
 }
 
 /** 渲染替换阶段惰性补录（P1-4：content-hash 守卫——渲染期间文档被覆盖则放弃补录，防僵尸 ref） */
@@ -138,32 +153,39 @@ export async function runImageGcCycle(): Promise<{ pendingReaped: number; readyR
         if (reapedInBatch === 0) break; // 防自旋：批内全被条件式拦下（单线程同步下理论不可达）
     }
     // 2) ready 无 refs 超 24h：软删墓碑 + 反查删 blob
+    //    refs 判定下推 SQL（NOT EXISTS 相关子查询）：被活文档合法引用的行不进候选窗口——
+    //    若在 JS 侧过滤，refed 行不改状态、继续匹配 WHERE、无游标推进，稳态下首个 500 窗口
+    //    一旦全为 refed 行，窗口外的无引用幽灵图永久漏收且重扫吞噬 CYCLE_LIMIT 预算
+    //    （违背 §9.4 周期回收=全局收敛器）
     let readyReaped = 0;
     let readyScanned = 0;
     while (readyScanned < CYCLE_LIMIT) {
-        const staleReady = db.select({ id: schema.images.id }).from(schema.images)
-            .where(and(eq(schema.images.status, 'ready'), lt(schema.images.readyAt, now - 24 * 3_600_000)))
+        const staleReady = db.select({
+            id: schema.images.id,
+            storageBackend: schema.images.storageBackend,
+            storageKey: schema.images.storageKey
+        }).from(schema.images)
+            .where(and(
+                eq(schema.images.status, 'ready'),
+                lt(schema.images.readyAt, now - 24 * 3_600_000),
+                sql`NOT EXISTS (SELECT 1 FROM ${schema.imageRefs} WHERE ${schema.imageRefs.imageId} = ${schema.images.id})`
+            ))
             .orderBy(asc(schema.images.id)) // 同上：批间确定性分页
             .limit(Math.min(BATCH, CYCLE_LIMIT - readyScanned)).all();
         if (staleReady.length === 0) break;
-        const candidateIds = staleReady.map((r) => r.id);
-        const refed = new Set(db.select({ imageId: schema.imageRefs.imageId }).from(schema.imageRefs)
-            .where(inArray(schema.imageRefs.imageId, candidateIds)).all().map((r) => r.imageId));
         let reapedInBatch = 0;
-        for (const id of candidateIds) {
-            if (refed.has(id)) continue;
+        for (const r of staleReady) {
+            // 条件式软删（GC 安全包 §4.3-4）：与 refs 重登记窗口期的竞态由 status 条件兜底
             const flipped = db.update(schema.images).set({ status: 'deleted' })
-                .where(and(eq(schema.images.id, id), eq(schema.images.status, 'ready'))).run().changes > 0;
+                .where(and(eq(schema.images.id, r.id), eq(schema.images.status, 'ready'))).run().changes > 0;
             if (flipped) {
                 readyReaped++;
                 reapedInBatch++;
-                const r = db.select({ storageBackend: schema.images.storageBackend, storageKey: schema.images.storageKey })
-                    .from(schema.images).where(eq(schema.images.id, id)).get();
-                if (r) void deleteBlobIfOrphaned(r.storageBackend, r.storageKey);
+                void deleteBlobIfOrphaned(r.storageBackend, r.storageKey);
             }
         }
         readyScanned += staleReady.length;
-        if (reapedInBatch === 0) break; // 批内全被 refs 挡住（无新可收行）→ 留给下轮，防对同批行自旋
+        if (reapedInBatch === 0) break; // 条件式拦下整批（NOT EXISTS 后候选恒可收，理论不可达）→ 防自旋
     }
     return { pendingReaped, readyReaped, danglingRefs };
 }
