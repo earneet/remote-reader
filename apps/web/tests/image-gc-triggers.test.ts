@@ -37,6 +37,12 @@ const flush = async (): Promise<void> => {
     for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r));
 };
 
+// 删除终态断言用条件等待（同 image-refs.test.ts 的 waitUntil 范式）：极端负载下 fs 线程池回调
+// 可晚于固定轮数 flush（QA 定向连打实测 ~6% flake）；条件永不成立（真 bug）时轮数耗尽照常报红
+const waitUntil = async (cond: () => boolean): Promise<void> => {
+    for (let i = 0; i < 200 && !cond(); i++) await new Promise((r) => setImmediate(r));
+};
+
 function mkUser(id: string): void {
     sqlite.exec(`INSERT INTO users (id, email, password_hash, role, created_at) VALUES ('${id}', '${id}@t.local', 'x', 'member', 0)`);
 }
@@ -83,7 +89,7 @@ describe('uploadDocument 挂载（新建/覆盖/幂等三分支）', () => {
         const r = await uploadDocument('u1', 'doc.md', '![x](a.png)', []);
         expect(fs.existsSync(blobPath(a))).toBe(true);
         await uploadDocument('u1', 'doc.md', '覆盖后只剩文字，没有图了', []);
-        await flush();
+        await waitUntil(() => !fs.existsSync(blobPath(a)));
         expect(refRows(r.id)).toEqual([]);
         expect(imageRow(a)!.status).toBe('deleted');   // 墓碑（行保留）
         expect(fs.existsSync(blobPath(a))).toBe(false); // blob 已删
@@ -108,7 +114,7 @@ describe('deleteNode 挂载（快照 → CASCADE 删 refs → 终态 GC）', () 
         const a = await mkReadyImage('u1', 'a.png', pngBytes(1));
         const r = await uploadDocument('u1', 'doc.md', '![x](a.png)', []);
         deleteNode('u1', r.id);
-        await flush();
+        await waitUntil(() => !fs.existsSync(blobPath(a)));
         expect(refRows(r.id)).toEqual([]);              // CASCADE 已清 refs 行
         expect(imageRow(a)!.status).toBe('deleted');
         expect(fs.existsSync(blobPath(a))).toBe(false);
@@ -140,7 +146,7 @@ describe('deleteNode 挂载（快照 → CASCADE 删 refs → 终态 GC）', () 
             ))
             .get()!;
         deleteNode('u1', folder.id);
-        await flush();
+        await waitUntil(() => !fs.existsSync(blobPath(a)) && !fs.existsSync(blobPath(b)));
         expect(imageRow(a)!.status).toBe('deleted');
         expect(imageRow(b)!.status).toBe('deleted');
         expect(fs.existsSync(blobPath(a))).toBe(false);

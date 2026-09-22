@@ -145,7 +145,7 @@ describe('registerDocumentRefs（声明式登记，spec §9.1/§9.2）', () => {
         registerDocumentRefs('u1', 'd1', '![x](gone.png)');
         expect(fs.existsSync(blobPath(gone))).toBe(true);
         registerDocumentRefs('u1', 'd1', '覆盖后不再引用图片');
-        await flush();
+        await waitUntil(() => !fs.existsSync(blobPath(gone)));
         expect(imageRow(gone)!.status).toBe('deleted');       // 墓碑（行保留）
         expect(fs.existsSync(blobPath(gone))).toBe(false);    // blob 已删
     });
@@ -174,7 +174,7 @@ describe('gcImagesIfUnreferenced（§4.3-1/2/4）', () => {
         mkDoc('d1', 'u1');
         registerDocumentRefs('u1', 'd1', '![k](kept.png)');
         await gcImagesIfUnreferenced([orphan, kept]);
-        await flush();
+        await waitUntil(() => !fs.existsSync(blobPath(orphan)));
         expect(imageRow(orphan)!.status).toBe('deleted');
         expect(fs.existsSync(blobPath(orphan))).toBe(false);
         expect(imageRow(kept)!.status).toBe('ready');
@@ -242,7 +242,7 @@ describe('runImageGcCycle（周期回收，spec §9.3）', () => {
         registerDocumentRefs('u1', 'd1', '![k](kept.png)');
         sqlite.exec(`UPDATE images SET ready_at=0 WHERE id IN ('${orphan}', '${kept}')`);
         const r = await runImageGcCycle();
-        await flush();
+        await waitUntil(() => !fs.existsSync(blobPath(orphan)));
         expect(r.readyReaped).toBe(1);
         expect(imageRow(orphan)!.status).toBe('deleted');
         expect(fs.existsSync(blobPath(orphan))).toBe(false);
