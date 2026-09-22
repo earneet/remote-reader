@@ -97,13 +97,23 @@ const WINDOWS_DRIVE = /^[a-zA-Z]:[\\/]/;
 export function extractLocalImageSrcs(src: string): string[] {
     const seen = new Set<string>();
     const out: string[] = [];
-    for (const { src: raw } of imageTokenLines(src)) {
-        if (!raw) continue;
-        const decoded = decodeLocalSrc(raw);
-        if (WINDOWS_DRIVE.test(decoded)) { if (!seen.has(decoded)) { seen.add(decoded); out.push(decoded); } continue; }
-        if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(raw)) continue;
-        if (!seen.has(raw)) { seen.add(raw); out.push(raw); }
-    }
+    // 免行号 walk：不再经 imageTokenLines——其行定位在表格上下文（父 inline map 为 null）退化为
+    // 全文 findIndex，O(引用数×全文)，认证用户可用大表格+海量引用单请求阻塞事件循环（审查 P1 DoS）。
+    // 遍历序与 imageTokenLines 的 DFS 同构，输出序列逐字节等价（对照快照用例锁定）
+    const walk = (toks: MdToken[]): void => {
+        for (const t of toks) {
+            if (t.type === 'image') {
+                const raw = t.attrGet('src') ?? '';
+                if (!raw) continue;
+                const decoded = decodeLocalSrc(raw);
+                if (WINDOWS_DRIVE.test(decoded)) { if (!seen.has(decoded)) { seen.add(decoded); out.push(decoded); } continue; }
+                if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(raw)) continue;
+                if (!seen.has(raw)) { seen.add(raw); out.push(raw); }
+            }
+            if (t.children) walk(t.children);
+        }
+    };
+    walk(parser().parse(src, {}));
     return out;
 }
 
