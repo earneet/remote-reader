@@ -211,7 +211,7 @@ stateDiagram-v2
 
 - 认证/限流同 init；Body `{image_id}`
 - 验证（行必须在 owner 作用域且 status='pending'）：HEAD size≤上限；GET range 32B magic+扩展名；ETag==行内 content_md5（**默认强校验：mismatch 一律 invalid**；"非-MD5 后端"的退化开关仅在上线实测确认后以代码级常量开启，P2-5——防"一律退化"架空诚实性校验）
-- 通过 → 条件式 UPDATE pending→ready + size 回写 → `{status:"ok", name}`；对象缺失 → `{status:"missing"}`；校验失败 → `400 {status:"invalid", reason}`，处置按分支：**ETag 不符** → 删云对象、行保留 pending（真值未证，行可能是无辜的，1h reaper 兜底）；**magic/ext 失败且 ETag==md5**（真值已绑定，错配永久）→ 删 pending 行释放 (owner,hash) 与名字（§4.2 永久性 invalid 出边）+ 反查式异步删孤儿对象（direct 通道对象已 PUT、删行后无其他回收路径；反查挡住改名重传同 key 新行的误删）；ETag 缺失时的 magic/ext 失败 → 不删行不删对象（真值未证）
+- 通过 → 条件式 UPDATE pending→ready + size 回写 → `{status:"ok", name}`；对象缺失 → `{status:"missing"}`；校验失败 → `400 {status:"invalid", reason}`，处置按分支：**ETag 不符** → 删云对象、行保留 pending（真值未证，行可能是无辜的，1h reaper 兜底）；**magic/ext 失败且 ETag==md5**（真值已绑定，错配永久）→ 删 pending 行释放 (owner,hash) 与名字（§4.2 永久性 invalid 出边）+ 反查式异步删孤儿对象（direct 通道对象已 PUT、删行后无其他回收路径；反查挡住改名重传同 key 新行的误删）；ETag 缺失或不符时的 magic/ext 失败 → 不删行不删对象（真值未证，行可能是无辜的）
 - 0 行 → 回查：ready→ok；否则 missing
 
 ### 5.4 `GET /s/[token]/i/[name]` 与 5.5 `GET /d/[id]/i/[name]`（代理路由）
