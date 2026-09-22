@@ -7,6 +7,7 @@ import { getBlobStore, getActiveImageStore } from './blobstore';
 import { getMaxImageBytes } from './env';
 import { sanitizeImageName, detectImageMime, extsForMime } from '@remote-reader/shared/image-mime';
 import { ObjectNotFoundError, ArchiveUnavailableError } from './object-store';
+import { deleteBlobIfOrphaned } from './image-refs';
 
 const HEX64 = /^[0-9a-f]{64}$/;
 const HEX32 = /^[0-9a-f]{32}$/;
@@ -206,7 +207,11 @@ export async function confirmImage(ownerId: string, imageId: string): Promise<Co
     const mime = detectImageMime(head32);
     if (mime === null) {
         // ETag==md5 已证字节诚实 → 非支持格式对该内容永久成立 → 删 pending 行防死锁；ETag 缺失/不符 → 行可能是无辜的，不删
-        if (head.etag !== undefined && head.etag === row.contentMd5) dropDoomedPendingRow(row.id);
+        if (head.etag !== undefined && head.etag === row.contentMd5) {
+            dropDoomedPendingRow(row.id);
+            // direct 通道对象已 PUT 到云：行删后无任何回收路径 → 反查式删孤儿（relay 路径字节从未落盘，drop 在 put 之前，无需处理）
+            void deleteBlobIfOrphaned(row.storageBackend, row.storageKey);
+        }
         return { ok: false, reason: 'invalid', message: '对象内容非支持图片格式' };
     }
     // 扩展名一致（spec §5.3/§11 与 relay 双重承诺）：direct 通道 PUT 的字节格式须与 init 名字匹配；
@@ -214,7 +219,11 @@ export async function confirmImage(ownerId: string, imageId: string): Promise<Co
     // ETag==md5 已证字节诚实 → (name,content) 错配永久成立 → 同款删行封死死锁；ETag 缺失/不符不删（行可能是无辜的）
     const ext = row.name.split('.').pop()?.toLowerCase() ?? '';
     if (!extsForMime(mime).includes(ext)) {
-        if (head.etag !== undefined && head.etag === row.contentMd5) dropDoomedPendingRow(row.id);
+        if (head.etag !== undefined && head.etag === row.contentMd5) {
+            dropDoomedPendingRow(row.id);
+            // 同上 magic-null：direct 通道孤儿对象反查式回收
+            void deleteBlobIfOrphaned(row.storageBackend, row.storageKey);
+        }
         return { ok: false, reason: 'invalid', message: `扩展名 .${ext} 与实际格式 ${mime} 不一致，请改名重传` };
     }
     if (head.etag !== undefined && head.etag !== row.contentMd5) {

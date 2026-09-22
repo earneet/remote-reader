@@ -15,6 +15,11 @@ const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'rr-img2-'));
 process.env.DATA_DIR = DIR;
 afterAll(() => { delete process.env.DATA_DIR; fs.rmSync(DIR, { recursive: true, force: true }); });
 
+// 全量联跑高负载下单轮 setImmediate 可能先于 fs 回调执行——多轮轮询（每轮含 poll 阶段）兜住
+const flush = async (): Promise<void> => {
+    for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r));
+};
+
 beforeEach(() => resetDb());
 const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(120, 7)]);
 const JPG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(50, 3)]);
@@ -150,6 +155,8 @@ describe('confirmImage（spec §5.3）', () => {
         const r = await confirmImage('u1', init.imageId);
         expect(r.ok).toBe(false);
         expect(fake.deleted).toContain(key); // invalid 时删云对象
+        // 纯 ETag 分支行保留锁定：内容未证真值（真值绑定恰恰要先 ETag==md5），行可能是无辜的 → 不删行
+        expect(db.select().from(schema.images).where(eq(schema.images.id, init.imageId)).get()!.status).toBe('pending');
     });
     it('扩展名不一致（与 relay 校验对齐，spec §5.3/§11 双重承诺）：init 名 x.png + PUT jpeg 字节 → invalid', async () => {
         const fake = new FakeS3();
@@ -269,13 +276,26 @@ describe('confirm 改名重传死锁修复（s3 直传侧：ETag==md5 证诚实�
         mkUser('u1');
         const init1 = await initImage('u1', { name: 'photo.jpg', contentHash: sha256(PNG), contentMd5: md5(PNG), sizeBytes: PNG.length });
         if (init1.status !== 'direct') throw new Error('unreachable');
-        await fake.put(init1.uploadUrl.split('/put/')[1]!.split('?')[0], PNG); // 直传 PNG 字节到 .jpg 名
+        const key = init1.uploadUrl.split('/put/')[1]!.split('?')[0];
+        await fake.put(key, PNG); // 直传 PNG 字节到 .jpg 名
         const r = await confirmImage('u1', init1.imageId);
         expect(r.ok).toBe(false); // ext-mismatch invalid
         expect(db.select().from(schema.images).where(eq(schema.images.id, init1.imageId)).get()).toBeUndefined(); // 行已删
+        // 删行后 direct 通道已 PUT 的对象无任何回收路径 → 反查式删孤儿对象（fire-and-forget，flush 沉降）
+        await flush();
+        expect(fake.deleted).toContain(key);
+        // 改名重传端到端（防误删活图对照）：同 hash 新行同 storageKey，重 PUT 后 confirm → ready 且对象在
         const init2 = await initImage('u1', { name: 'photo.png', contentHash: sha256(PNG), contentMd5: md5(PNG), sizeBytes: PNG.length });
         expect(init2.status).toBe('direct');
         expect(init2.name).toBe('photo.png'); // 新名生效
+        if (init2.status !== 'direct') throw new Error('unreachable');
+        const key2 = init2.uploadUrl.split('/put/')[1]!.split('?')[0];
+        expect(key2).toBe(key); // 内容寻址：同 (owner,hash) 同 key
+        await fake.put(key2, PNG);
+        const r2 = await confirmImage('u1', init2.imageId);
+        expect(r2.ok).toBe(true);
+        expect(db.select().from(schema.images).where(eq(schema.images.id, init2.imageId)).get()!.status).toBe('ready');
+        expect((await fake.get(key2)).equals(PNG)).toBe(true); // 对象存在，未被旧删除误伤
     });
 
     it('magic-null 且 ETag==md5（内容诚实）→ 行删（文本对象非支持格式，永久性）', async () => {
@@ -289,6 +309,9 @@ describe('confirm 改名重传死锁修复（s3 直传侧：ETag==md5 证诚实�
         const r = await confirmImage('u1', init1.imageId);
         expect(r.ok).toBe(false); // magic-null invalid
         expect(db.select().from(schema.images).where(eq(schema.images.id, init1.imageId)).get()).toBeUndefined(); // 行已删
+        // 同 ext-mismatch：删行后 direct 通道已 PUT 的对象成孤儿 → 反查式删（fire-and-forget，flush 沉降）
+        await flush();
+        expect(fake.deleted).toContain(init1.uploadUrl.split('/put/')[1]!.split('?')[0]);
     });
 
     it('ext-mismatch 但 ETag!=md5（内容未证诚实，行可能是无辜的）→ 行保留 pending', async () => {
