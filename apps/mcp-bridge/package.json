@@ -1,6 +1,6 @@
 {
   "name": "remote-reader-bridge",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "Local MCP bridge for Remote Reader — exposes the upload_document tool over stdio",
   "license": "MIT",
