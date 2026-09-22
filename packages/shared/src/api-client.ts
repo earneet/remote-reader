@@ -17,7 +17,7 @@ type InitImageResult =
     | { status: 'direct'; name: string; imageId: string; uploadUrl: string };
 
 export interface ApiClient {
-    uploadDocument(input: { name: string; content: string; path?: string }): Promise<{ id: string; url: string }>;
+    uploadDocument(input: { name: string; content: string; path?: string }): Promise<{ id: string; url: string; warnings?: string[]; minBridgeVersion?: string }>;
     initImage(input: { name: string; contentHash: string; contentMd5: string; sizeBytes: number }): Promise<InitImageResult>;
     relayImage(input: { imageId: string; contentBase64: string }): Promise<{ name: string }>;
     confirmImage(input: { imageId: string }): Promise<{ status: 'ok'; name: string }>;
@@ -27,6 +27,8 @@ export interface ApiClient {
 interface UploadResponse {
     id?: string;
     url?: string;
+    // 服务端检测到未随文档上传的本地图片引用时返回（旧桥裂图提示）
+    warnings?: unknown;
     // SvelteKit error() 的真实 wire 形状是扁平 {"message":...}（Accept: */* 协商走 JSON 分支）；
     // error:{message} 为历史兼容形状
     message?: string;
@@ -84,11 +86,14 @@ async function requestJson<T>(
 const imageReasonFrom = (body: Record<string, unknown>): string | undefined =>
     typeof body.reason === 'string' ? body.reason : undefined;
 
-export function createApiClient(opts: { baseUrl: string; token: string }): ApiClient {
+export function createApiClient(opts: { baseUrl: string; token: string; userAgent?: string }): ApiClient {
     const baseUrl = opts.baseUrl.replace(/\/+$/, '');
+    // UA 声明桥版本（服务端 access log 识别 + 兼容判断）；可选——putImageBytes 除外（第三方 presigned URL）
+    const uaHeader: Record<string, string> = opts.userAgent ? { 'User-Agent': opts.userAgent } : {};
     const jsonHeaders = (): Record<string, string> => ({
         Authorization: `Bearer ${opts.token}`,
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        ...uaHeader
     });
     return {
         async uploadDocument({ name, content, path }) {
@@ -98,7 +103,8 @@ export function createApiClient(opts: { baseUrl: string; token: string }): ApiCl
                     method: 'POST',
                     headers: {
                         Authorization: `Bearer ${opts.token}`,
-                        'Content-Type': 'application/json'
+                        'Content-Type': 'application/json',
+                        ...uaHeader
                     },
                     body: JSON.stringify(path ? { name, content, path } : { name, content }),
                     signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS)
@@ -123,7 +129,13 @@ export function createApiClient(opts: { baseUrl: string; token: string }): ApiCl
             if (typeof body.id !== 'string' || typeof body.url !== 'string') {
                 throw new ApiError(res.status, '上传成功但响应格式异常');
             }
-            return { id: body.id, url: body.url };
+            // warnings 仅在确为字符串数组时透传（服务端扩展字段，脏数据不外溢）
+            const warnings = Array.isArray(body.warnings) && body.warnings.every((w) => typeof w === 'string')
+                ? body.warnings
+                : undefined;
+            // 服务端建议的最低桥版本（响应头，缺头不透传）
+            const minBridgeVersion = res.headers.get('x-remote-reader-min-bridge') ?? undefined;
+            return { id: body.id, url: body.url, warnings, minBridgeVersion };
         },
         // 图片三方法 wire 键名一律 snake_case（P1-3，与 Phase 2 路由对齐）；接口 camelCase 显式映射
         async initImage({ name, contentHash, contentMd5, sizeBytes }) {

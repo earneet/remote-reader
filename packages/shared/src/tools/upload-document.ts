@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { collectImageProblems, orchestrateImages, ImageValidationError } from './image-pipeline';
+import { compareVersions } from '../semver';
 import type { ApiClient } from '../api-client';
 
 export const uploadDocumentSchema = z.object({
@@ -26,12 +27,22 @@ export interface UploadDocumentArgs {
 
 export async function uploadDocumentHandler(
     args: UploadDocumentArgs,
-    api: ApiClient
+    api: ApiClient,
+    opts?: { clientVersion?: string }
 ): Promise<{ content: { type: 'text'; text: string }[] }> {
     const problems = await collectImageProblems(args.content);
     if (problems.length > 0) throw new ImageValidationError(problems); // 桥 catch → isError 多行清单（spec #14）
     const { content, uploaded, reused, rewrites } = await orchestrateImages(args.content, api);
-    const { id, url } = await api.uploadDocument({ ...args, content });
+    const { id, url, warnings, minBridgeVersion } = await api.uploadDocument({ ...args, content });
     const imgSummary = uploaded + reused > 0 ? `。图片：新传 ${uploaded} · 复用 ${reused} · 引用改写 ${rewrites} 处` : '';
-    return { content: [{ type: 'text', text: `已上传（id=${id}）。查看链接：${url}${imgSummary}` }] };
+    let text = `已上传（id=${id}）。查看链接：${url}${imgSummary}`;
+    // Layer ②：旧桥上传未改写的本地图片引用 → 服务端 warnings 转告给 Agent（裂图不自知）
+    if (warnings && warnings.length > 0) {
+        text += `\n\n⚠️ 服务端警告：${warnings.join('；')}`;
+    }
+    // Layer ③：服务端建议的最低桥版本高于当前 → 升级指引（opts 省略时不自检，向后兼容）
+    if (opts?.clientVersion && minBridgeVersion && compareVersions(opts.clientVersion, minBridgeVersion) < 0) {
+        text += `\n\n⚠️ 当前桥版本 ${opts.clientVersion} 低于服务端建议的最低版本 ${minBridgeVersion}，请升级桥（npm 用户：npx -y remote-reader-bridge@latest；源码用户：git pull 后重新 build）`;
+    }
+    return { content: [{ type: 'text', text }] };
 }
