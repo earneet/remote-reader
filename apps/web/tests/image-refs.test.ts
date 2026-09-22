@@ -42,6 +42,12 @@ const flush = async (): Promise<void> => {
     for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r));
 };
 
+// 删除终态断言用条件等待：极端负载下 fs 线程池回调可晚于固定轮数 flush（实测间歇 flake），
+// 轮询到条件成立为止；条件永不成立（真 bug）时 200 轮后落到断言照常报红
+const waitUntil = async (cond: () => boolean): Promise<void> => {
+    for (let i = 0; i < 200 && !cond(); i++) await new Promise((r) => setImmediate(r));
+};
+
 function mkUser(id: string): void {
     sqlite.exec(`INSERT INTO users (id, email, password_hash, role, created_at) VALUES ('${id}', '${id}@t.local', 'x', 'member', 0)`);
 }
@@ -326,7 +332,7 @@ describe('runImageGcCycle（周期回收，spec §9.3）', () => {
         insertReadyRows([{ id: 'img-zzz-ghost', name: 'ghost.png', key: 'ghost-blob.bin' }]);
         fs.writeFileSync(path.join(DIR, 'ghost-blob.bin'), 'x');
         const r = await runImageGcCycle();
-        await flush();
+        await waitUntil(() => !fs.existsSync(path.join(DIR, 'ghost-blob.bin')));
         expect(r.readyReaped).toBe(1);                                 // 候选查询下推 refs 判定：批次恒为可收行
         expect(imageRow('img-zzz-ghost')!.status).toBe('deleted');     // 窗口推进越过 refed 行
         expect(fs.existsSync(path.join(DIR, 'ghost-blob.bin'))).toBe(false);

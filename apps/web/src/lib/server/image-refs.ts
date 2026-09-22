@@ -80,7 +80,7 @@ export async function gcImagesIfUnreferenced(imageIds: string[]): Promise<void> 
 /** §4.3-2：物理删 blob 前反查同 key 活行——封死"行删后重传同 key 新行 → 延迟 DELETE 误删活图"。
  *  反查的 DB 查询也纳入 try：本函数全部调用点为 void fire-and-forget，开头同步抛错会变
  *  unhandledRejection → Node ≥15 默认进程崩溃；失败无害（blob 残留为孤儿，下轮再看）。 */
-async function deleteBlobIfOrphaned(backend: string, key: string): Promise<void> {
+export async function deleteBlobIfOrphaned(backend: string, key: string): Promise<void> {
     try {
         const active = db.select({ id: schema.images.id }).from(schema.images)
             .where(and(eq(schema.images.storageKey, key), inArray(schema.images.status, ['pending', 'ready']))).all();

@@ -146,6 +146,7 @@ stateDiagram-v2
     [*] --> pending : init 插行（所有后端统一）/ 墓碑复活
     pending --> ready : confirm 验证通过 / relay 写盘验证通过
     pending --> [*] : 回收：超 1h 未 confirm → 物理删行+删对象+释放名字*
+    pending --> [*] : 永久性 invalid：内容真值绑定后 magic/ext 失败<br/>（relay：sha256 过后；confirm：ETag==md5 过后）→ 删行释放 (owner,hash) 与名字
     ready --> referenced : md 上传 refs 登记
     referenced --> referenced : 覆盖上传 refs diff 重算
     referenced --> tomb : refs 归零（即时 GC）或 ready 无引用超 24h（周期兜底）<br/>软删除 + 删 blob + 留墓碑
@@ -203,14 +204,14 @@ stateDiagram-v2
 
 - 认证/限流：与 documents 同规格的独立重桶；Body `{image_id, content_base64}`
 - **行必须在 owner 作用域**（同 §5.3 confirm 口径，P2-1）
-- 验证：base64 → 大小 → magic → 扩展名一致（同白名单口径）→ **`sha256(buffer) == 行内 content_hash`（P1-1：封死去重池投毒——谎报 hash 的 init + 异字节的 relay 会污染 owner 全池 exists 复用）**
+- 验证：base64 → 大小（实测字节，非 init 报称）→ **`sha256(buffer) == 行内 content_hash`（P1-1：封死去重池投毒——谎报 hash 的 init + 异字节的 relay 会污染 owner 全池 exists 复用）** → magic → 扩展名一致（同白名单口径）。**顺序即语义：sha256 真值绑定必须先于 magic/ext——其后 magic/ext 失败才可判永久性并删行（§4.2 永久性 invalid 出边）**
 - 通过 → 写盘（local 布局；storage.ts tmp 名含随机后缀，并发写同目标为原子 last-wins，内容相同无害）+ 事务内 `UPDATE … SET status='ready', ready_at=now, size_bytes=实测 WHERE id=? AND owner_id=? AND status='pending'`（0 行回查分流同 §4.3-5）→ `{name}`
 
 ### 5.3 `POST /api/v1/images/confirm`
 
 - 认证/限流同 init；Body `{image_id}`
 - 验证（行必须在 owner 作用域且 status='pending'）：HEAD size≤上限；GET range 32B magic+扩展名；ETag==行内 content_md5（**默认强校验：mismatch 一律 invalid**；"非-MD5 后端"的退化开关仅在上线实测确认后以代码级常量开启，P2-5——防"一律退化"架空诚实性校验）
-- 通过 → 条件式 UPDATE pending→ready + size 回写 → `{status:"ok", name}`；对象缺失 → `{status:"missing"}`；校验失败 → 删云对象 → `400 {status:"invalid", reason}`
+- 通过 → 条件式 UPDATE pending→ready + size 回写 → `{status:"ok", name}`；对象缺失 → `{status:"missing"}`；校验失败 → `400 {status:"invalid", reason}`，处置按分支：**ETag 不符** → 删云对象、行保留 pending（真值未证，行可能是无辜的，1h reaper 兜底）；**magic/ext 失败且 ETag==md5**（真值已绑定，错配永久）→ 删 pending 行释放 (owner,hash) 与名字（§4.2 永久性 invalid 出边）+ 反查式异步删孤儿对象（direct 通道对象已 PUT、删行后无其他回收路径；反查挡住改名重传同 key 新行的误删）；ETag 缺失时的 magic/ext 失败 → 不删行不删对象（真值未证）
 - 0 行 → 回查：ready→ok；否则 missing
 
 ### 5.4 `GET /s/[token]/i/[name]` 与 5.5 `GET /d/[id]/i/[name]`（代理路由）
