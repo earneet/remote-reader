@@ -34,7 +34,11 @@ export const POST: RequestHandler = async ({ request, getClientAddress }) => {
         result = await relayImage(auth.userId, raw.image_id, data);
     } catch (e) {
         // relayImage 消化行级 miss 为 result missing；此处只映射存储层故障（store.put 5xx 终态）
-        if (e instanceof ArchiveUnavailableError) error(503, 'image storage unreachable');
+        // 503 必须可诊断：cause 打日志（同 confirm 路由）
+        if (e instanceof ArchiveUnavailableError) {
+            console.warn('[images] relay 存储不可达，cause:', e.cause ?? e);
+            error(503, 'image storage unreachable');
+        }
         throw e;
     }
     if (result.ok) return json({ name: result.name });
