@@ -52,4 +52,27 @@ describe('S3Client 兼容性配置', () => {
         const resolved = typeof v === 'function' ? await v() : v;
         expect(resolved).toBe('WHEN_REQUIRED');
     });
+
+    // 审查跟进（2026-09-23）：SDK ≥3.729 默认 requestChecksumCalculation WHEN_SUPPORTED
+    // 会把空载荷 CRC32（x-amz-checksum-crc32=AAAAAA==）与 x-amz-sdk-checksum-algorithm
+    // 签进 presigned URL——七牛容忍，但严格 S3 兼容网关（R2/OSS/MinIO/真 AWS）会按
+    // 该参数校验真实载荷 → direct PUT 被拒。与响应侧 WHEN_REQUIRED 成对，官方推荐位。
+    it('requestChecksumCalculation 必须 WHEN_REQUIRED（presign URL 不得签入校验和参数）', async () => {
+        const store = new S3BlobStore(CFG);
+        const client = (store as unknown as { client: S3Client }).client;
+        const v = client.config.requestChecksumCalculation;
+        const resolved = typeof v === 'function' ? await v() : v;
+        expect(resolved).toBe('WHEN_REQUIRED');
+    });
+
+    it('presign get/put URL 不含 x-amz-checksum* / x-amz-sdk-checksum-algorithm（跨网关 direct PUT 兼容性）', async () => {
+        const store = new S3BlobStore(CFG);
+        const get = await store.presign!('get', 'images/u-1/abcd', 600);
+        const put = await store.presign!('put', 'images/u-1/abcd', 600);
+        for (const url of [get, put]) {
+            expect(url).not.toContain('x-amz-checksum');
+            expect(url).not.toContain('X-Amz-Checksum');
+            expect(url).not.toContain('checksum-algorithm');
+        }
+    });
 });
