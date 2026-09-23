@@ -260,7 +260,7 @@ Response 200: { "id": "...", "url": "https://<host>/s/<share-token>" }
 | `BASE_URL` | `http://localhost:5173` | 生成分享链接的外链前缀 |
 | `BRIDGE_REPO_URL` | `https://github.com/earneet/remote-reader` | 登录页 Agent 指引块展示的桥源码克隆地址（自定义 fork 时修改） |
 | `MAX_UPLOAD_BYTES` | `5242880`（5MB） | 单文档大小上限 |
-| `BODY_SIZE_LIMIT` | adapter-node 默认 512K | **字节数（数字）**，网关层 body 上限，须 > `MAX_UPLOAD_BYTES` |
+| `BODY_SIZE_LIMIT` | adapter-node 默认 512K | **字节数（数字）**，网关层 body 上限，生产须 ≥ `max(MAX_UPLOAD_BYTES×1.5, MAX_IMAGE_BYTES×1.37×1.5)`（默认配置下 ≥ 21548237，如 `25165824`） |
 | `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW_MS` | `60` / `60000` | 每 token 上传速率 |
 | `LOGIN_RATE_LIMIT_MAX` | `10` | 每邮箱登录尝试次数（同窗口） |
 | `SESSION_MAX_AGE` | `2592000`（30 天，秒） | session 有效期；token 内嵌 exp 服务端校验 |
@@ -278,7 +278,7 @@ Response 200: { "id": "...", "url": "https://<host>/s/<share-token>" }
 | 现象 | 排查 |
 |---|---|
 | 生产启动报 `SESSION_SECRET must be set in production` | 设置 `SESSION_SECRET`（长随机串） |
-| 生产启动报 `Invalid BODY_SIZE_LIMIT` | 改成字节数（如 `8388608`），不带单位 |
+| 生产启动报 BODY_SIZE_LIMIT 须 ≥ max(...) | 提升到达标字节数（默认配置下如 `25165824`）；systemd 部署跑 `sudo ./scripts/update.sh` 会自动迁移 |
 | `better-sqlite3 ... not supported` / `ERR_DLOPEN_FAILED` | 你在用 `bun run` 启服务——改用 `node apps/web/build/index.js` |
 | `bun run test` 报 better-sqlite3 加载失败 | 不应使用 `bun test`；测试用 vitest，跑 `bun run test`（经 node） |
 | 上传 >512K 返回 413 但你确定 < `MAX_UPLOAD_BYTES` | `BODY_SIZE_LIMIT` < 内容大小（adapter-node 默认仅 512K） |
