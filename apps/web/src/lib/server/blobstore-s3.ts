@@ -32,8 +32,12 @@ export class S3BlobStore implements BlobStore {
             // content-md5 给分片 MD5、实际流回全量 body；SDK ≥3.729 默认 WHEN_SUPPORTED
             // 消费 body 时校验不过抛 ChecksumMismatch → confirm 恒 503。
             // WHEN_REQUIRED = 仅请求方显式要求时才校验（我们从不要求），官方推荐的
-            // S3 兼容网关兼容位。注意七牛仍会流回全量 body，getRange 返回值可能长于请求区间。
-            responseChecksumValidation: 'WHEN_REQUIRED'
+            // S3 兼容网关兼容位。注意七牛仍会流回全量 body，getRange 内 subarray 封口长度契约。
+            responseChecksumValidation: 'WHEN_REQUIRED',
+            // 请求侧成对兼容位（审查跟进 2026-09-23）：默认 WHEN_SUPPORTED 会把空载荷 CRC32
+            // （x-amz-checksum-crc32=AAAAAA==）签进 presigned URL——严格网关（R2/OSS/MinIO/真 AWS）
+            // 按参数校验真实载荷会拒收 direct PUT。我们从不依赖请求校验和，关掉零损失。
+            requestChecksumCalculation: 'WHEN_REQUIRED'
         });
         this.bucket = config.bucket;
     }
@@ -95,7 +99,10 @@ export class S3BlobStore implements BlobStore {
         }
         if (!body) throw new ObjectNotFoundError(key);
         try {
-            return Buffer.from(await body.transformToByteArray());
+            const raw = Buffer.from(await body.transformToByteArray());
+            // 接口契约封口：返回 [start, end] 闭区间字节。七牛无视 Range 流回全量 body，
+            // subarray 零拷贝截到请求长度，调用方无需感知网关怪癖（短对象自然短于请求区间，subarray 安全）
+            return raw.subarray(0, end - start + 1);
         } catch (e) {
             // 同 get() 先例：header 阶段之外的 body 流中断（慢网络/传输截断）归入 503 语义，不裸抛降级 500
             throw new ArchiveUnavailableError(`blob getRange ${key} body 失败`, { cause: e });
