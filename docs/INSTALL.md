@@ -152,7 +152,7 @@ INITIAL_INVITE_CODE=<邀请码> \
 DATABASE_PATH=./data/app.db \
 DATA_DIR=./data/documents \
 BASE_URL=https://your-domain \
-BODY_SIZE_LIMIT=8388608 \
+BODY_SIZE_LIMIT=25165824 \
 PORT=3000 \
 node apps/web/build/index.js
 ```
@@ -380,8 +380,8 @@ bun --filter remote-reader-web db:migrate    # 应用（生产在停服/维护�
 | 现象 | 排查 |
 |---|---|
 | 生产启动报 `SESSION_SECRET must be set in production` | 设置 `SESSION_SECRET`（长随机串） |
-| 生产启动报 `Invalid BODY_SIZE_LIMIT` | 改成字节数（如 `8388608`），不带单位 |
-| `better-sqlite3 ... not supported` / `ERR_DLOPEN_FAILED` | 你在用 `bun run` 启服务——改用 `node apps/web/build/index.js` |
+| 生产启动报 BODY_SIZE_LIMIT 须 ≥ max(...) | 改成 ≥ `max(MAX_UPLOAD_BYTES×1.5, MAX_IMAGE_BYTES×1.37×1.5)` 的字节数（默认 5M 文档+10M 图片时下限 21548237，如 `25165824`）；systemd 部署跑 `update.sh` 会自动迁移达标 |
+| `better-sqlite3 ... not supported` / `ERR_DLOPEN_FAILED` | 用 `bun run` 启服务会加载失败——改用 `node apps/web/build/index.js`；若 node 下报 `NODE_MODULE_VERSION` 不匹配：bun install 的 prebuilt 跟随 bun 内置 node 的 ABI——`install.sh`/`update.sh` 已自动检测并换对应 ABI 的 prebuilt，手动部署则在仓库根 `npm rebuild better-sqlite3` |
 | 上传 >512K 返回 413 但你确定 < `MAX_UPLOAD_BYTES` | `BODY_SIZE_LIMIT` < 内容大小（adapter-node 默认仅 512K） |
 | 注册时邀请码无效 | 引导码：核对 `INITIAL_INVITE_CODE` 与启动时一致；DB 码：可能已过期或被 admin 撤销（`/settings/invites` 查看） |
 | seed-token 报 `Cannot find package 'better-sqlite3'` | 在**仓库根目录**执行（非 apps/web） |
