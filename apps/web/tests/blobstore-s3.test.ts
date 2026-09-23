@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import type { S3Client } from '@aws-sdk/client-s3';
 import { S3BlobStore } from '$server/blobstore-s3';
 
 const CFG = {
@@ -36,5 +37,19 @@ describe('S3BlobStore presign（本地计算，无网络 IO）', () => {
 
     it('uploadUrlTtlSeconds 默认 600', () => {
         expect(new S3BlobStore(CFG).uploadUrlTtlSeconds).toBe(600);
+    });
+});
+
+describe('S3Client 兼容性配置', () => {
+    // 2026-09-22 生产实证：七牛 Range GET 响应自相矛盾——Content-Range 声明分片、
+    // content-md5 是分片 MD5、实际却流回全量 body；SDK ≥3.729 默认 WHEN_SUPPORTED
+    // 会在消费 body 时抛 ChecksumMismatch → confirm 恒 503。WHEN_REQUIRED 是官方
+    // 为这类 S3 兼容网关准备的开关（我们从不主动要求校验和，等效关闭校验）。
+    it('responseChecksumValidation 必须 WHEN_REQUIRED（删掉它七牛 confirm 即 503）', async () => {
+        const store = new S3BlobStore(CFG);
+        const client = (store as unknown as { client: S3Client }).client;
+        const v = client.config.responseChecksumValidation;
+        const resolved = typeof v === 'function' ? await v() : v;
+        expect(resolved).toBe('WHEN_REQUIRED');
     });
 });
