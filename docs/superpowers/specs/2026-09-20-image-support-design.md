@@ -296,6 +296,7 @@ interface BlobStore {
 ```
 
 - 内置：`local`（`DATA_DIR/<owner>/blobs/<hash前2>/<hash>`）、`s3`（现 object-store-s3 泛化 + Buffer 化 + `@aws-sdk/s3-request-presigner`，官方七牛示例同款）
+- **getRange 契约与 S3 网关怪癖（2026-09-23 实证勘误）**：契约恒为返回 `[start, end]` 闭区间字节。七牛网关的 Range GET 响应自相矛盾——Content-Range 声明分片、content-md5 给分片 MD5、实际流回全量 body；s3 实现在函数内 `subarray` 零拷贝封口长度，调用方无需感知网关怪癖。同因 AWS SDK ≥3.729 默认响应校验消费 body 时必抛 `ChecksumMismatch`（confirm 恒 503），S3Client 单源配置钉 `responseChecksumValidation` / `requestChecksumCalculation` **双 `WHEN_REQUIRED`**（后者防空载荷 CRC32 被签进 presigned URL 致严格网关拒收 direct PUT）——两配置有钉子测试锁定，不得移除
 - 注册表：启动按 env 实例化，`Map<id, store>`；行内 backend 路由，查无实现 → 503
 - **接口定形（#27）**：能力域窄定制——接口只认 key 与字节（mime/size/hash 元数据全在 DB 行，存储层不理解内容，因此图片与冷档文档共用同一接口）；消费者横向复用（图片/冷档/未来任何字节存储需求）；注册用极简硬编码 Map（第三方加插件 = PR 加实现类 + 注册一行，**不做** manifest/发现机制/运行时加载/版本协商——单实例自部署 PR 是自然贡献路径，npm 分发备案）
 - **演进纪律**：只能加可选成员（`?`），**禁止加必选成员、禁止删改既有签名**（仓库外 fork 实现会静默断裂）；可选能力用运行时探测（`if (store.presign)`）——L0/L1 分级的实现方式，核心不得假设能力存在
@@ -396,6 +397,7 @@ pending 超时释放；ready 墓碑永不释放（90d 物理清理备案）。
 | 七牛 presign PUT 签 Content-Type | 实测；不签则 magic 兜底 |
 | 七牛 2026-04-08 新空间政策 | 新建空间浏览器直连强制 attachment——`<img>` 子资源是否受影响**上线前实测**；中招则文档指引自定义域名/旧空间 |
 | 七牛 S3 空间名 ≠ 空间名 | presign Bucket 必须用 S3 空间名（控制台查）——INSTALL 写明 |
+| 七牛 Range GET 流全量 body（2026-09-23 实证） | Content-Range/content-md5 声明分片、实际流回全量 body——SDK ≥3.729 默认响应校验必抛 `ChecksumMismatch`（曾致 confirm 恒 503，`2e821e3` 修复）；getRange subarray 封口 + 双 `WHEN_REQUIRED` 口径见 §8 勘误 |
 | Referer 配置口径 | 白名单填站点域名（无 scheme；`*.` 不含裸域）；「允许空 Referer」建议开启（门禁靠签名） |
 | 签名 URL 撤销残留 | 撤销分享后 ≤TTL 内已分发 URL 仍可取图 |
 | 无行孤儿 blob | confirm 前崩溃的云对象（key 内容寻址，重传覆盖消化）+ relay 写盘后插行前崩溃 |
