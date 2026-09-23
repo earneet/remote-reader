@@ -107,12 +107,17 @@ do_rollback() {
     fi
     log "重启服务以应用回滚后的代码"
     systemctl restart "${SERVICE_NAME}.service" 2>/dev/null || true
-    sleep 2
-    if curl -sf "http://127.0.0.1:${PORT}/api/health" >/dev/null 2>&1; then
-        ok "已回滚，服务恢复到升级前版本"
-    else
-        warn "已回滚但 health 仍未通过——服务可能本就异常，请排查：journalctl -u ${SERVICE_NAME} -n 100"
-    fi
+    # 回滚后同样轮询：旧代码冷启动也要数秒，单次 curl 会把"还在启动"误报成"回滚失败"
+    local i
+    for i in $(seq 1 "${HEALTH_WAIT}"); do
+        if curl -sf "http://127.0.0.1:${PORT}/api/health" >/dev/null 2>&1; then
+            ok "已回滚，服务恢复到升级前版本（${i}s）"
+            ROLLED_BACK=1
+            return 0
+        fi
+        sleep 1
+    done
+    warn "已回滚但 ${HEALTH_WAIT}s 内 health 仍未通过——服务可能本就异常，请排查：journalctl -u ${SERVICE_NAME} -n 100"
     ROLLED_BACK=1
 }
 cleanup() {
@@ -136,6 +141,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 [[ -f "${SRC_DIR}/package.json" ]] || die "未在源码根找到 package.json：${SRC_DIR}"
 [[ -d "${SRC_DIR}/apps/web" ]]     || die "未找到 apps/web 目录：${SRC_DIR}/apps/web"
+
+# 部署辅助函数（BODY_SIZE_LIMIT 计算 / better-sqlite3 ABI 自修），与 install.sh 共用单源
+# shellcheck source=lib-deploy.sh
+source "${SCRIPT_DIR}/lib-deploy.sh"
 
 # 解析原属主（脚本经 sudo 跑时，源码克隆通常属 SUDO_USER）；git 操作需以其身份执行
 SUDO_HOME=""
@@ -224,7 +233,7 @@ fi
 printf '  2) 备份 %s → %s（unit / env 变更另有独立备份）\n' "${INSTALL_DIR}" "${BACKUP_DIR}"
 printf '  3) rsync 新码到 %s（排除 data / node_modules / build / .git / .env）\n' "${INSTALL_DIR}"
 printf '  4) chown root:root + bun install + build + 剥离 devDeps\n'
-printf '  5) 配置迁移（幂等）：env 补 ORIGIN / 建日志目录 / 补 logrotate / 刷新 unit 模板 + daemon-reload\n'
+    printf '  5) 配置迁移（幂等）：env 补 ORIGIN / BODY_SIZE_LIMIT 达标校验 / 建日志目录 / 补 logrotate / 刷新 unit 模板 + daemon-reload\n'
 printf '  6) systemctl restart %s\n' "${SERVICE_NAME}"
 printf '  7) 轮询 /api/health（最多 %ss）；不过则自动回滚\n' "${HEALTH_WAIT}"
 echo
@@ -308,10 +317,18 @@ log "构建 web 应用（adapter-node 产物）"
 ok "构建完成"
 
 # 剥离 devDependencies（vite build 已把 workspace 依赖内联到 build/server）
+# 注意保留 bun.lock：删了它二次 install 会重新解析依赖树，结果随 registry 漂移且慢
 log "整理生产 node_modules"
-(cd "${INSTALL_DIR}" && rm -rf node_modules apps/web/node_modules packages/shared/node_modules apps/mcp-bridge/node_modules bun.lock)
+(cd "${INSTALL_DIR}" && rm -rf node_modules apps/web/node_modules packages/shared/node_modules apps/mcp-bridge/node_modules)
 (cd "${INSTALL_DIR}" && "${BUN_BIN}" install --production)
 ok "生产依赖就绪"
+
+# bun 装出的 better-sqlite3 prebuilt 跟随 bun 内置 node 的 ABI，与生产 node 不匹配则服务起不来
+# （实测 bun 1.3.x=ABI 137 vs node 22=ABI 127）。不匹配时自动换对应 ABI 的 prebuilt。
+NODE_BIN="$(command -v node)"
+if ! fix_better_sqlite3_abi "${INSTALL_DIR}" "${NODE_BIN}"; then
+    die "better-sqlite3 ABI 自动修复失败，正在回滚…（可手动在 ${INSTALL_DIR} 内 npm rebuild better-sqlite3 后重试）"
+fi
 
 chown -R root:root "${INSTALL_DIR}"
 
@@ -328,6 +345,27 @@ if ! grep -q '^ORIGIN=' "${ENV_FILE}" 2>/dev/null; then
     else
         warn "env 未设 ORIGIN 且 BASE_URL 为空，无法自动迁移——新版启动校验要求 ORIGIN，health 可能不过而回滚"
     fi
+fi
+
+# a2) env：老部署的 BODY_SIZE_LIMIT 多为 8M——图片支持后启动校验要求
+#     ≥ max(MAX_UPLOAD_BYTES×1.5, MAX_IMAGE_BYTES×1.37×1.5)（默认 5M/10M 时 = 21548237B），
+#     不足则服务起不来 → 按 env 实际值算下限，不足就提升到 MiB 取整值（有备份、可回滚）
+MIG_MAX_UPLOAD="$(env_val MAX_UPLOAD_BYTES)"; [[ "${MIG_MAX_UPLOAD}" =~ ^[0-9]+$ ]] || MIG_MAX_UPLOAD=5242880
+MIG_MAX_IMAGE="$(env_val MAX_IMAGE_BYTES)";  [[ "${MIG_MAX_IMAGE}" =~ ^[0-9]+$ ]] || MIG_MAX_IMAGE=10485760
+MIG_NEED="$(required_body_size_limit "${MIG_MAX_UPLOAD}" "${MIG_MAX_IMAGE}")"
+MIG_CURRENT="$(parse_size_bytes "$(env_val BODY_SIZE_LIMIT)")"
+if [[ "${MIG_CURRENT}" -lt "${MIG_NEED}" ]]; then
+    MIG_NEW="$(round_up_mib "${MIG_NEED}")"
+    [[ -f "${ENV_BAK}" ]] || cp -a "${ENV_FILE}" "${ENV_BAK}"
+    if grep -q '^BODY_SIZE_LIMIT=' "${ENV_FILE}"; then
+        sed -i "s/^BODY_SIZE_LIMIT=.*/BODY_SIZE_LIMIT=${MIG_NEW}/" "${ENV_FILE}"
+    else
+        # 先补换行：原文件末行无换行时直接追加会拼成无效变量
+        printf '\nBODY_SIZE_LIMIT=%s\n' "${MIG_NEW}" >> "${ENV_FILE}"
+    fi
+    chown root:"${SERVICE_USER}" "${ENV_FILE}"
+    chmod 640 "${ENV_FILE}"
+    ok "env 已迁移：BODY_SIZE_LIMIT=${MIG_NEW}（启动校验下限 ${MIG_NEED}，原文件备份 ${ENV_BAK}）"
 fi
 
 # b) 日志目录（幂等）：unit 的 append: 指向它，缺失则启动失败
@@ -373,11 +411,11 @@ for i in $(seq 1 "${HEALTH_WAIT}"); do
 done
 
 if [[ "${HEALTH_OK}" -ne 1 ]]; then
-    # health 不过 = 生产二进制起不来（最常见 better-sqlite3 ABI 与 node ${NODE_MAJOR} 不匹配）。
-    # EXIT trap 会自动回滚；此处只负责给出排查指引。
-    warn "health 校验失败。常见原因：better-sqlite3 ABI 与 node ${NODE_MAJOR} 不匹配。"
-    warn "排查：journalctl -u ${SERVICE_NAME} -n 100 --no-pager"
-    warn "确认 ABI 问题后，可在 ${INSTALL_DIR} 内 npm rebuild better-sqlite3 再重试，或保留旧版。"
+    # health 不过 = 生产二进制起不来。EXIT trap 会自动回滚；此处只负责给出排查指引。
+    # better-sqlite3 ABI 不匹配已在剥离步骤后自动检测/修复，此处仍失败多为其他原因（端口/权限/配置）。
+    warn "health 校验失败。排查：journalctl -u ${SERVICE_NAME} -n 100 --no-pager 或 sudo tail -n 100 ${LOG_DIR}/app.log"
+    warn "若为 better-sqlite3 ABI 报错（ERR_DLOPEN_FAILED / NODE_MODULE_VERSION），自动修复可能未生效："
+    warn "可在 ${INSTALL_DIR} 内 npm rebuild better-sqlite3 后重跑 update.sh。"
     die "升级未通过 health 校验，正在回滚…"
 fi
 

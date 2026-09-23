@@ -95,7 +95,7 @@ DATABASE_PATH=./data/app.db \
 DATA_DIR=./data/documents \
 BASE_URL=https://your-domain \
 ORIGIN=https://your-domain \
-BODY_SIZE_LIMIT=8388608 \
+BODY_SIZE_LIMIT=25165824 \
 PORT=3000 \
 node apps/web/build/index.js
 ```
@@ -276,8 +276,8 @@ Docker deployments: migrations are already executed at image build time; a schem
 | Symptom | What to check |
 |---|---|
 | Production startup reports `SESSION_SECRET must be set in production` | Set `SESSION_SECRET` (a long random string) |
-| Production startup reports `Invalid BODY_SIZE_LIMIT` | Use a byte count (e.g. `8388608`), no unit |
-| `better-sqlite3 ... not supported` / `ERR_DLOPEN_FAILED` | You're starting the service with `bun run` — switch to `node apps/web/build/index.js` |
+| Production startup reports BODY_SIZE_LIMIT must be ≥ max(...) | Use a byte count ≥ `max(MAX_UPLOAD_BYTES×1.5, MAX_IMAGE_BYTES×1.37×1.5)` (with 5M docs + 10M images the floor is 21548237, e.g. `25165824`); on systemd deployments `update.sh` migrates it automatically |
+| `better-sqlite3 ... not supported` / `ERR_DLOPEN_FAILED` | Starting with `bun run` fails to load it — switch to `node apps/web/build/index.js`; if node reports a `NODE_MODULE_VERSION` mismatch: bun's prebuilt follows bun's bundled-node ABI — `install.sh`/`update.sh` auto-detect and swap in the matching-ABI prebuilt, for manual deploys run `npm rebuild better-sqlite3` at the repo root |
 | Upload >512K returns 413 but you're sure it's < `MAX_UPLOAD_BYTES` | `BODY_SIZE_LIMIT` is smaller than the content size (adapter-node default is only 512K) |
 | Invite code rejected at registration | Bootstrap code: verify `INITIAL_INVITE_CODE` matches what was set at startup; DB code: may have expired or been revoked (check `/settings/invites`) |
 | seed-token reports `Cannot find package 'better-sqlite3'` | Run it from the **repository root** (not apps/web) |

@@ -261,7 +261,7 @@ To browse / delete / organize your own document library: visit the site home →
 | `BASE_URL` | `http://localhost:5173` | External URL prefix used when generating share links |
 | `BRIDGE_REPO_URL` | `https://github.com/earneet/remote-reader` | Bridge source repo URL shown in the login-page agent guide (change for custom forks) |
 | `MAX_UPLOAD_BYTES` | `5242880` (5MB) | Maximum single document size |
-| `BODY_SIZE_LIMIT` | adapter-node default 512K | **Bytes (numeric)**, gateway-layer body limit; must be > `MAX_UPLOAD_BYTES` |
+| `BODY_SIZE_LIMIT` | adapter-node default 512K | **Bytes (numeric)**, gateway-layer body limit; production must be ≥ `max(MAX_UPLOAD_BYTES×1.5, MAX_IMAGE_BYTES×1.37×1.5)` (with defaults ≥ 21548237, e.g. `25165824`) |
 | `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW_MS` | `60` / `60000` | Upload rate per token |
 | `LOGIN_RATE_LIMIT_MAX` | `10` | Login attempts per email (same window) |
 | `SESSION_MAX_AGE` | `2592000` (30 days, seconds) | Session lifetime; exp is embedded in the token and validated server-side |
@@ -279,7 +279,7 @@ To browse / delete / organize your own document library: visit the site home →
 | Symptom | Troubleshooting |
 |---|---|
 | Production startup reports `SESSION_SECRET must be set in production` | Set `SESSION_SECRET` (a long random string) |
-| Production startup reports `Invalid BODY_SIZE_LIMIT` | Use a byte count (e.g. `8388608`) without a unit |
+| Production startup reports BODY_SIZE_LIMIT must be ≥ max(...) | Raise it to a compliant byte count (e.g. `25165824` with defaults); on systemd deployments `sudo ./scripts/update.sh` migrates it automatically |
 | `better-sqlite3 ... not supported` / `ERR_DLOPEN_FAILED` | You are starting the service with `bun run` — switch to `node apps/web/build/index.js` |
 | `bun run test` reports better-sqlite3 load failure | Don't use `bun test`; tests run under vitest via `bun run test` (through node) |
 | Upload >512K returns 413 but you are certain it's < `MAX_UPLOAD_BYTES` | `BODY_SIZE_LIMIT` is smaller than the content size (adapter-node defaults to just 512K) |

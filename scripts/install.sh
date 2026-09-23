@@ -47,6 +47,10 @@ SRC_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 [[ -d "${SRC_DIR}/apps/web" ]]     || die "未找到 apps/web 目录：${SRC_DIR}/apps/web"
 [[ -d "${SRC_DIR}/apps/mcp-bridge" ]] || die "未找到 apps/mcp-bridge 目录"
 
+# 部署辅助函数（BODY_SIZE_LIMIT 计算 / better-sqlite3 ABI 自修），与 update.sh 共用单源
+# shellcheck source=lib-deploy.sh
+source "${SCRIPT_DIR}/lib-deploy.sh"
+
 # 检测 init 系统（支持 systemd 才有意义）
 [[ -d /run/systemd/system ]] || die "未检测到 systemd，本脚本仅支持 systemd 发行版（Ubuntu 16.04+/Debian 8+）"
 
@@ -145,10 +149,17 @@ log "构建 web 应用（adapter-node 产物）"
 ok "构建完成"
 
 # 剥离 devDependencies（vite build 已把 workspace 依赖内联到 build/server）
+# 注意保留 bun.lock：删了它二次 install 会重新解析依赖树，结果随 registry 漂移且慢
 log "整理生产 node_modules"
-(cd "${INSTALL_DIR}" && rm -rf node_modules apps/web/node_modules packages/shared/node_modules apps/mcp-bridge/node_modules bun.lock)
+(cd "${INSTALL_DIR}" && rm -rf node_modules apps/web/node_modules packages/shared/node_modules apps/mcp-bridge/node_modules)
 (cd "${INSTALL_DIR}" && "${BUN_BIN}" install --production)
 ok "生产依赖就绪"
+
+# bun 装出的 better-sqlite3 prebuilt 跟随 bun 内置 node 的 ABI，与系统 node 不匹配则服务起不来
+# （实测 bun 1.3.x=ABI 137 vs node 22=ABI 127）。不匹配时自动换对应 ABI 的 prebuilt。
+if ! fix_better_sqlite3_abi "${INSTALL_DIR}" "$(command -v node)"; then
+    die "better-sqlite3 ABI 自动修复失败。可在 ${INSTALL_DIR} 内 npm rebuild better-sqlite3 后重启服务，或检查网络后重跑安装"
+fi
 
 # 代码目录归 root，防止 service user 改动
 chown -R root:root "${INSTALL_DIR}"
@@ -161,6 +172,9 @@ chmod 750 "${DATA_DIR}"
 log "生成 SESSION_SECRET 与 INITIAL_INVITE_CODE"
 SESSION_SECRET="$(openssl rand -base64 48 | tr -d '\n')"
 INITIAL_INVITE_CODE="$(openssl rand -hex 6)"
+# BODY_SIZE_LIMIT 须 ≥ max(MAX_UPLOAD_BYTES×1.5, MAX_IMAGE_BYTES×1.37×1.5)（生产启动校验，缺/小了起不来），
+# 与下方 env 模板里的两个 MAX_* 默认值联动计算，MiB 取整（默认 5M/10M → 22020096）
+BODY_SIZE_LIMIT_VAL="$(round_up_mib "$(required_body_size_limit 5242880 10485760)")"
 
 ENV_FILE="${CONFIG_DIR}/env"
 log "写入 ${ENV_FILE}"
@@ -176,7 +190,8 @@ DATA_DIR=${DATA_DIR}/documents
 SESSION_SECRET=${SESSION_SECRET}
 INITIAL_INVITE_CODE=${INITIAL_INVITE_CODE}
 MAX_UPLOAD_BYTES=5242880
-BODY_SIZE_LIMIT=8388608
+MAX_IMAGE_BYTES=10485760
+BODY_SIZE_LIMIT=${BODY_SIZE_LIMIT_VAL}
 RATE_LIMIT_MAX=60
 RATE_LIMIT_WINDOW_MS=60000
 LOGIN_RATE_LIMIT_MAX=10

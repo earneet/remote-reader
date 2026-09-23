@@ -25,7 +25,7 @@
 2. 自动探测 BASE_URL（首个非 loopback IPv4）
 3. 创建系统用户 `remote-reader`（nologin shell）
 4. rsync 代码到 `/opt/remote-reader`（排除 data / node_modules / build / .git）
-5. `bun install` + `bun --filter remote-reader-web build` + 二次 `install --production` 剥离 devDeps
+5. `bun install` + `bun --filter remote-reader-web build` + 二次 `install --production` 剥离 devDeps（保留 bun.lock 防依赖漂移；剥离后自动检测 better-sqlite3 与系统 node 的 ABI 匹配，不匹配则换对应 ABI 的 prebuilt）
 6. `openssl rand` 生成 `SESSION_SECRET`（base64 48）与 `INITIAL_INVITE_CODE`（hex 6）
 7. 写 `/etc/remote-reader/env`（权限 640 root:remote-reader）
 8. 写 `/etc/systemd/system/remote-reader.service`（含 17 项安全加固）
@@ -329,10 +329,10 @@ sudo ./scripts/uninstall.sh --yes           # 跳过所有确认（自动化）
 4. `--git` 模式：`git pull --ff-only` 拉取最新代码（只动克隆，不碰 `INSTALL_DIR`）；默认模式：跳过，直接用当前工作区代码
 5. **整目录备份** `/opt/remote-reader` → `/opt/remote-reader.bak`（含 build + node_modules，兜底 better-sqlite3 ABI 坑）
 6. `rsync -a --delete` 新码到 `INSTALL_DIR`（排除 data / node_modules / build / .git / .env）
-7. `chown root:root` + `bun install` + `bun --filter remote-reader-web build` + 剥离 devDeps（与 install.sh 同 build 链路）
-8. **配置迁移（幂等，老部署升级到新特性所需）**：env 缺 `ORIGIN` 时用 `BASE_URL` 补写（原文件备份 `env.update-bak`）；创建 `/var/log/remote-reader`；补写缺失的 logrotate；从单源模板（`gen-unit.sh`，与 install.sh 共用防漂移）重新生成 unit，有差异才替换 + `daemon-reload`（原 unit 备份 `unit.update-bak`）
+7. `chown root:root` + `bun install` + `bun --filter remote-reader-web build` + 剥离 devDeps（与 install.sh 同 build 链路；剥离保留 bun.lock，剥离后自动检测/修复 better-sqlite3 ABI 与生产 node 的匹配，修复失败直接中止走回滚）
+8. **配置迁移（幂等，老部署升级到新特性所需）**：env 缺 `ORIGIN` 时用 `BASE_URL` 补写、`BODY_SIZE_LIMIT` 低于启动校验下限（`max(MAX_UPLOAD_BYTES×1.5, MAX_IMAGE_BYTES×1.37×1.5)`）时自动提升到 MiB 取整值（原文件备份 `env.update-bak`）；创建 `/var/log/remote-reader`；补写缺失的 logrotate；从单源模板（`gen-unit.sh`，与 install.sh 共用防漂移）重新生成 unit，有差异才替换 + `daemon-reload`（原 unit 备份 `unit.update-bak`）
 9. `systemctl restart` → 轮询 `/api/health`（最多 30s）
-10. **health 不过则自动回滚** `INSTALL_DIR` ← `.bak` + 恢复 unit/env 备份 + `daemon-reload` + 重启 + 告警；通过则清理全部备份 + 总结
+10. **health 不过则自动回滚** `INSTALL_DIR` ← `.bak` + 恢复 unit/env 备份 + `daemon-reload` + 重启 + 回滚后同样轮询 health（最多 30s）+ 告警；通过则清理全部备份 + 总结
 
 ### 基本用法
 
@@ -372,7 +372,9 @@ sudo ./scripts/update.sh -y           # 跳过确认（自动化）
 |---|---|
 | `sudo` 找不到 bun（secure_path 不含 `~/.bun/bin`） | 从 `SUDO_USER` 取 home，加进 `PATH` |
 | sudo 下 `~/.bun-install` 不可写 | `export BUN_INSTALL_CACHE_DIR=/tmp/.bun-cache` |
-| bun 重编译 better-sqlite3 产出与 node 22（ABI 127）不匹配的 `.node` | 整目录备份 + health 校验 + 失败回滚 |
+| bun 装出的 better-sqlite3 prebuilt 跟随 bun 内置 node 的 ABI（如 bun 1.3.x=ABI 137），与生产 node（如 22=ABI 127）不匹配则服务起不来 | 剥离后自动用生产 node 实测加载，不匹配则从 npmmirror（回退 GitHub）拉对应 ABI 的 prebuilt 替换并复测；另由整目录备份 + health 校验 + 失败回滚兜底 |
+| 剥离 devDeps 时删掉 bun.lock → 二次 install 重新解析依赖树，版本随 registry 漂移且慢 | 剥离只删 node_modules，保留 bun.lock |
+| 老部署 env 的 `BODY_SIZE_LIMIT=8388608` 低于图片支持后的启动校验下限 → 升级后服务起不来 | update.sh 幂等迁移：按 env 实际 MAX_* 值算下限，不足自动提升到 MiB 取整值（有备份、随回滚恢复） |
 
 ---
 
@@ -466,5 +468,6 @@ NODE_PATH=<含 playwright 的 node_modules> API_TOKEN=rr_xxx BASE_URL=http://loc
 ## 开发提示
 
 - 除 `seed-token.mjs` 需要 better-sqlite3 外，其余 bash 脚本都不依赖项目运行时，可以独立分发。
+- `lib-deploy.sh` 是 install.sh / update.sh 共用的函数库（被 source，非独立入口）：BODY_SIZE_LIMIT 公式（与 `apps/web/src/lib/server/startup-check.ts` 同语义，改公式要三处同步）与 better-sqlite3 ABI 自修。改部署逻辑时注意保持单源，勿在两个脚本里各写一份。
 - install.sh 的逻辑都按"前可预测、后可追溯"设计：每步有 `[install]` log 前缀，失败不静默。
 - 想加新脚本时保持同样风格：set -euo pipefail、颜色 log 函数、前置检查、可参数化。
