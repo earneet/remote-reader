@@ -27,7 +27,11 @@ export const POST: RequestHandler = async ({ request, getClientAddress }) => {
     } catch (e) {
         // head 的 ObjectNotFound 已在服务层消化为 missing；此处兜 getRange 阶段的同错（head 后对象被删竞态）
         if (e instanceof ObjectNotFoundError) return json({ status: 'missing' }, { status: 404 });
-        if (e instanceof ArchiveUnavailableError) error(503, 'image storage unreachable');
+        // 503 必须可诊断：吞 cause 会让网关兼容类故障无法定位（2026-09-22 七牛 checksum 排障教训）
+        if (e instanceof ArchiveUnavailableError) {
+            console.warn('[images] confirm 存储不可达，cause:', e.cause ?? e);
+            error(503, 'image storage unreachable');
+        }
         throw e;
     }
     if (result.ok) return json({ status: 'ok', name: result.name });

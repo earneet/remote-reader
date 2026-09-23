@@ -27,7 +27,13 @@ export class S3BlobStore implements BlobStore {
             },
             // 挂起端点快速失败交给 503 语义（冷档与图片 blob 共用此单源配置）
             requestHandler: new NodeHttpHandler({ requestTimeout: 5_000 }),
-            maxAttempts: 2
+            maxAttempts: 2,
+            // 七牛实证（2026-09-22）：其 Range GET 响应自相矛盾——Content-Range 声明分片、
+            // content-md5 给分片 MD5、实际流回全量 body；SDK ≥3.729 默认 WHEN_SUPPORTED
+            // 消费 body 时校验不过抛 ChecksumMismatch → confirm 恒 503。
+            // WHEN_REQUIRED = 仅请求方显式要求时才校验（我们从不要求），官方推荐的
+            // S3 兼容网关兼容位。注意七牛仍会流回全量 body，getRange 返回值可能长于请求区间。
+            responseChecksumValidation: 'WHEN_REQUIRED'
         });
         this.bucket = config.bucket;
     }
