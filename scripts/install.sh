@@ -50,6 +50,7 @@ SRC_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # 部署辅助函数（BODY_SIZE_LIMIT 计算 / better-sqlite3 ABI 自修），与 update.sh 共用单源
 # shellcheck source=lib-deploy.sh
 source "${SCRIPT_DIR}/lib-deploy.sh"
+die_if_src_is_install_dir "${SRC_DIR}" "${INSTALL_DIR}"
 
 # 检测 init 系统（支持 systemd 才有意义）
 [[ -d /run/systemd/system ]] || die "未检测到 systemd，本脚本仅支持 systemd 发行版（Ubuntu 16.04+/Debian 8+）"

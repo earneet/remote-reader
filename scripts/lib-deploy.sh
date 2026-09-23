@@ -34,6 +34,19 @@ round_up_mib() {
     echo $(( ($1 + 1048575) / 1048576 * 1048576 ))
 }
 
+# SRC_DIR==INSTALL_DIR 守卫（2026-09-23 实证）：SRC_DIR 由脚本自身路径推导，
+# 在部署目录里跑 ./scripts/update.sh 会自我 rsync 旧源码"假升级"——构建与
+# 健康检查全过，但部署的是部署目录里的旧码。必须在 rsync/构建前拦截。
+# 用法：die_if_src_is_install_dir <src_dir> <install_dir>
+die_if_src_is_install_dir() {
+    local src="$1" dst="$2"
+    [[ -d "${dst}" ]] && dst="$(cd "${dst}" && pwd)"
+    dst="${dst%/}"
+    if [[ "${src}" == "${dst}" ]]; then
+        die "源码目录与安装目录相同（${src}）——本脚本以自身位置推导源码目录，在部署目录内执行会自我 rsync 旧代码（假升级）。请 cd 到源码克隆目录后重跑"
+    fi
+}
+
 # bun install 产出的 better-sqlite3 prebuilt 跟随 bun 内置 node 的 ABI（如 bun 1.3.x = ABI 137），
 # 与生产 /usr/bin/node（如 node 22 = ABI 127）不匹配时服务起不来（ERR_DLOPEN_FAILED）。
 # 本函数用生产 node 实测加载；失败则按生产 node 的 ABI 从 npmmirror 二进制镜像

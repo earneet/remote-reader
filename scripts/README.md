@@ -375,6 +375,7 @@ sudo ./scripts/update.sh -y           # 跳过确认（自动化）
 | bun 装出的 better-sqlite3 prebuilt 跟随 bun 内置 node 的 ABI（如 bun 1.3.x=ABI 137），与生产 node（如 22=ABI 127）不匹配则服务起不来 | 剥离后自动用生产 node 实测加载，不匹配则从 npmmirror（回退 GitHub）拉对应 ABI 的 prebuilt 替换并复测；另由整目录备份 + health 校验 + 失败回滚兜底 |
 | 剥离 devDeps 时删掉 bun.lock → 二次 install 重新解析依赖树，版本随 registry 漂移且慢 | 剥离只删 node_modules，保留 bun.lock |
 | 老部署 env 的 `BODY_SIZE_LIMIT=8388608` 低于图片支持后的启动校验下限 → 升级后服务起不来 | update.sh 幂等迁移：按 env 实际 MAX_* 值算下限，不足自动提升到 MiB 取整值（有备份、随回滚恢复） |
+| 在部署目录里跑 `./scripts/update.sh`（脚本以自身路径推导源码目录）→ 自我 rsync 旧源码"假升级"，构建与健康检查全过但部署的是旧码 | `die_if_src_is_install_dir` 前置拦截：SRC_DIR==INSTALL_DIR 直接拒绝并提示去源码克隆目录跑（install.sh 同款守卫） |
 
 ---
 
@@ -468,6 +469,6 @@ NODE_PATH=<含 playwright 的 node_modules> API_TOKEN=rr_xxx BASE_URL=http://loc
 ## 开发提示
 
 - 除 `seed-token.mjs` 需要 better-sqlite3 外，其余 bash 脚本都不依赖项目运行时，可以独立分发。
-- `lib-deploy.sh` 是 install.sh / update.sh 共用的函数库（被 source，非独立入口）：BODY_SIZE_LIMIT 公式（与 `apps/web/src/lib/server/startup-check.ts` 同语义，改公式要三处同步）与 better-sqlite3 ABI 自修。改部署逻辑时注意保持单源，勿在两个脚本里各写一份。
+- `lib-deploy.sh` 是 install.sh / update.sh 共用的函数库（被 source，非独立入口）：BODY_SIZE_LIMIT 公式（与 `apps/web/src/lib/server/startup-check.ts` 同语义，改公式要三处同步）、better-sqlite3 ABI 自修、SRC_DIR==INSTALL_DIR 假升级守卫。改部署逻辑时注意保持单源，勿在两个脚本里各写一份。
 - install.sh 的逻辑都按"前可预测、后可追溯"设计：每步有 `[install]` log 前缀，失败不静默。
 - 想加新脚本时保持同样风格：set -euo pipefail、颜色 log 函数、前置检查、可参数化。
