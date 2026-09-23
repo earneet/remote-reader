@@ -145,6 +145,7 @@ SRC_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # 部署辅助函数（BODY_SIZE_LIMIT 计算 / better-sqlite3 ABI 自修），与 install.sh 共用单源
 # shellcheck source=lib-deploy.sh
 source "${SCRIPT_DIR}/lib-deploy.sh"
+die_if_src_is_install_dir "${SRC_DIR}" "${INSTALL_DIR}"
 
 # 解析原属主（脚本经 sudo 跑时，源码克隆通常属 SUDO_USER）；git 操作需以其身份执行
 SUDO_HOME=""
