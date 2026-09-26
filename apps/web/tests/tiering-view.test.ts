@@ -53,7 +53,7 @@ async function makeColdWithShare(content: string): Promise<string> {
 test('冷文档 + 有效 token → 正常渲染（内容来自远端）且触发异步回热', async () => {
     const token = await makeColdWithShare('# Cold View');
     const result = (await callShareLoad(token)) as { title: string; html: string };
-    expect(result.html).toContain('<h1>Cold View</h1>');
+    expect(result.html).toContain('<h1 id="cold-view" tabindex="-1">Cold View</h1>');
     // 回热 fire-and-forget：轮询等待翻转（固定 sleep 在 CI 负载下会假红，回热链含 3 次真实磁盘 I/O）
     for (let i = 0; i < 100 && getDocRow().storageTier !== 'hot'; i++) {
         await new Promise((r) => setTimeout(r, 20));
@@ -86,7 +86,7 @@ test('热文档访问 → last_viewed_at 刷新', async () => {
 test('冷文档 storagePath 保留不再是 404 条件（守卫放宽）', async () => {
     const token = await makeColdWithShare('# guard');
     const result = (await callShareLoad(token)) as { html: string };
-    expect(result.html).toContain('<h1>guard</h1>');
+    expect(result.html).toContain('<h1 id="guard" tabindex="-1">guard</h1>');
 });
 
 // ── 自愈兜底（spec §7，双 Agent 交叉审查发现：陈旧行判定与实际状态竞态防假 404）──

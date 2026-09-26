@@ -54,7 +54,7 @@ test('owner 查看自己的文档：返回渲染 html + cache-control no-store',
     const headers: Record<string, string> = {};
     const result = (await load(mkEvent(ownerId, docId, headers))) as { title: string; html: string };
     expect(result.title).toBe('doc.md');
-    expect(result.html).toContain('<h1>Hello</h1>');
+    expect(result.html).toContain('<h1 id="hello" tabindex="-1">Hello</h1>');
     expect(headers['cache-control']).toBe('no-store');
 });
 

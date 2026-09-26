@@ -45,7 +45,7 @@ test('有效 token 返回渲染 html（#32）', async () => {
     const result = (await load({ locals: { user: null }, params: { token }, setHeaders: (h: Record<string, string>) => Object.assign(headers, h) } as unknown as Parameters<typeof load>[0])) as { title: string; html: string };
     expect(headers['cache-control']).toBe('no-store');
     expect(result.title).toBe('a.md');
-    expect(result.html).toContain('<h1>Title</h1>');
+    expect(result.html).toContain('<h1 id="title" tabindex="-1">Title</h1>');
 });
 
 test('无效 token → 404（#32）', async () => {
