@@ -1,6 +1,7 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, type Mock } from 'vitest';
 import type { S3Client } from '@aws-sdk/client-s3';
 import { S3BlobStore } from '$server/blobstore-s3';
+import { ObjectNotFoundError, ArchiveUnavailableError } from '$server/object-store-errors';
 
 const CFG = {
     endpoint: 'https://s3.cn-north-1.qiniucs.com',
@@ -74,5 +75,64 @@ describe('S3Client 兼容性配置', () => {
             expect(url).not.toContain('X-Amz-Checksum');
             expect(url).not.toContain('checksum-algorithm');
         }
+    });
+});
+
+describe('S3BlobStore 数据面（client.send 注入 SDK v3 响应形状，无网络 IO）', () => {
+    type SendOut = Awaited<ReturnType<S3Client['send']>>;
+    // SDK v3 的 Body 消费面是流式对象的 transformToByteArray——mock 只提供该形状（形状保真）
+    const mkBody = (bytes: Uint8Array): { transformToByteArray(): Promise<Uint8Array> } => ({
+        transformToByteArray: async () => bytes
+    });
+    function mkStore(): { store: S3BlobStore; send: Mock } {
+        const store = new S3BlobStore(CFG);
+        const client = (store as unknown as { client: S3Client }).client;
+        return { store, send: vi.spyOn(client, 'send') };
+    }
+
+    it('getRange 封口契约（七牛怪癖）：Range GET 流回长于请求区间的全量 body → 返回恰好 [start,end] 闭区间字节', async () => {
+        const { store, send } = mkStore();
+        const full = Buffer.alloc(100, 7); // 网关无视 Range 流回 100B（七牛实证形态）
+        send.mockResolvedValueOnce({ Body: mkBody(full) } as unknown as SendOut);
+        const out = await store.getRange('k', 0, 31);
+        expect(out.length).toBe(32);
+        expect(out).toEqual(full.subarray(0, 32));
+        send.mockRestore();
+    });
+
+    it('getRange 透传 Range 头 bytes=start-end', async () => {
+        const { store, send } = mkStore();
+        send.mockResolvedValueOnce({ Body: mkBody(new Uint8Array(32)) } as unknown as SendOut);
+        await store.getRange('k', 5, 36);
+        expect(send.mock.calls[0]?.[0]).toMatchObject({ input: { Range: 'bytes=5-36' } });
+        send.mockRestore();
+    });
+
+    it('head：ETag 去引号归一化（confirm 比对 md5 的前置条件）', async () => {
+        const { store, send } = mkStore();
+        send.mockResolvedValueOnce({ ContentLength: 10, ETag: '"abc123"' } as unknown as SendOut);
+        expect(await store.head('k')).toEqual({ size: 10, etag: 'abc123' });
+        send.mockRestore();
+    });
+
+    it('get：Body 缺失 → ObjectNotFoundError（非裸 500）', async () => {
+        const { store, send } = mkStore();
+        send.mockResolvedValueOnce({} as unknown as SendOut);
+        await expect(store.get('k')).rejects.toBeInstanceOf(ObjectNotFoundError);
+        send.mockRestore();
+    });
+
+    it('get/getRange：body 流消费中断 → ArchiveUnavailableError（503 语义，不降级裸 500）', async () => {
+        const broken = (): { transformToByteArray(): Promise<Uint8Array> } => ({
+            transformToByteArray: async () => { throw new Error('truncated'); }
+        });
+        const a = mkStore();
+        a.send.mockResolvedValueOnce({ Body: broken() } as unknown as SendOut);
+        await expect(a.store.get('k')).rejects.toBeInstanceOf(ArchiveUnavailableError);
+        a.send.mockRestore();
+        const b = mkStore();
+        b.send.mockResolvedValueOnce({ Body: broken() } as unknown as SendOut);
+        await expect(b.store.getRange('k', 0, 3)).rejects.toBeInstanceOf(ArchiveUnavailableError);
+        b.send.mockRestore();
     });
 });
