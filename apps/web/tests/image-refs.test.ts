@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterAll } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
 import { db, schema, sqlite } from '$server/db';
 import { resetDb } from './helpers';
 import { initImage, relayImage } from '$server/images';
@@ -186,6 +186,22 @@ describe('gcImagesIfUnreferenced（§4.3-1/2/4）', () => {
         const dead = await mkReadyImage('u1', 'dead.png', pngBytes(1));
         sqlite.exec(`UPDATE images SET status='deleted' WHERE id='${dead}'`);
         await expect(gcImagesIfUnreferenced([dead])).resolves.toBeUndefined();
+    });
+
+    it('per-id 容错（2026-09-22 修复锁）：单 id 事务抛错只 warn 不中断整批、函数不 reject', async () => {
+        mkUser('u1');
+        const a = await mkReadyImage('u1', 'a.png', pngBytes(1));
+        const b = await mkReadyImage('u1', 'b.png', pngBytes(2));
+        // 首个 id 的墓碑事务注入 DB 故障（once 抛错后自动回落原实现）——调用点是
+        // void fire-and-forget，reject 会变 unhandledRejection 崩进程
+        const spy = vi.spyOn(db, 'transaction').mockImplementationOnce(() => { throw new Error('injected db failure'); });
+        try {
+            await expect(gcImagesIfUnreferenced([a, b])).resolves.toBeUndefined();
+        } finally {
+            spy.mockRestore();
+        }
+        expect(imageRow(a)!.status).toBe('ready');   // 故障 id 未软删（下轮收敛，宁可晚删不早删）
+        expect(imageRow(b)!.status).toBe('deleted'); // 后续 id 不受牵连
     });
 });
 

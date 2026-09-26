@@ -73,6 +73,9 @@ describe('relayImage（spec §5.2）', () => {
         const init = await initImage('u1', { name: 'a.png', contentHash: sha256(big), contentMd5: md5(big), sizeBytes: 1 });
         const r = await relayImage('u1', idOf(init), big);
         expect(r).toEqual({ ok: false, reason: 'invalid', message: expect.stringContaining('上限') });
+        // size 超限不构成内容真值绑定失败（对照 magic/ext 删行分支）——行保留 pending，
+        // 同 sha256/ETag 的 keep 三兄弟：sha256 不符 keep、ETag 不符 keep、size 超限 keep
+        expect(db.select().from(schema.images).where(eq(schema.images.id, idOf(init))).get()!.status).toBe('pending');
     });
     it('魔数不符 → invalid 带文案（SVG 拒绝说明）', async () => {
         __setBlobStoresForTest({ local: new LocalBlobStore() });
@@ -239,8 +242,13 @@ describe('改名重传死锁修复（QA 实测：sha256 绑定后的 magic/ext �
         mkUser('u1');
         const txt = Buffer.from('plain text, not an image');
         const init1 = await initImage('u1', { name: 'note.png', contentHash: sha256(txt), contentMd5: md5(txt), sizeBytes: txt.length });
-        expect((await relayImage('u1', idOf(init1), txt)).ok).toBe(false); // magic-null invalid
+        // 预置悬空 ref 指向该 pending 行：dropDoomedPendingRow 必须**先清 refs 再删行**——
+        // image_refs.image_id FK 为 no action 且 foreign_keys=ON，顺序反了 DELETE 抛 FK 错
+        sqlite.exec(`INSERT INTO documents (id, owner_id, name, type, created_at, updated_at) VALUES ('d-doom', 'u1', 'd.md', 'file', 0, 0)`);
+        sqlite.exec(`INSERT INTO image_refs (document_id, image_id, created_at) VALUES ('d-doom', '${idOf(init1)}', 0)`);
+        expect((await relayImage('u1', idOf(init1), txt)).ok).toBe(false); // magic-null invalid（含防御序删行，FK 序对则不抛）
         expect(db.select().from(schema.images).where(eq(schema.images.id, idOf(init1))).get()).toBeUndefined(); // 行已删
+        expect(db.select().from(schema.imageRefs).where(eq(schema.imageRefs.imageId, idOf(init1))).all()).toEqual([]); // refs 已清
         const init2 = await initImage('u1', { name: 'renamed.png', contentHash: sha256(txt), contentMd5: md5(txt), sizeBytes: txt.length });
         expect(init2.status).toBe('relay');
         expect(init2.name).toBe('renamed.png'); // 不再复用旧名
@@ -326,5 +334,25 @@ describe('confirm 改名重传死锁修复（s3 直传侧：ETag==md5 证诚实�
         expect(r.ok).toBe(false); // ext-mismatch（校验链先于 ETag 判定命中）
         const row = db.select().from(schema.images).where(eq(schema.images.id, init1.imageId)).get()!;
         expect(row.status).toBe('pending'); // 行保留
+    });
+
+    // head 报称超大对象：size 分支在 ETag 判定之前命中，且不删行（与 relay 侧 size-keep 对称）
+    class OversizedHeadS3 extends FakeS3 {
+        override async head(key: string): Promise<{ size: number; etag?: string }> {
+            const h = await super.head(key);
+            return { ...h, size: 11 * 1024 * 1024 };
+        }
+    }
+
+    it('对象超大小上限 → invalid 且行保留 pending（confirm 侧 size 分支）', async () => {
+        const fake = new OversizedHeadS3();
+        __setBlobStoresForTest({ local: new LocalBlobStore(), s3: fake });
+        mkUser('u1');
+        const init = await initImage('u1', { name: 'a.png', contentHash: sha256(PNG), contentMd5: md5(PNG), sizeBytes: PNG.length });
+        if (init.status !== 'direct') throw new Error('unreachable');
+        await fake.put(init.uploadUrl.split('/put/')[1]!.split('?')[0], PNG);
+        const r = await confirmImage('u1', init.imageId);
+        expect(r).toEqual({ ok: false, reason: 'invalid', message: expect.stringContaining('上限') });
+        expect(db.select().from(schema.images).where(eq(schema.images.id, init.imageId)).get()!.status).toBe('pending');
     });
 });
