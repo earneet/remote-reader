@@ -3,7 +3,30 @@ import { renderMarkdown, __resetMarkdownCacheForTest } from '../src/lib/server/m
 
 test('渲染标题', async () => {
     const html = (await renderMarkdown('# Title')).html;
-    expect(html).toContain('<h1>Title</h1>');
+    expect(html).toContain('<h1 id="title" tabindex="-1">Title</h1>');
+});
+
+// ===== 标题锚点（heading id，GitHub 风格 slug——救活文档目录链接与 #fragment 跳转）=====
+
+test('CJK 标题生成 GitHub 风格 id（CJK 保留、标点剥离、空格转连字符）', async () => {
+    const html = (await renderMarkdown('## 5. 边界情况分析')).html;
+    expect(html).toContain('<h2 id="5-边界情况分析" tabindex="-1">');
+});
+
+test('英文标题 slug 小写化 + 空格转连字符', async () => {
+    const html = (await renderMarkdown('## Hello World')).html;
+    expect(html).toContain('<h2 id="hello-world" tabindex="-1">');
+});
+
+test('重复标题加数字后缀去重（GitHub 同款 -1）', async () => {
+    const html = (await renderMarkdown('## 重复\n\n## 重复')).html;
+    expect(html).toContain('id="重复"');
+    expect(html).toContain('id="重复-1"');
+});
+
+test('标题内行内代码文本计入 slug（GitHub 对齐）', async () => {
+    const html = (await renderMarkdown('## Use `npm install` now')).html;
+    expect(html).toContain('id="use-npm-install-now"');
 });
 
 test('渲染段落与加粗', async () => {

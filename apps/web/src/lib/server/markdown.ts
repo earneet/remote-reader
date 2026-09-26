@@ -2,6 +2,8 @@ import MarkdownIt from 'markdown-it';
 import { createHighlighter } from 'shiki';
 import type { Highlighter } from 'shiki';
 import { createHash } from 'node:crypto';
+import anchor from 'markdown-it-anchor';
+import GithubSlugger from 'github-slugger';
 import { registerMathRules, registerMathRenderers } from '$shared/markdown-math';
 import { extractImageNames, normalizeImageRef } from '@remote-reader/shared/image-extract';
 
@@ -100,6 +102,13 @@ async function getMarkdown(): Promise<MarkdownIt> {
     });
     registerMathRules(md);
     registerMathRenderers(md);
+    // 标题锚点：GitHub 风格 slug（CJK 保留、标点剥离、空格转连字符）——文档内目录链接与
+    // URL #fragment 跳转的着落目标。默认 slugify 保留点号（`5.-标题`），须换 github-slugger
+    // 对齐 Agent 写目录的 GitHub 惯例；slugger 实例内部有跨调用去重状态，每标题新建，
+    // 去重交回插件（per-render env，-1/-2 后缀与 GitHub 一致），否则第二篇文档的同名标题会漂移
+    md.use(anchor, {
+        slugify: (s) => new GithubSlugger().slug(s)
+    });
     md.renderer.rules.table_open = () => '<div class="rr-table-outer"><div class="rr-table-wrap"><table>';
     md.renderer.rules.table_close = () => '</table></div></div>';
     mdInstance = md;
