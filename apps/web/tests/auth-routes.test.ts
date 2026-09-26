@@ -1,5 +1,5 @@
 import { test, expect, beforeEach } from 'vitest';
-import { db, schema, sqlite } from '../src/lib/server/db';
+import { db, schema } from '../src/lib/server/db';
 import { eq } from 'drizzle-orm';
 import { createInviteCode, revokeInvite } from '../src/lib/server/invites';
 

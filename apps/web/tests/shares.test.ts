@@ -1,6 +1,6 @@
 import { test, expect, beforeEach } from 'vitest';
 import { eq } from 'drizzle-orm';
-import { db, schema, sqlite } from '../src/lib/server/db';
+import { db, schema } from '../src/lib/server/db';
 import { generateId } from '../src/lib/server/auth';
 import {
     generateShareToken,

@@ -1,7 +1,7 @@
 import { test, expect, beforeEach, afterEach } from 'vitest';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { db, schema, sqlite } from '../src/lib/server/db';
+import { db, schema } from '../src/lib/server/db';
 import { generateId } from '../src/lib/server/auth';
 import { writeFile } from '../src/lib/server/storage';
 
