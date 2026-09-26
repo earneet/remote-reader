@@ -49,12 +49,15 @@ test('clearSessionCookie：删除 session cookie', () => {
     expect(c._store.session).toBeUndefined();
 });
 
-test('setSessionCookie：cookie 选项安全（httpOnly / sameSite=lax / path=/ / maxAge>0）', () => {
+test('setSessionCookie：cookie 选项安全（httpOnly / sameSite=lax / path=/ / secure / maxAge>0）', () => {
     const c = mockCookies();
     setSessionCookie(c as never, { userId: 'user-123' });
     const opts = c._setCalls[0].opts!;
     expect(opts.httpOnly).toBe(true);
     expect(opts.sameSite).toBe('lax');
     expect(opts.path).toBe('/');
+    // 非 production 环境须为 false——反向（NODE_ENV 误判为 production）会让无 HTTPS 的
+    // 本地/内网部署丢 session cookie；生产 true 分支由 NODE_ENV=production 部署保证
+    expect(opts.secure).toBe(false);
     expect(opts.maxAge as number).toBeGreaterThan(0);
 });

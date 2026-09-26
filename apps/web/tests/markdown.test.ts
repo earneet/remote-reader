@@ -73,11 +73,14 @@ test('block $$...$$ 转为 math block 占位 div', async () => {
 
 test('渲染结果缓存：同输入返回同输出、不同输入各异（M13）', async () => {
     __resetMarkdownCacheForTest();
-    const a1 = (await renderMarkdown('# cached')).html;
-    const a2 = (await renderMarkdown('# cached')).html;
-    expect(a1).toBe(a2);
-    const b = (await renderMarkdown('# other')).html;
-    expect(b).not.toBe(a1);
+    // 命中直返缓存对象（markdown.ts RENDER_CACHE 命中分支 return hit）——对象级 toBe
+    // 才能区分「命中」与「重新渲染出相同结果」（字符串值比较在渲染确定性下恒真）
+    const o1 = await renderMarkdown('# cached');
+    const o2 = await renderMarkdown('# cached');
+    expect(o2).toBe(o1);
+    expect(o1.html).toContain('cached');
+    const b = await renderMarkdown('# other');
+    expect(b).not.toBe(o1);
 });
 
 test('表格被 overflow 壳包裹（防手机撑破布局）', async () => {
