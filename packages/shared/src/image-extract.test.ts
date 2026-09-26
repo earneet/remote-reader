@@ -95,6 +95,38 @@ describe('imageTokenLines / extractLocalImageSrcs（桥编排单源）', () => {
             'D:/pics/w2.png'
         ]);
     });
+    it('walker 等价差分锁：extractLocalImageSrcs 序列 === imageTokenLines 序列经同款过滤+去重', () => {
+        // image-extract.ts 注释宣称两 walker「输出序列逐字节等价」，此前只锁了单侧快照——
+        // 任一 walker 的遍历序/过滤规则漂移（orchestrate 的 rename map 与 rewrite 的行定位
+        // 错位 → 静默裂图）时，本差分断言必红。过滤规则在此手写副本（scheme 剔除 + 盘符
+        // decode 例外 + 首现去重），与实现的内联规则独立，不构成同义反复。
+        const md = [
+            '# t',
+            '',
+            '![a](one.png) 与 ![b](https://x.com/e.png)',
+            '',
+            '| x | y |',
+            '|---|---|',
+            '| ![c](sub/t%20wo.png) | ![d](one.png) |',
+            '',
+            '盘符 ![w](C:\\p\\w.png) 与 ![w2](<my file.png>)'
+        ].join('\n');
+        const WINDOWS_DRIVE = /^[a-zA-Z]:[\\/]/;
+        const seen = new Set<string>();
+        const expected: string[] = [];
+        for (const t of imageTokenLines(md)) {
+            const raw = t.src;
+            let decoded = raw;
+            try { decoded = decodeURIComponent(raw); } catch { /* 与 decodeLocalSrc 同款：非法编码按原样 */ }
+            if (WINDOWS_DRIVE.test(decoded)) {
+                if (!seen.has(decoded)) { seen.add(decoded); expected.push(decoded); }
+                continue;
+            }
+            if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(raw)) continue;
+            if (!seen.has(raw)) { seen.add(raw); expected.push(raw); }
+        }
+        expect(extractLocalImageSrcs(md)).toEqual(expected);
+    });
     it('表格内图片：父 inline 无 map → 降级返回该 src 的全部出现行（改写走全文逐行）', () => {
         const md = '| a | b |\n|---|---|\n| ![x](t.png) | y |';
         const toks = imageTokenLines(md);
