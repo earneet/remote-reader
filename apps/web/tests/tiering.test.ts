@@ -1,4 +1,4 @@
-import { test, expect, beforeEach, afterEach } from 'vitest';
+import { test, expect, beforeEach, afterEach, vi } from 'vitest';
 import { rmSync, existsSync } from 'node:fs';
 import { db, schema, sqlite } from '../src/lib/server/db';
 import { generateId, sha256Hex } from '../src/lib/server/auth';
@@ -32,6 +32,7 @@ beforeEach(async () => {
 afterEach(() => {
     try { rmSync(TMP_DOCS, { recursive: true, force: true }); } catch {}
     __setObjectStoreForTest(undefined);
+    delete process.env.DATA_DIR; // 不留悬挂 env 指向已删目录（与 blobstore-local 纪律对齐）
 });
 
 // 冷态夹具：上传 → 把 updated_at 回拨 40 天 → 跑一轮归档
@@ -307,18 +308,27 @@ test('P2-8 归档饥饿防护：>50 个坏候选暂缓重试，不阻塞后面�
     expect(getDoc(good.id).storageTier).toBe('cold');
 });
 
-test('P2-8 暂缓 24h 后坏候选恢复重试（窗口过期自动出列）', async () => {
-    __clearArchiveSkipForTest(); // 直接清空暂缓表模拟窗口过期
+test('P2-8 暂缓期内不重试；24h 窗口真实到期后自动出列重试（真时间驱动，锁暂缓过期行为）', async () => {
     const r = await uploadDocument(ownerId, 'bad.md', 'v1', []);
     const row = getDoc(r.id);
     db.update(schema.documents).set({ updatedAt: Date.now() - 40 * DAY, createdAt: Date.now() - 40 * DAY }).where(eq(schema.documents.id, r.id)).run();
     const { writeFile } = await import('../src/lib/server/storage');
     await writeFile(row.storagePath!, 'tampered');
+    // 首轮：盘内容与 hash 不符 → skip 且登记暂缓 24h
     expect(await runArchiveCycle(store)).toBe(0);
-    expect(await runArchiveCycle(store)).toBe(0); // 暂缓期内不再重试
-    __clearArchiveSkipForTest();
-    // 窗口清空（模拟过期）后重新成为候选（仍 skip，因为盘内容还是坏的）
+    // 修复盘内容，但暂缓窗口未过期 → 周期入口的时间驱动出列分支不触发，不重试（仍 0）
+    await writeFile(row.storagePath!, 'v1');
     expect(await runArchiveCycle(store)).toBe(0);
+    // 推进系统时间越过 24h：入口 for 循环删过期条目 → 候选重新入批 → hash 一致 → 归档成功。
+    // 只 fake Date（runArchiveCycle 的候选筛选/暂缓判定全依赖 Date.now，fs put/get 无 timer 依赖）
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+        vi.setSystemTime(Date.now() + 25 * DAY);
+        expect(await runArchiveCycle(store)).toBe(1);
+    } finally {
+        vi.useRealTimers();
+    }
+    expect(getDoc(r.id)?.storageTier).toBe('cold');
 });
 
 // ===== 备忘：归档 flip 补 storagePath 守卫（与 rewarm 对称） =====

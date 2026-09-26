@@ -1,6 +1,6 @@
 import { test, expect, beforeEach, afterEach } from 'vitest';
 import { rmSync } from 'node:fs';
-import { db, schema, sqlite } from '../src/lib/server/db';
+import { db, schema } from '../src/lib/server/db';
 import { generateId } from '../src/lib/server/auth';
 import { uploadDocument } from '../src/lib/server/documents';
 import { runArchiveCycle, rewarmDocument } from '../src/lib/server/tiering';
@@ -28,6 +28,7 @@ beforeEach(async () => {
 afterEach(() => {
     try { rmSync(TMP_DOCS, { recursive: true, force: true }); } catch {}
     __setObjectStoreForTest(undefined);
+    delete process.env.DATA_DIR; // 不留悬挂 env 指向已删目录（与 blobstore-local 纪律对齐）
 });
 
 test('归档后：内容词不可搜、标题可搜且 snippet 为空、storageTier 透出为 cold', async () => {
