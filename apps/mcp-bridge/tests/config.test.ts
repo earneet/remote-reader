@@ -8,6 +8,10 @@ const CFG_DIR = join(TMP, 'remote-reader');
 const CFG_FILE = join(CFG_DIR, 'config.json');
 
 beforeEach(() => {
+    // 宿主 shell 可能 export 过桥 env（README 推荐用法）——worker fork 继承启动时快照，
+    // 不清理则首个用例（无前序 afterEach 可依赖）会被宿主 env 污染假红
+    delete process.env.REMOTE_READER_URL;
+    delete process.env.REMOTE_READER_TOKEN;
     mkdirSync(CFG_DIR, { recursive: true });
     process.env.XDG_CONFIG_HOME = TMP;
 });
