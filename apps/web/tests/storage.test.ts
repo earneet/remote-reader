@@ -1,8 +1,11 @@
 import { test, expect, afterEach } from 'vitest';
-import { rmSync, readdirSync } from 'node:fs';
+import { rmSync, readdirSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { writeFile, readFile, FileNotFoundError } from '../src/lib/server/storage';
 
-const TMP = './data/test-storage';
+// mkdtemp 实例唯一：固定名在两个并发 vitest 实例同时跑本文件时会互删对方文件（本次审查残留面）
+const TMP = mkdtempSync(join(tmpdir(), 'rr-storage-'));
 
 afterEach(() => {
     try {

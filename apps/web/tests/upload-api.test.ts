@@ -1,12 +1,23 @@
-import { test, expect, beforeEach } from 'vitest';
-import { db, schema, sqlite } from '../src/lib/server/db';
+import { test, expect, beforeEach, afterAll } from 'vitest';
+import { db, schema } from '../src/lib/server/db';
 import { generateApiToken, generateId, hashPassword } from '../src/lib/server/auth';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 
-// 413 测试需要小上限；限流放宽避免测试间互相触发——须在 import +server 前设
+// 413 测试需要小上限；限流放宽避免测试间互相触发——须在 import +server 前设。
+// DATA_DIR 隔离：uploadDocument 经 getDataDir() 落盘，不设会写进默认 ./data/documents
+// 永久残留（2026-09-26 审查 F-2 实测累积 1700+ 目录）
 import { resetDb } from './helpers';
 process.env.MAX_UPLOAD_BYTES = '10';
 process.env.RATE_LIMIT_MAX = '10000';
 process.env.AUTH_FAIL_RATE_LIMIT_MAX = '3';
+const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'rr-uploadapi-'));
+process.env.DATA_DIR = DIR;
+afterAll(() => {
+    delete process.env.DATA_DIR;
+    fs.rmSync(DIR, { recursive: true, force: true });
+});
 const { POST } = await import('../src/routes/api/v1/documents/+server');
 
 let validAuth: string;

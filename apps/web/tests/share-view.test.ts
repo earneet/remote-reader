@@ -1,11 +1,21 @@
-import { test, expect, beforeEach } from 'vitest';
-import { db, schema, sqlite } from '../src/lib/server/db';
+import { test, expect, beforeEach, afterAll } from 'vitest';
+import { db, schema } from '../src/lib/server/db';
 import { generateId } from '../src/lib/server/auth';
 import { writeFile } from '../src/lib/server/storage';
 import { createShareLink } from '../src/lib/server/shares';
 import { join } from 'node:path';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 
 import { resetDb } from './helpers';
+// DATA_DIR 隔离：writeFile 不设会写进默认 ./data/documents 永久残留（审查 P2-1）
+const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'rr-shareview-'));
+process.env.DATA_DIR = DIR;
+afterAll(() => {
+    delete process.env.DATA_DIR;
+    fs.rmSync(DIR, { recursive: true, force: true });
+});
 const { load } = await import('../src/routes/s/[token]/+page.server');
 
 beforeEach(() => {
@@ -30,7 +40,10 @@ test('有效 token 返回渲染 html（#32）', async () => {
         createdAt: Date.now(), updatedAt: Date.now()
     }).run();
     const { token } = await createShareLink(docId);
-    const result = (await load({ locals: { user: null }, params: { token }, setHeaders: () => {} } as unknown as Parameters<typeof load>[0])) as { title: string; html: string };
+    // M1：撤销 share token 后浏览器/CDN/bfcache 不得回放——headers 须 no-store（与 /d/ 侧对称）
+    const headers: Record<string, string> = {};
+    const result = (await load({ locals: { user: null }, params: { token }, setHeaders: (h: Record<string, string>) => Object.assign(headers, h) } as unknown as Parameters<typeof load>[0])) as { title: string; html: string };
+    expect(headers['cache-control']).toBe('no-store');
     expect(result.title).toBe('a.md');
     expect(result.html).toContain('<h1>Title</h1>');
 });

@@ -1,12 +1,22 @@
-import { test, expect, beforeEach } from 'vitest';
-import { db, schema, sqlite } from '../src/lib/server/db';
+import { test, expect, beforeEach, afterAll } from 'vitest';
+import { db, schema } from '../src/lib/server/db';
 import { generateId } from '../src/lib/server/auth';
 import { uploadDocument } from '../src/lib/server/documents';
 import { setDocTags } from '../src/lib/server/tags';
 import { searchDocuments, getDocPath } from '../src/lib/server/search';
 import { eq, and } from 'drizzle-orm';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 
 import { resetDb } from './helpers';
+// DATA_DIR 隔离：uploadDocument 经 getDataDir() 落盘，不设会写进默认 ./data/documents 永久残留
+const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'rr-search-'));
+process.env.DATA_DIR = DIR;
+afterAll(() => {
+    delete process.env.DATA_DIR;
+    fs.rmSync(DIR, { recursive: true, force: true });
+});
 let ownerId: string;
 const now = () => Date.now();
 
