@@ -1,7 +1,7 @@
 import { test, expect, beforeEach, afterEach } from 'vitest';
 import { rmSync } from 'node:fs';
 import { eq } from 'drizzle-orm';
-import { db, schema, sqlite } from '../src/lib/server/db';
+import { db, schema } from '../src/lib/server/db';
 import { generateId } from '../src/lib/server/auth';
 import { uploadDocument } from '../src/lib/server/documents';
 import { setDocTags } from '../src/lib/server/tags';
@@ -70,6 +70,20 @@ test('before cursor：返回 cursor 之后（更旧）的行', async () => {
     expect(body.items.map((i) => i.name)).toEqual(['b.md']);
 });
 
+// keyset row-value 全序：(ts, id) 二元组比较——同毫秒多行（批量上传常态）不漏不重的
+// 关键在 id 决胜。只比 ts 的退化实现下，cursor 同 ts 的行会整段漏掉，本用例必红
+test('before cursor 同 ts 异 id 决胜：返回同 ts 中 id 小于 cursor id 的行', async () => {
+    const a = await uploadDocument(ownerId, 'a.md', 'x', []);
+    const b = await uploadDocument(ownerId, 'b.md', 'y', []);
+    const T = 1_700_000_000_000;
+    setUpdatedAt(a.id, T);
+    setUpdatedAt(b.id, T);
+    const [lo, hi] = [a.id, b.id].sort();
+    const r = await call(ownerId, `?before=${T}_${hi}`);
+    const body = await r.json() as { items: { name: string }[] };
+    expect(body.items.map((i) => i.name)).toEqual([lo === a.id ? 'a.md' : 'b.md']);
+});
+
 test('非法 before → 400', async () => {
     await expect(call(ownerId, '?before=abc')).rejects.toMatchObject({ status: 400 });
 });
@@ -135,6 +149,19 @@ test('sort=viewed：before cursor 按 owner_viewed_at 解释', async () => {
     const r = await call(ownerId, `?sort=viewed&before=${T}_${a.id}`);
     const body = await r.json() as { items: { name: string }[] };
     expect(body.items.map((i) => i.name)).toEqual(['b.md']);
+});
+
+// 同 ts 异 id 决胜在 sort=viewed 下走同一 row-value 比较表达式（orderCol 参数化切换）
+test('sort=viewed 同 owner_viewed_at 异 id 决胜', async () => {
+    const a = await uploadDocument(ownerId, 'a.md', 'x', []);
+    const b = await uploadDocument(ownerId, 'b.md', 'y', []);
+    const T = 1_700_000_000_000;
+    setOwnerViewedAt(a.id, T);
+    setOwnerViewedAt(b.id, T);
+    const [lo, hi] = [a.id, b.id].sort();
+    const r = await call(ownerId, `?sort=viewed&before=${T}_${hi}`);
+    const body = await r.json() as { items: { name: string }[] };
+    expect(body.items.map((i) => i.name)).toEqual([lo === a.id ? 'a.md' : 'b.md']);
 });
 
 test('非法 sort → 400', async () => {
