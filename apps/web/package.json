@@ -32,8 +32,10 @@
     "@smithy/node-http-handler": "^4.12.1",
     "better-sqlite3": "^12.11.1",
     "drizzle-orm": "^0.36.0",
+    "github-slugger": "^2.0.0",
     "katex": "^0.18.0",
     "markdown-it": "^14.1.0",
+    "markdown-it-anchor": "^10.0.0",
     "mermaid": "^11.16.0",
     "shiki": "^1.22.0"
   }
