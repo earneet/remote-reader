@@ -6,8 +6,9 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-// upload-api.test.ts 顶层把 MAX_UPLOAD_BYTES 固化泄漏为 '10'（singleFork 同进程），带图片引用的
-// content 必超 10B——按 upload-image-limit.test.ts 先例，在 import +server 之前用真实上限覆写
+// 显式设置 5MB 上限（恰等于 env.ts 默认值）：+server 的 MAX_BYTES 在模块加载时读 env，
+// 须在 import 前设置；显式化使断言不依赖默认值漂移（“防 upload-api 顶层 env 泄漏”的
+// 历史说法不成立——vitest 4 每文件独立 fork，env 逐文件隔离）
 process.env.MAX_UPLOAD_BYTES = String(5 * 1024 * 1024);
 process.env.RATE_LIMIT_MAX = '10000';
 const { POST } = await import('../src/routes/api/v1/documents/+server');

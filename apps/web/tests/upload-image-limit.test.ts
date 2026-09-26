@@ -6,8 +6,10 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-// upload-api.test.ts 顶层把 MAX_UPLOAD_BYTES 固化泄漏为 '10'（singleFork 同进程），本文件用真实
-// 5MB 上限测图片引用数量 413——须在 import +server 之前覆写
+// 显式设置 5MB 上限（恰等于 env.ts 默认值）：+server 的 MAX_BYTES 在模块加载时读 env，
+// 须在 import 前设置；显式化使 413 断言不依赖默认值漂移。
+// （历史注释称 upload-api 顶层 env 会“跨文件泄漏到本文件”——实测 vitest 4 每文件独立
+// fork、env 逐文件隔离，该泄漏不存在；显式设置保留仅为密闭性，非防泄漏）
 process.env.MAX_UPLOAD_BYTES = String(5 * 1024 * 1024);
 process.env.RATE_LIMIT_MAX = '10000';
 const { POST } = await import('../src/routes/api/v1/documents/+server');
