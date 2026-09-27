@@ -29,6 +29,23 @@ test('标题内行内代码文本计入 slug（GitHub 对齐）', async () => {
     expect(html).toContain('id="use-npm-install-now"');
 });
 
+test('标题含行内公式：math_inline 文本计入 slug（GitHub 对齐，R-02）', async () => {
+    const html = (await renderMarkdown('## 前 $x^2$ 后缀')).html;
+    expect(html).toContain('id="前-x2-后缀"');
+});
+
+test('纯公式标题产出公式 slug 而非退化 id（R-02）', async () => {
+    const html = (await renderMarkdown('## 求 $x$ 解')).html;
+    expect(html).toContain('id="求-x-解"');
+});
+
+test('纯符号标题不产出空 id / -1（GitHub 同款跳过，R-02）', async () => {
+    const html = (await renderMarkdown('## !!!\n\n## ???\n\n## 正常标题')).html;
+    expect(html).not.toContain('id=""');
+    expect(html).not.toContain('id="-1"');
+    expect(html).toContain('id="正常标题"');
+});
+
 test('渲染段落与加粗', async () => {
     const html = (await renderMarkdown('这是一份 **测试** 文档。')).html;
     expect(html).toContain('<strong>测试</strong>');

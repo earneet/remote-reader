@@ -107,7 +107,21 @@ async function getMarkdown(): Promise<MarkdownIt> {
     // 对齐 Agent 写目录的 GitHub 惯例；slugger 实例内部有跨调用去重状态，每标题新建，
     // 去重交回插件（per-render env，-1/-2 后缀与 GitHub 一致），否则第二篇文档的同名标题会漂移
     md.use(anchor, {
-        slugify: (s) => new GithubSlugger().slug(s)
+        slugify: (s) => new GithubSlugger().slug(s),
+        // 默认 getTokensText 只收 text + code_inline——math_inline 的公式文本被整段丢弃，
+        // 含公式标题的 GitHub 惯例目录链接落空（R-02）。math_inline.content 不含 $ 定界
+        // （markdown-math.ts 单源），计入后与 GitHub 逐字一致。
+        getTokensText: (toks) => toks
+            .filter((t) => ['text', 'code_inline', 'math_inline'].includes(t.type))
+            .map((t) => t.content)
+            .join(''),
+        // 纯符号/纯公式空标题 slug 为 ''——GitHub 不加 id，插件默认无条件 attrSet 会产出
+        // 非法 id=""；且第二空 slug 先被插件去重成 '-1'，故按 title 重算基底判定再回滚
+        callback: (token, { title }) => {
+            if (new GithubSlugger().slug(title) === '' && token.attrIndex('id') >= 0) {
+                token.attrs!.splice(token.attrIndex('id'), 1);
+            }
+        }
     });
     md.renderer.rules.table_open = () => '<div class="rr-table-outer"><div class="rr-table-wrap"><table>';
     md.renderer.rules.table_close = () => '</table></div></div>';
