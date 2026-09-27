@@ -1,6 +1,8 @@
 <script lang="ts">
+    import { goto } from '$app/navigation';
     let { data } = $props();
     const tags = $derived(data.allTags);
+    let searchInput = $state<HTMLInputElement | null>(null);
     function toggleTag(name: string): string[] {
         return data.selectedTags.includes(name)
             ? data.selectedTags.filter((t: string) => t !== name)
@@ -13,12 +15,22 @@
         const s = p.toString();
         return s ? `/search?${s}` : '/search';
     }
+    // ✕：从 URL 真正清掉关键词（保留已选标签），结果立即解除过滤；焦点回输入框
+    function clearKeyword(): void {
+        void goto(hrefFor('', data.selectedTags));
+        searchInput?.focus();
+    }
 </script>
 
 <div class="search-page">
     <h1>查找文档</h1>
     <form method="GET" action="/search" class="search-form">
-        <input name="q" value={data.q} placeholder="搜索文件名或正文…" aria-label="搜索关键词" autofocus>
+        <div class="search-box" class:has-clear={data.q}>
+            <input name="q" value={data.q} bind:this={searchInput} placeholder="搜索文件名或正文…" aria-label="搜索关键词" autofocus>
+            {#if data.q}
+                <button type="button" class="search-clear" aria-label="清空搜索关键词" onclick={clearKeyword}>✕</button>
+            {/if}
+        </div>
         {#each data.selectedTags as t}
             <input type="hidden" name="tag" value={t}>
         {/each}
@@ -78,6 +90,17 @@
     .search-form { display: flex; gap: 0.5rem; margin: 1rem 0; }
     .search-form input { flex: 1; padding: 0.5rem 0.7rem; border: 1px solid var(--rr-input-border); border-radius: 6px; font-size: 0.95rem; background: var(--rr-input-bg); color: var(--rr-text); }
     .search-form input:focus { outline: none; border-color: var(--rr-accent); box-shadow: 0 0 0 2px var(--rr-focus-ring); }
+    /* ✕ 清空按钮：绝对定位在输入框最右侧，有关键词才出现（预留右内边距防文字压字；
+       padding 撑到 ≥24×24 触屏命中区，WCAG 2.5.8） */
+    .search-box { position: relative; flex: 1; }
+    .search-box input { width: 100%; box-sizing: border-box; }
+    .search-box.has-clear input { padding-right: 2rem; }
+    .search-clear {
+        position: absolute; right: 0.4rem; top: 50%; transform: translateY(-50%);
+        border: none; background: none; cursor: pointer; padding: 0.375rem 0.45rem;
+        color: var(--rr-text-muted); font-size: 0.8rem; line-height: 1; border-radius: 4px;
+    }
+    .search-clear:hover { color: var(--rr-text); background: var(--rr-hover-bg); }
     .btn { border: 1px solid var(--rr-btn-border); background: var(--rr-btn-bg); color: var(--rr-btn-text); cursor: pointer; padding: 0.4rem 0.9rem; border-radius: 6px; font-size: 0.85rem; }
     .btn.primary { background: var(--rr-btn-primary-bg); color: var(--rr-btn-primary-text); border-color: var(--rr-btn-primary-bg); }
     .tag-filter { margin: 1rem 0; padding: 0.75rem; background: var(--rr-bg); border-radius: 6px; }

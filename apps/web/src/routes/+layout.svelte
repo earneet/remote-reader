@@ -16,6 +16,9 @@
     // 用 offsetHeight（border-box）：clientHeight 不含 border-bottom 会少算 1px 导致整页溢出。
     let navH = $state(0);
     let menuDetails = $state<HTMLDetailsElement | null>(null);
+    // 顶栏搜索框关键词本地态：仅驱动 ✕ 清空按钮的显隐与清空（表单提交本身仍走 GET /search）
+    let navQ = $state('');
+    let navSearchInput = $state<HTMLInputElement | null>(null);
     function closeMenu(): void {
         if (menuDetails) menuDetails.open = false;
     }
@@ -28,7 +31,13 @@
 <header class="topnav" bind:offsetHeight={navH}>
     <a href="/">我的文档</a>
     <form class="nav-search" method="GET" action="/search">
-        <input name="q" placeholder="搜索文档…" aria-label="搜索文档">
+        <div class="search-box" class:has-clear={navQ}>
+            <input name="q" bind:value={navQ} bind:this={navSearchInput} placeholder="搜索文档…" aria-label="搜索文档">
+            {#if navQ}
+                <button type="button" class="search-clear" aria-label="清空搜索框"
+                        onclick={() => { navQ = ''; navSearchInput?.focus(); }}>✕</button>
+            {/if}
+        </div>
     </form>
     <details bind:this={menuDetails}>
         <summary>设置</summary>
@@ -84,6 +93,16 @@
         padding: 0.3rem 0.6rem; border: 1px solid var(--rr-input-border); border-radius: 5px;
         font-size: 0.85rem; width: 14rem; background: var(--rr-input-bg); color: var(--rr-text);
     }
+    /* ✕ 清空按钮：绝对定位在输入框最右侧，有内容才出现（预留右内边距防文字压字；
+       padding 撑到 ≥24×24 触屏命中区，WCAG 2.5.8） */
+    .topnav .nav-search .search-box { position: relative; }
+    .topnav .nav-search .search-box.has-clear input { padding-right: 1.85rem; }
+    .topnav .search-clear {
+        position: absolute; right: 0.3rem; top: 50%; transform: translateY(-50%);
+        border: none; background: none; cursor: pointer; padding: 0.375rem 0.45rem;
+        color: var(--rr-text-muted); font-size: 0.75rem; line-height: 1; border-radius: 4px;
+    }
+    .topnav .search-clear:hover { color: var(--rr-text); background: var(--rr-hover-bg); }
 
     /* 窄屏两行布局：搜索框固定 14rem 不收缩会把其余元素挤到竖排换行，
        故令其独占第二行满宽；email 截断防长地址撑爆。 */
