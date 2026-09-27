@@ -3,34 +3,27 @@
     import { RECENT_PAGE_SIZE, type RecentDoc, type RecentSort } from '$lib/shared/recent';
     import { folderNamesOf, type TreeFolder } from '$lib/shared/folder-tree';
     import { formatRelative } from '$lib/shared/time';
-    import { submitAction, actionErrorMessage } from '$lib/shared/form-action';
-    import { rowActions } from '$lib/shared/row-menu';
-    import { fetchShareUrl, revokeDocShares } from '$lib/shared/share-api';
-    import ActionSheet from '$components/ActionSheet.svelte';
-    import ActionMenu from '$components/ActionMenu.svelte';
-    import ShareDialog from '$components/ShareDialog.svelte';
+    import { formatBytes } from '$lib/shared/format';
     import FileStateIcon from '$components/FileStateIcon.svelte';
     import InlineNameForm from '$components/InlineNameForm.svelte';
     import InlineTagForm from '$components/InlineTagForm.svelte';
     import RowActions from '$components/RowActions.svelte';
+    import type { RowActionOrchestrator } from '$lib/shared/row-orchestrator.svelte';
 
     let {
+        orchestrator,
         initialRows,
         sort,
         folderById,
-        scrollRoot,
         movingId,
-        isMobile,
-        onStartMove,
         onCancelMove
     }: {
+        /** 行操作编排单源（R-06）：与 FM 目录视图共用宿主页同一实例——操作语义零漂移 */
+        orchestrator: RowActionOrchestrator;
         initialRows: RecentDoc[];
         sort: RecentSort;
         folderById: Map<string, TreeFolder>;
-        scrollRoot: HTMLElement | null;
         movingId: string | null;
-        isMobile: boolean;
-        onStartMove: (id: string) => void;
         onCancelMove: () => void;
     } = $props();
 
@@ -43,21 +36,9 @@
     let loadingMore = $state(false);
     let loadError = $state(false);
     let resyncing = $state(false);
-    let editingId = $state<string | null>(null);
-    let renameValue = $state('');
-    let taggingId = $state<string | null>(null);
-    let tagInput = $state('');
     let sentinel = $state<HTMLElement | null>(null);
-    let sheet = $state<ActionSheet | null>(null);
-    let actionMenu = $state<ActionMenu | null>(null);
-    let shareDialog = $state<ShareDialog | null>(null);
-    // 菜单上下文（移动 sheet 与桌面下拉共用）：构造条件菜单项（转私有仅 shared 时出）
-    let menuCtx = $state<RecentDoc | null>(null);
-    // P2-10：失败反馈 + 防重复提交（fetch 版与目录视图 enhance 版同语义）
-    let renameError = $state<string | null>(null);
-    let tagError = $state<string | null>(null);
-    let actionError = $state<string | null>(null);
-    let busyId = $state<string | null>(null);
+    // 删除乐观移除经 orchestrator.removedIds 过滤（refresh 失败也不残留已删行）
+    const visibleRows = $derived(rows.filter((x) => !orchestrator.isRemoved(x.id)));
 
     const pathOf = (item: RecentDoc): string => folderNamesOf(folderById, item.parentId).join(' / ');
 
@@ -110,112 +91,10 @@
         }
     }
 
-    function startRename(item: RecentDoc): void {
-        editingId = item.id;
-        renameValue = item.name;
-        renameError = null;
-    }
-
-    // 菜单项来自 lib/shared/row-menu 单源（评审跟进：与目录视图收敛，防两份漂移）
-    // ⋯ 入口路由：移动端底部 sheet，桌面锚定下拉
-    function openRowMenu(anchor: HTMLElement, item: RecentDoc): void {
-        menuCtx = item;
-        if (isMobile) sheet?.show();
-        else actionMenu?.toggle(anchor);
-    }
-
-    function onRowAction(key: string): void {
-        const id = menuCtx?.id;
-        const item = rows.find((x) => x.id === id);
-        menuCtx = null;
-        if (!item) return;
-        if (key === 'rename') startRename(item);
-        else if (key === 'tags') { taggingId = item.id; tagInput = item.tags.map((t) => t.name).join(', '); tagError = null; }
-        else if (key === 'move') onStartMove(item.id);
-        else if (key === 'share') void doShare(item);
-        else if (key === 'unshare') void doUnshare(item);
-        else if (key === 'delete') void doDelete(item);
-    }
-
-    // 复制分享链接（get-or-create）：成功后刷新（私有→共享图标翻转）再弹浮层
-    async function doShare(item: RecentDoc): Promise<void> {
-        busyId = item.id;
-        try {
-            const url = await fetchShareUrl(item.id);
-            if (!url) throw new Error('share failed');
-            await invalidateAll();
-            await reSync();
-            shareDialog?.show(url);
-        } catch {
-            actionError = '获取分享链接失败，请重试';
-        } finally {
-            busyId = null;
-        }
-    }
-
-    // 转为私有：撤销该文档全部分享链接（404=文档已不在也算完成，幂等）
-    async function doUnshare(item: RecentDoc): Promise<void> {
-        if (!confirm('转为私有后，该文档的所有分享链接立即失效（已发出的链接将无法再打开），且不可恢复。继续？')) return;
-        busyId = item.id;
-        try {
-            if (!(await revokeDocShares(item.id))) throw new Error('unshare failed');
-            actionError = null;
-            await invalidateAll();
-            await reSync();
-        } catch {
-            actionError = '转为私有失败，请重试';
-        } finally {
-            busyId = null;
-        }
-    }
-
-    async function doRename(id: string, name: string): Promise<void> {
-        if (!name) return;
-        busyId = id;
-        const status = await submitAction('rename', { id, name });
-        busyId = null;
-        if (status === 200) {
-            editingId = null;
-            renameError = null;
-            await reSync();
-        } else {
-            renameError = actionErrorMessage(status); // 失败保持编辑态 + 展示原因，可改可取消
-        }
-    }
-
-    async function doSetTags(id: string, tags: string): Promise<void> {
-        busyId = id;
-        const status = await submitAction('setTags', { id, tags });
-        busyId = null;
-        if (status === 200) {
-            taggingId = null;
-            tagInput = '';
-            tagError = null;
-            await reSync();
-        } else {
-            tagError = actionErrorMessage(status);
-        }
-    }
-
-    async function doDelete(item: RecentDoc): Promise<void> {
-        if (!confirm('确认删除该文件？此操作不可恢复。')) return;
-        busyId = item.id;
-        const status = await submitAction('delete', { id: item.id });
-        busyId = null;
-        if (status === 200 || status === 404) {
-            actionError = null;
-            rows = rows.filter((x) => x.id !== item.id); // 乐观移除：reSync 失败也不残留已删行（终审跟进）
-            await invalidateAll(); // 刷左树计数（rows 本地态不被重置，零代价——Task 6 审查跟进）
-            await reSync();
-        } else {
-            actionError = actionErrorMessage(status);
-        }
-    }
-
     // 哨兵 observer：root 用视口（null）而非右栏元素——≤768px 布局下 .fm-right 是
     // height:auto 不裁剪的普通块，哨兵恒在其盒内 → 交叉状态永不翻转，移动端无限滚动哑火。
-    // 桌面右栏几乎占满视口，rootMargin 600px 预载语义不变。
-    // 依赖仅 scrollRoot/sentinel；loadMore 内部状态在异步回调里读，不进依赖。SSR 不执行。
+    // 桌面右栏几乎占满视口，rootMargin 600px 预载语义不变。依赖仅 sentinel；
+    // loadMore 内部状态在异步回调里读，不进依赖。SSR 不执行。
     $effect(() => {
         const target = sentinel;
         if (!target) return;
@@ -227,25 +106,25 @@
     });
 </script>
 
-{#if rows.length === 0}
+{#if visibleRows.length === 0}
     <p class="muted empty">{sort === 'viewed' ? '还没有浏览记录，打开过的文档会出现在这里。' : '还没有文档，让 Agent 通过 MCP 上传吧。'}</p>
 {:else}
     <ul class="items">
-        {#each rows as item (item.id)}
-            <li class="item" class:editing={editingId === item.id}>
-                {#if editingId === item.id}
+        {#each visibleRows as item (item.id)}
+            <li class="item" class:editing={orchestrator.editingId === item.id}>
+                {#if orchestrator.editingId === item.id}
                     <InlineNameForm
-                        initialName={renameValue}
-                        busy={busyId === item.id}
-                        error={renameError}
-                        onSave={(name) => void doRename(item.id, name)}
-                        onCancel={() => (editingId = null)}
+                        initialName={orchestrator.renameValue}
+                        busy={orchestrator.busyId === item.id}
+                        error={orchestrator.renameError}
+                        onSave={(name) => void orchestrator.doRename(item.id, name)}
+                        onCancel={() => orchestrator.cancelRename()}
                     />
                 {:else}
                     <span class="name">
                         <a href="/d/{item.id}"><FileStateIcon type={item.type} shared={item.shared} /> {item.name}</a>
                         {#if item.storageTier === 'cold'}<span class="chip-static cold-chip">☁️ 已归档</span>{/if}
-                        {#if item.sizeBytes != null}<span class="size">{item.sizeBytes} B</span>{/if}
+                        {#if item.sizeBytes != null}<span class="size">{formatBytes(item.sizeBytes)}</span>{/if}
                     </span>
                     {#if pathOf(item)}
                         <span class="path" title={pathOf(item)}>{pathOf(item)}</span>
@@ -259,19 +138,19 @@
                         {#each item.tags as tg (tg.id)}
                             <span class="chip-static">{tg.name}</span>
                         {/each}
-                        {#if taggingId === item.id}
+                        {#if orchestrator.taggingId === item.id}
                             <InlineTagForm
-                                initialValue={tagInput}
-                                busy={busyId === item.id}
-                                error={tagError}
-                                onSave={(tags) => void doSetTags(item.id, tags)}
-                                onCancel={() => (taggingId = null)}
+                                initialValue={orchestrator.tagInput}
+                                busy={orchestrator.busyId === item.id}
+                                error={orchestrator.tagError}
+                                onSave={(tags) => void orchestrator.doSetTags(item.id, tags)}
+                                onCancel={() => (orchestrator.taggingId = null)}
                             />
                         {/if}
                     </span>
                     <RowActions
                         moving={movingId === item.id}
-                        onMore={(btn) => openRowMenu(btn, item)}
+                        onMore={(btn) => orchestrator.openRowMenu(btn, item)}
                         onCancelMove={onCancelMove}
                     />
                 {/if}
@@ -285,24 +164,7 @@
     {#if loadError}
         <p class="error">加载失败 <button class="link" onclick={() => void loadMore()}>点击重试</button></p>
     {/if}
-    {#if actionError}
-        <p class="error">{actionError} <button class="link" onclick={() => (actionError = null)}>关闭</button></p>
-    {/if}
 {/if}
-
-<ActionSheet
-    bind:this={sheet}
-    label="文档操作"
-    actions={menuCtx ? rowActions(menuCtx) : []}
-    onSelect={onRowAction}
-/>
-<ActionMenu
-    bind:this={actionMenu}
-    label="文档操作"
-    actions={menuCtx ? rowActions(menuCtx) : []}
-    onSelect={onRowAction}
-/>
-<ShareDialog bind:this={shareDialog} />
 
 <style>
     .empty { padding: 2rem 0; }
