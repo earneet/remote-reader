@@ -19,7 +19,7 @@
 
 <div class="settings-page">
     <h1>API Token 管理</h1>
-    {#if actionError}<p class="form-error" role="alert">{actionError}</p>{/if}
+    {#if actionError ?? form?.error}<p class="form-error" role="alert">{actionError ?? form?.error}</p>{/if}
 
     {#if form?.plaintext && !dismissed}
     <div class="reveal">
@@ -38,10 +38,13 @@
         creating = true;
         return async ({ result, update }) => {
             creating = false;
-            if (result.type === 'success') { dismissed = false; copied = false; await update(); }
+            if (result.type === 'success') { dismissed = false; copied = false; actionError = null; await update(); }
+            else if (result.type === 'failure') {
+                actionError = String((result.data as { error?: string } | undefined)?.error ?? '创建失败，请重试');
+            }
         };
     }}>
-        <input name="name" placeholder="如 claude-code-laptop" required>
+        <input name="name" placeholder="如 claude-code-laptop" aria-label="Token 名称" required>
         <button disabled={creating}>生成新 token</button>
     </form>
 

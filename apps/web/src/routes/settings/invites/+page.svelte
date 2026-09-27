@@ -24,7 +24,7 @@
 
 <div class="settings-page">
     <h1>邀请码管理</h1>
-    {#if actionError}<p class="form-error" role="alert">{actionError}</p>{/if}
+    {#if actionError ?? form?.error}<p class="form-error" role="alert">{actionError ?? form?.error}</p>{/if}
 
     {#if form?.plaintext && !dismissed}
     <div class="reveal">
@@ -43,10 +43,13 @@
         creating = true;
         return async ({ result, update }) => {
             creating = false;
-            if (result.type === 'success') { dismissed = false; copied = false; await update(); }
+            if (result.type === 'success') { dismissed = false; copied = false; actionError = null; await update(); }
+            else if (result.type === 'failure') {
+                actionError = String((result.data as { error?: string } | undefined)?.error ?? '创建失败，请重试');
+            }
         };
     }}>
-        <input name="note" placeholder="如 给同事的注册码" required>
+        <input name="note" placeholder="如 给同事的注册码" aria-label="邀请码备注" required>
         <select name="days" aria-label="有效期">
             <option value="1">1 天</option>
             <option value="7" selected>7 天</option>
