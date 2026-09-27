@@ -317,4 +317,29 @@ describe('rewriteImageRefs（token 级改写）', () => {
         expect(r.content).toBe('![a](a&amp;b.png)'); // 原样保留（不 crash、不误改）
         expect(r.rewrites).toBe(0);
     });
+
+    it('R-25：同 src 先段落再表格——表格处引用也改写（首次出现语义回归）', () => {
+        const md = '![a](pics/dup.png)\n\n|x|\n|---|\n| ![b](pics/dup.png) |';
+        const { content, rewrites } = rewriteImageRefs(md, new Map([['pics/dup.png', 'reg-1.png']]));
+        expect(content).toBe('![a](reg-1.png)\n\n|x|\n|---|\n| ![b](reg-1.png) |');
+        expect(rewrites).toBe(2);
+    });
+
+    it('R-25：同 src 两次均在表格——两行分别改写', () => {
+        const md = '|a|\n|---|\n| ![x](p.png) |\n| ![y](p.png) |';
+        const { content, rewrites } = rewriteImageRefs(md, new Map([['p.png', 'r.png']]));
+        const lines = content.split('\n');
+        expect(lines[2]).toBe('| ![x](r.png) |');
+        expect(lines[3]).toBe('| ![y](r.png) |');
+        expect(rewrites).toBe(2);
+    });
+
+    it('R-25：同 src 段落两次 + 表格一次——表格行不被首现行挤占', () => {
+        const md = '![a](d.png) ![b](d.png)\n\n|t|\n|---|\n| ![c](d.png) |';
+        const { content, rewrites } = rewriteImageRefs(md, new Map([['d.png', 'r.png']]));
+        const lines = content.split('\n');
+        expect(lines[0]).toBe('![a](r.png) ![b](r.png)');
+        expect(lines[4]).toBe('| ![c](r.png) |');
+        expect(rewrites).toBe(2);
+    });
 });

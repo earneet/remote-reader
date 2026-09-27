@@ -64,7 +64,10 @@ export function imageTokenLines(src: string): ImageTokenLine[] {
     const out: ImageTokenLine[] = [];
     const lines = src.split('\n');
     // 双形态匹配（Task 1 遗留边界）：md 原文写中文/空格、token src 是 normalizeLink 编码形态——
-    // 只试编码形态会 miss → line=-1 → 改写丢失；decode 形态也须参与命中
+    // 只试编码形态会 miss → line=-1 → 改写丢失；decode 形态也须参与命中。
+    // R-25：map-less（表格）token 的兜底找行须跳过同 src 前序 token 已消费的行——
+    // 恒取首现行会使「同图先段落再表格」的表格真实行永不进改写集合（残留本地路径）。
+    const consumed = new Map<string, Set<number>>();
     const lineOf = (raw: string, range: [number, number] | null): number => {
         const hit = (l: string): boolean => l.includes(raw) || l.includes(decodeLocalSrc(raw));
         if (range) {
@@ -72,14 +75,30 @@ export function imageTokenLines(src: string): ImageTokenLine[] {
                 if (hit(lines[i])) return i;
             }
         }
-        return lines.findIndex(hit); // null 或范围未命中：全文找（首现行）
+        const taken = consumed.get(raw);
+        if (taken) {
+            for (let i = 0; i < lines.length; i++) {
+                if (hit(lines[i]) && !taken.has(i)) return i;
+            }
+        }
+        return lines.findIndex(hit); // null 或范围未命中且无未消费命中：全文找（首现行）
     };
     const walk = (toks: MdToken[], parentMap: [number, number] | null): void => {
         for (const t of toks) {
-            if (t.type === 'inline' && t.map) parentMap = [t.map[0], t.map[1]];
+            // map-less inline（表格 cell）必须重置为 null：沿用上一段落的陈旧范围会把
+            // 表格 token 定位回段落行（旧实现两路径结果恰等价，R-25 修复后不再等价）
+            if (t.type === 'inline') parentMap = t.map ? [t.map[0], t.map[1]] : null;
             if (t.type === 'image') {
                 const raw = t.attrGet('src') ?? '';
-                if (raw) out.push({ src: raw, line: lineOf(raw, parentMap) });
+                if (raw) {
+                    const line = lineOf(raw, parentMap);
+                    out.push({ src: raw, line });
+                    if (line >= 0) {
+                        const s = consumed.get(raw) ?? new Set<number>();
+                        s.add(line);
+                        consumed.set(raw, s);
+                    }
+                }
             }
             if (t.children) walk(t.children, parentMap);
         }
