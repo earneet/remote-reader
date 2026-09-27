@@ -5,10 +5,19 @@
     import type { GestureOpts } from '$lib/shared/overlay-gestures';
     import { trapTabKey } from '$lib/shared/focus-trap';
     import { browserFullscreen, type BrowserFullscreenCtl } from '$lib/shared/browser-fullscreen';
+    import { createOverlayHistory } from '$lib/shared/overlay-history';
 
     let { container, html }: { container: HTMLDivElement | undefined; html: string } = $props();
 
     let fs = $state<{ html: string } | null>(null);
+    // 表格全屏浮层根（R-40：MarkdownViewer 的图片点击/裂图兜底委托要挂到浮层子树——
+    // overlay 渲染于 .markdown-body 容器之外，容器级委托够不到）
+    let overlayEl = $state<HTMLDivElement | null>(null);
+    export function getOverlayEl(): HTMLDivElement | null {
+        return overlayEl;
+    }
+    // 返回键编排（R-09）：开 = 推条目，系统返回键 = 关浮层
+    const fsHistory = createOverlayHistory();
     let zoom = $state(1);
     let rotated = $state(false);
     // 挂载时由 use:browserFullscreen 装入实现（组件侧零全屏状态）
@@ -37,11 +46,17 @@
         fs = { html: tableHtml };
         zoom = 1;
         syncRotation();
+        fsHistory.setOnPop(() => {
+            fs = null;
+        });
+        fsHistory.push();
     }
 
     function closeOverlay() {
+        if (!fs) return;
         fsCtl.exit();
         fs = null;
+        void fsHistory.consume();
     }
 
     // 手势快照：pinch 基准式（onPinchStart 快照 → onZoom 里 zoomStart * factor）；
@@ -185,6 +200,7 @@
         role="dialog"
         aria-modal="true"
         tabindex="-1"
+        bind:this={overlayEl}
         use:overlayOnMount
         use:browserFullscreen={fsCtl}
         onclick={(e) => { if (e.target === e.currentTarget) closeOverlay(); }}
