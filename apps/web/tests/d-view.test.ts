@@ -1,5 +1,6 @@
 import { test, expect, beforeEach, afterEach } from 'vitest';
-import { rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
+import * as os from 'node:os';
 import { join } from 'node:path';
 import { db, schema } from '../src/lib/server/db';
 import { generateId } from '../src/lib/server/auth';
@@ -8,7 +9,7 @@ import { writeFile } from '../src/lib/server/storage';
 import { resetDb } from './helpers';
 const { load } = await import('../src/routes/d/[id]/+page.server');
 
-const TMP = `./data/test-dview-${Date.now().toString(36)}`;
+const TMP = mkdtempSync(join(os.tmpdir(), 'rr-dview-'));
 
 beforeEach(() => {
     process.env.DATA_DIR = TMP;

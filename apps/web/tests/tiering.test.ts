@@ -1,5 +1,7 @@
 import { test, expect, beforeEach, afterEach, vi } from 'vitest';
-import { rmSync, existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { db, schema, sqlite } from '../src/lib/server/db';
 import { generateId, sha256Hex } from '../src/lib/server/auth';
 import { uploadDocument, renameNode, deleteNode } from '../src/lib/server/documents';
@@ -11,7 +13,7 @@ import { resetDb } from './helpers';
 const DAY = 86_400_000;
 let ownerId: string;
 let store: MemoryObjectStore;
-const TMP_DOCS = `./data/test-tiering-${Date.now().toString(36)}`;
+const TMP_DOCS = mkdtempSync(path.join(os.tmpdir(), 'rr-tiering-'));
 
 function getDoc(id: string) {
     return db.select().from(schema.documents).where(eq(schema.documents.id, id)).get()!;

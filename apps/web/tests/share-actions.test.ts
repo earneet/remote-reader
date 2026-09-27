@@ -1,5 +1,7 @@
 import { test, expect, beforeEach, afterEach } from 'vitest';
-import { rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { and, eq } from 'drizzle-orm';
 import { db, schema } from '../src/lib/server/db';
 import { generateId } from '../src/lib/server/auth';
@@ -9,7 +11,7 @@ import { sharedDocIds } from '../src/lib/server/shares';
 import { resetDb } from './helpers';
 const { POST, DELETE } = await import('../src/routes/api/share/[id]/+server');
 
-const TMP = `./data/test-share-${Date.now().toString(36)}`;
+const TMP = mkdtempSync(path.join(os.tmpdir(), 'rr-share-'));
 let ownerId: string;
 
 beforeEach(() => {

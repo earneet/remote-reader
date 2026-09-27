@@ -1,5 +1,7 @@
 import { test, expect, beforeEach, afterEach } from 'vitest';
-import { rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '../src/lib/server/db';
 import { generateId } from '../src/lib/server/auth';
@@ -10,7 +12,7 @@ const tokensMod = await import('../src/routes/settings/tokens/+page.server');
 const sharesMod = await import('../src/routes/settings/shares/+page.server');
 const invitesMod = await import('../src/routes/settings/invites/+page.server');
 
-const TMP = `./data/test-settings-${Date.now().toString(36)}`;
+const TMP = mkdtempSync(path.join(os.tmpdir(), 'rr-settings-'));
 
 beforeEach(() => {
     process.env.DATA_DIR = TMP;
