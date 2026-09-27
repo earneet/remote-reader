@@ -71,11 +71,22 @@ confirm() {
 [[ $EUID -eq 0 ]] || die "需要 root 权限,请用 sudo 运行:sudo $0"
 [[ -d /run/systemd/system ]] || die "未检测到 systemd,本脚本仅支持 systemd 发行版"
 
-# 拒绝危险路径:卸载要 rm -rf,DATA_DIR/INSTALL_DIR/LOG_DIR 为空或根目录会酿成灾难
+# 拒绝危险路径:卸载要 rm -rf,DATA_DIR/INSTALL_DIR/LOG_DIR 为空或根目录会酿成灾难。
+# realpath -m 归一后再比较（验收第 2 轮）：字面比较挡不住 SERVICE_NAME=/ → CONFIG_DIR=/etc//
+# （实测 rm -rf 可删 /etc 内容）与 ../usr 逃逸形态
 [[ -n "${SERVICE_NAME}" ]] || die "SERVICE_NAME 不能为空"
-[[ -n "${INSTALL_DIR}" && "${INSTALL_DIR}" != "/" ]] || die "INSTALL_DIR 非法(${INSTALL_DIR:-空}),拒绝执行"
-[[ -n "${DATA_DIR}" && "${DATA_DIR}" != "/" ]] || die "DATA_DIR 非法(${DATA_DIR:-空}),拒绝执行"
-[[ -n "${LOG_DIR}" && "${LOG_DIR}" != "/" && "${LOG_DIR}" != "/var/log" ]] || die "LOG_DIR 非法(${LOG_DIR:-空}),拒绝执行"
+safe_path() {  # $1=值 $3=字段名：realpath -m 归一后不得命中敏感系统根（保留任意自定义子路径）
+    local norm
+    [[ -n "$1" ]] || die "$3 不能为空,拒绝执行"
+    norm="$(realpath -m "$1" 2>/dev/null || echo "$1")"
+    case "${norm}" in
+        /|/etc|/opt|/var|/var/lib|/var/log|/usr|/home|/root) die "$3 非法($1 → ${norm}),拒绝执行" ;;
+    esac
+}
+safe_path "${INSTALL_DIR}" "" "INSTALL_DIR"
+safe_path "${DATA_DIR}" "" "DATA_DIR"
+safe_path "${LOG_DIR}" "" "LOG_DIR"
+safe_path "${CONFIG_DIR}" "" "CONFIG_DIR"
 
 # ---- 2. 存在性检测(unit / 代码 / 数据 / 用户 全无残留 → 幂等退出)----
 installed=0

@@ -283,51 +283,21 @@ fi
 mv "${BACKUP_TMP}" "${BACKUP_DIR}"
 ok "备份完成（升级成功后自动删除）"
 
-# ---- 6. rsync 新码到 INSTALL_DIR（排除产物/数据/版本控制；--delete 同步删除）----
+# ---- 6. rsync 新码到 INSTALL_DIR（排除清单单源：lib-deploy.sh rsync_source_tree；--delete 同步删除）----
 log "rsync 新码到 ${INSTALL_DIR}"
-rsync -a --delete \
-    --exclude '/data' \
-    --exclude '/node_modules' \
-    --exclude '/apps/web/node_modules' \
-    --exclude '/apps/web/build' \
-    --exclude '/apps/web/.svelte-kit' \
-    --exclude '/packages/shared/node_modules' \
-    --exclude '/apps/mcp-bridge/node_modules' \
-    --exclude '/apps/mcp-bridge/dist' \
-    --exclude '/.git' \
-    --exclude '/.env' \
-    --exclude '/.env.local' \
-    "${SRC_DIR}/" "${INSTALL_DIR}/"
+rsync_source_tree "${SRC_DIR}" "${INSTALL_DIR}"
 ok "代码已同步"
 
-# ---- 7. 归属 + 依赖 + 构建（与 install.sh 完全一致的 build 链路）----
+# ---- 7. 归属 + 依赖 + 构建（构建链单源：lib-deploy.sh build_and_prune，与 install.sh 共用防漂移）----
 log "chown -R root:root ${INSTALL_DIR}"
 chown -R root:root "${INSTALL_DIR}"
 
 BUN_BIN="$(command -v bun)"
-# sudo 下 ~/.bun-install 不可写，统一用 /tmp 缓存（与 install.sh 同因）
-export BUN_INSTALL_CACHE_DIR=/tmp/.bun-cache
-mkdir -p "${BUN_INSTALL_CACHE_DIR}"
-
-log "安装依赖（bun install）：${BUN_BIN}"
-(cd "${INSTALL_DIR}" && "${BUN_BIN}" install)
-ok "依赖已安装"
-
-log "构建 web 应用（adapter-node 产物）"
-(cd "${INSTALL_DIR}" && "${BUN_BIN}" --filter remote-reader-web build)
-ok "构建完成"
-
-# 剥离 devDependencies（vite build 已把 workspace 依赖内联到 build/server）
-# 注意保留 bun.lock：删了它二次 install 会重新解析依赖树，结果随 registry 漂移且慢
-log "整理生产 node_modules"
-(cd "${INSTALL_DIR}" && rm -rf node_modules apps/web/node_modules packages/shared/node_modules apps/mcp-bridge/node_modules)
-(cd "${INSTALL_DIR}" && "${BUN_BIN}" install --production)
-ok "生产依赖就绪"
-
-# bun 装出的 better-sqlite3 prebuilt 跟随 bun 内置 node 的 ABI，与生产 node 不匹配则服务起不来
-# （实测 bun 1.3.x=ABI 137 vs node 22=ABI 127）。不匹配时自动换对应 ABI 的 prebuilt。
 NODE_BIN="$(command -v node)"
-if ! fix_better_sqlite3_abi "${INSTALL_DIR}" "${NODE_BIN}"; then
+log "安装依赖 + 构建 + 生产依赖剥离 + better-sqlite3 ABI 自修"
+# bun 装出的 better-sqlite3 prebuilt 跟随 bun 内置 node 的 ABI（实测 bun 1.3.x=ABI 137 vs
+# node 22=ABI 127）。不匹配时自动换对应 ABI 的 prebuilt 并复测
+if ! build_and_prune "${INSTALL_DIR}" "${BUN_BIN}" "${NODE_BIN}"; then
     die "better-sqlite3 ABI 自动修复失败，正在回滚…（可手动在 ${INSTALL_DIR} 内 npm rebuild better-sqlite3 后重试）"
 fi
 

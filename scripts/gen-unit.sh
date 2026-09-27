@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # systemd unit 与 logrotate 配置的唯一生成源——install.sh（初始部署）与 update.sh（原地升级）
-# 共用，防止两处模板漂移（unit 含 17 项加固，漂移即安全语义分叉）。
+# 共用，防止两处模板漂移（unit 含 22 项加固 + 3 条资源上限，漂移即安全语义分叉）。
 #
 # 用法（参数一律经环境变量传入，stdout 输出文件内容）：
 #   scripts/gen-unit.sh unit      # 生成 systemd unit 内容
