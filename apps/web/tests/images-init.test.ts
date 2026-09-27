@@ -117,3 +117,22 @@ describe('initImage 四分支（spec §5.1）', () => {
         expect(r.status).toBe('relay');
     });
 });
+
+describe('initImage 名称归一化不动点（R-41/R-43：校验域须与引用归一化域对齐）', () => {
+    it('# / ? / %XX / %25 / %2F / %3A 名 → 400（此类名引用链必断 + 字节被 GC，禁注册）', async () => {
+        mkUser('u-norm');
+        for (const name of ['a#b.png', 'a?b.png', 'a%20b.png', 'a%25b.png', 'a%2Fb.png', 'a%3Ab.png']) {
+            await expect(
+                initImage('u-norm', { name, contentHash: 'e'.repeat(64), contentMd5: 'f'.repeat(32), sizeBytes: 10 })
+            ).rejects.toMatchObject({ status: 400 });
+        }
+    });
+
+    it('孤立 % 与中文名安全边界不受影响（cycle-4 结论保持）', async () => {
+        mkUser('u-norm2');
+        const r1 = await initImage('u-norm2', { name: '100%.png', contentHash: '1'.repeat(64), contentMd5: '2'.repeat(32), sizeBytes: 10 });
+        expect(r1.status).toBe('relay');
+        const r2 = await initImage('u-norm2', { name: '截图1.png', contentHash: '3'.repeat(64), contentMd5: '4'.repeat(32), sizeBytes: 10 });
+        expect(r2.status).toBe('relay');
+    });
+});

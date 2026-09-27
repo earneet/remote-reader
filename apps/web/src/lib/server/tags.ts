@@ -54,7 +54,9 @@ export class SetTagsError extends Error {
 
 function sanitizeTagName(raw: string): string | null {
     const n = raw.trim();
-    if (!n || n.length > MAX_TAG_NAME || n.includes('/')) return null;
+    // 逗号是全部三个标签编辑入口的序列化分隔符（join(', ') ↔ split(',')）——进入标签名的
+    // 逗号会在下一次任意保存中被静默拆分成两个标签（R-42），与 '/' 同级拒收
+    if (!n || n.length > MAX_TAG_NAME || n.includes('/') || n.includes(',')) return null;
     return n;
 }
 

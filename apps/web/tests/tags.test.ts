@@ -168,3 +168,17 @@ test('deleteTag 其他 owner 的同名标签不受影响', () => {
     expect(listTags(ownerId).length).toBe(0);
     expect(db.select().from(schema.tags).where(eq(schema.tags.ownerId, other)).all().length).toBe(1);
 });
+
+test('renameTag 拒绝逗号（三个标签编辑入口以逗号为分隔符，R-42）', () => {
+    mkTag('v1');
+    const r = renameTag(ownerId, 'v1', 'v1,final');
+    expect(r).toEqual({ ok: false, code: 'invalid' });
+    expect(listTags(ownerId).some((t) => t.name === 'v1,final')).toBe(false);
+});
+
+test('setDocTags 静默丢弃含逗号名（服务层纵深，R-42）', () => {
+    mkTag('ok');
+    setDocTags(ownerId, docId, ['ok', 'v1,final']);
+    const names = listTagsForDoc(docId, ownerId).map((t) => t.name);
+    expect(names).toEqual(['ok']);
+});

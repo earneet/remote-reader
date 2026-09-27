@@ -5,6 +5,8 @@ import { generateId, generateInviteCode, hashToken } from './auth';
 // 有效期白名单：创建时三选一，UI 默认 7 天
 export const INVITE_EXPIRY_DAYS = [1, 7, 30] as const;
 export type InviteExpiryDays = (typeof INVITE_EXPIRY_DAYS)[number];
+// 备注长度上限（R-27：与 MAX_TOKEN_NAME 卫生模式对齐，防 DB 膨胀）
+export const MAX_INVITE_NOTE = 200;
 
 export function listInvites(): Array<{
     id: string;

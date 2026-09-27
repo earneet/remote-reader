@@ -6,6 +6,7 @@ import { generateId } from './auth';
 import { getBlobStore, getActiveImageStore } from './blobstore';
 import { getMaxImageBytes } from './env';
 import { sanitizeImageName, detectImageMime, extsForMime } from '@remote-reader/shared/image-mime';
+import { normalizeImageRef } from '@remote-reader/shared/image-extract';
 import { ObjectNotFoundError, ArchiveUnavailableError } from './object-store';
 import { deleteBlobIfOrphaned } from './image-refs';
 
@@ -32,6 +33,12 @@ function validateInitInput(input: InitImageInput): void {
     if (!name || name.includes('/') || name.includes('\\') || name === '.' || name === '..'
         || /[\x00-\x1f]/.test(name) || Buffer.byteLength(name, 'utf8') > 255) {
         throw new ImageInputError('name 须为单段合法文件名', 400);
+    }
+    // 归一化不动点（R-41/R-43）：注册名经渲染端 normalizeImageRef（#? 截断 + %XX 解码）后
+    // 须等于自身，否则 refs 永不登记 → 裂图 + 字节被 GC 且重试死循环。单点收口全族：
+    // 字面 #/?、%20/%25、解码出 / 或 scheme（%2F/%3A）均在此拒绝；孤立 % 解码失败按原样，安全。
+    if (normalizeImageRef(name) !== name) {
+        throw new ImageInputError('name 含 # ? 或 %XX 等会被 URL 语义改写的字符（引用链会断裂）', 400);
     }
 }
 
