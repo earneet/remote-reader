@@ -4,7 +4,8 @@
 // 运行（playwright 不在项目依赖内，经 NODE_PATH 指向任意含 playwright 的 node_modules）：
 //   NODE_PATH=<...>/node_modules API_TOKEN=rr_xxx node scripts/e2e-images.mjs
 // 断言集：正文图渲染 → 点击开 lightbox（序号/工具栏）→ 滚轮缩放 → >1x 拖动平移 →
-// pinch 合成（factor 基准式，断言无指数爆炸）→ Esc 关闭 → 双击 250% → 方向键切图（每图独立重置）→ 全屏/关闭按钮。
+// pinch 合成（factor 基准式，断言无指数爆炸）→ Esc 关闭 → 双击 250% → 双击复位不死锁（R-37）→
+// 方向键切图（每图独立重置）→ 全屏/关闭按钮 → 单图图集方向键不死锁（R-37）。
 
 import { createHash } from 'node:crypto';
 import { deflateSync } from 'node:zlib';
@@ -179,6 +180,14 @@ try {
     const box2 = await overlay.locator('.rr-imglb-stage').boundingBox();
     await page.mouse.dblclick(box2.x + box2.width / 2, box2.y + box2.height / 2);
     ok((await label.textContent()) === '图片 2 / 2 · 250%', '双击放大：→ 250%');
+    // —— 双击复位（R-37 回归：idx 不变的 show() 不得重置加载态——曾死锁永久 spinner）——
+    await page.mouse.dblclick(box2.x + box2.width / 2, box2.y + box2.height / 2);
+    ok((await label.textContent()) === '图片 2 / 2 · 100%', '双击复位：250% → 100%');
+    ok(
+        await overlay.locator('.rr-imglb-img').evaluate((el) => el.classList.contains('loaded')),
+        '双击复位后图片仍可见（加载态未死锁）'
+    );
+    ok((await overlay.locator('.rr-imglb-spinner').count()) === 0, '双击复位后无 spinner');
     await page.keyboard.press('ArrowLeft');
     ok((await label.textContent()) === '图片 1 / 2 · 100%', '← 切图：索引回退 + 每图独立重置 100%');
 
@@ -188,6 +197,33 @@ try {
     await overlay.locator('button[title="关闭"]').click();
     await overlay.waitFor({ state: 'detached' });
     ok(true, '工具栏关闭按钮');
+
+    // —— 单图图集方向键（R-37 回归：(n±1)%1 === idx 的 show() 曾死锁，单图无切图自愈路径）——
+    const docSingle = await api('/api/v1/documents', {
+        name: 'img-lb-single.md',
+        content: `# 单图 e2e\n\n![红图](${name1})\n`,
+        path: 'checks'
+    });
+    const page2 = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    await page2.goto(docSingle.url);
+    await page2.waitForSelector('.markdown-body img');
+    await page2.waitForLoadState('networkidle');
+    const singleImg = (await page2.$$('.markdown-body img'))[0];
+    for (let i = 0; i < 10 && !(await page2.$('.rr-imglb-overlay')); i++) {
+        await singleImg.click();
+        await page2.waitForTimeout(400);
+    }
+    const overlay2 = page2.locator('.rr-imglb-overlay');
+    await overlay2.waitFor();
+    await page2.keyboard.press('ArrowRight');
+    await page2.waitForTimeout(300);
+    ok((await overlay2.locator('.rr-imglb-label').textContent()) === '图片 1 / 1 · 100%', '单图 → 方向键：序号不变');
+    ok(
+        await overlay2.locator('.rr-imglb-img').evaluate((el) => el.classList.contains('loaded')),
+        '单图方向键后图片仍可见（加载态未死锁）'
+    );
+    ok((await overlay2.locator('.rr-imglb-spinner').count()) === 0, '单图方向键后无 spinner');
+    await page2.close();
 
     console.log(`\n✓ lightbox Playwright 验收全部通过（${passed} 项断言）`);
 } finally {
