@@ -1,6 +1,7 @@
 import { defineConfig } from 'vitest/config';
 import { fileURLToPath } from 'node:url';
 import { rmSync, readdirSync, statSync } from 'node:fs';
+import { svelte } from '@sveltejs/vite-plugin-svelte';
 
 const r = (p: string) => fileURLToPath(new URL(p, import.meta.url));
 
@@ -37,12 +38,18 @@ if (!process.env.DATABASE_PATH) {
 }
 
 export default defineConfig({
+    // .svelte.ts（runes 模块，如 row-orchestrator）须经 svelte 编译器转译——vitest 默认不认识
+    plugins: [svelte()],
     resolve: {
         alias: {
             $server: r('./apps/web/src/lib/server'),
             $shared: r('./packages/shared/src'),
             $components: r('./apps/web/src/lib/components'),
-            $lib: r('./apps/web/src/lib')
+            $lib: r('./apps/web/src/lib'),
+            // $app/* 测试桩：overlay-history 等共享模块依赖 SvelteKit 运行时模块，单测环境
+            // 无法解析真身——指向 no-op 桩（生产行为不受影响，仅测试期解析）
+            '$app/navigation': r('./apps/web/tests/stubs/app-navigation.ts'),
+            '$app/state': r('./apps/web/tests/stubs/app-state.ts')
         }
     },
     // 执行模型（2026-09-26 探针实证，vitest 4.1.10）：fileParallelism:false → maxWorkers=1，
