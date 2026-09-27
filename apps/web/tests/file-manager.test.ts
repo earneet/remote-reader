@@ -1,6 +1,8 @@
 import { test, expect, beforeEach, afterEach } from 'vitest';
-import { rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import * as os from 'node:os';
 import { and, eq } from 'drizzle-orm';
+import { dirname, join } from 'node:path';
 import { db, schema } from '../src/lib/server/db';
 import { generateId } from '../src/lib/server/auth';
 import { uploadDocument } from '../src/lib/server/documents';
@@ -8,7 +10,7 @@ import { uploadDocument } from '../src/lib/server/documents';
 import { resetDb } from './helpers';
 const mod = await import('../src/routes/+page.server');
 
-const TMP = `./data/test-fm-${Date.now().toString(36)}`;
+const TMP = mkdtempSync(join(os.tmpdir(), 'rr-fm-'));
 
 beforeEach(() => {
     process.env.DATA_DIR = TMP;
@@ -52,9 +54,10 @@ async function expectStatus(
     fn: (evt: any) => unknown,
     userId: string,
     form: Record<string, string>,
-    status: number
+    status: number,
+    url: URL = new URL('http://localhost/')
 ): Promise<void> {
-    const r = await invoke(fn, userId, form);
+    const r = await invoke(fn, userId, form, url);
     expect((r as { status?: number })?.status).toBe(status);
 }
 
@@ -301,4 +304,23 @@ test('load：view 非法值回落 dir（既有模式扩展）', async () => {
     insertUser(ownerId);
     const data = await mod.load({ locals: { user: { id: ownerId } }, url: new URL('http://localhost/?view=bogus') } as any);
     expect((data as any).view).toBe('dir');
+});
+
+
+test('createFolder：dir 悬空（双标签页删除竞态）→ 404 且不落孤儿行（R-26）', async () => {
+    const ownerId = generateId();
+    insertUser(ownerId);
+    await expectStatus(mod.actions.createFolder, ownerId, { name: 'x' }, 404, new URL('http://localhost/?dir=ghost-id'));
+    const folders = db.select().from(schema.documents)
+        .where(and(eq(schema.documents.ownerId, ownerId), eq(schema.documents.type, 'folder'))).all();
+    expect(folders.length).toBe(0);
+});
+
+test('rename：磁盘失败（目标名被物理目录占位）→ 400 而非 404（R-10）', async () => {
+    const ownerId = generateId();
+    insertUser(ownerId);
+    const up = await uploadDocument(ownerId, 'f.md', 'x', []);
+    const row = db.select().from(schema.documents).where(eq(schema.documents.id, up.id)).get()!;
+    mkdirSync(join(dirname(row.storagePath!), 'blocker'), { recursive: true });
+    await expectStatus(mod.actions.rename, ownerId, { id: up.id, name: 'blocker' }, 400);
 });
