@@ -11,7 +11,7 @@
 ## 0. 快速上手（5 分钟本地体验）
 
 ```bash
-git clone <repo> && cd remote_reader
+git clone <repo> && cd remote-reader
 cp .env.example .env            # 至少改 SESSION_SECRET、INITIAL_INVITE_CODE
 ```
 
@@ -168,7 +168,7 @@ claude mcp add remote-reader bun "$(pwd)/apps/mcp-bridge/src/index.ts" \
 
 - **路径解析**：`![alt](路径)` 中的相对路径按桥进程工作目录解析（含 Windows 盘符绝对路径）；外链（`http(s)://`）、`data:` URI、含 `/` `\` 的多段路径**不视为本地图**，原样保留。
 - **格式**：支持 png / jpeg / gif / webp（魔数检测，扩展名须与真实格式一致——`.png` 里装 JPEG 会被拒）。**SVG 不支持**（可携带脚本，安全考虑），改用 png/webp 导出。
-- **大小**：单图 ≤ `MAX_IMAGE_BYTES`（默认 10MB，init 预检 + relay 实测双重校验）；单文档建议 ≤50 张图（服务端限流约束，超量会被 429 限流）。
+- **大小**：单图 ≤ `MAX_IMAGE_BYTES`（默认 10MB，init 预检 + relay 实测双重校验）；单文档硬上限 500 张图（超出 413），中转走独立限流桶（60/min，超出 429 由桥自动退避重试）。
 - **去重与回收**：图片按 sha256 内容寻址，同字节的图全库只存一份（重传直接复用）；图片一旦不被任何文档引用即自动回收（覆盖更新去掉引用 / 删除文档后），无需手动清理。
 - **预检**：上传前一次性列出全部问题（文件不存在 / 格式不支持 / 超大），不会传一半才失败。
 
@@ -224,6 +224,7 @@ Response 200: { "id": "...", "url": "https://<host>/s/<share-token>" }
 | 200 | 上传成功 | 把 `url` 发给用户 |
 | 400 | 请求体非法 / JSON 解析失败 / `name` 或 `path` 含非法字符（含 `..` 穿越） | 修正参数重试，**不要**当服务器故障重试 |
 | 401 | 缺 token 或 token 无效/已撤销 | 检查 `Authorization: Bearer` |
+| 409 | 位置冲突：`path` 段被同名文件占用，或与目标位置同名文件/文件夹撞名 | 换 `path` 或先处理同名节点（message 含具体位置） |
 | 413 | 内容超 `MAX_UPLOAD_BYTES`（默认 5MB）/ 图片超 `MAX_IMAGE_BYTES`（默认 10MB） | 拆分或精简文档 |
 | 429 | 触发速率限制（文档上传每 token 默认 60/min；图片中转独立同额；init/confirm 轻桶默认 120/min） | 退避后重试 |
 
@@ -243,9 +244,15 @@ Response 200: { "id": "...", "url": "https://<host>/s/<share-token>" }
 
 - 目录树浏览、新建文件夹、移动（含环路检测）、重命名、删除（级联删除子孙 + 磁盘文件 + share links）；
 - 行首图标区分**私有 / 已共享**（共享 = 存在有效分享链接）；行尾 ⋯ 菜单（桌面下拉 / 移动底部菜单）集中全部行操作，含**复制分享链接**（私有文档点它即生成链接并转为共享）与**转为私有**（一键撤销该文档全部链接，确认后不可恢复）；
+- **三个视图**（右栏页签切换）：目录内容 ⇄ **最近文档**（按更新时间全局平铺）⇄ **最近浏览**（按你本人的浏览时间），后两者无限滚动；
+- **搜索**：顶栏搜索框 → `/search` 页，支持全文（FTS5，命中摘要高亮）、文件名、标签三路过滤；
+- **标签**：任意文档（文件管理器或 `/d/<id>` 页）⋯ 菜单 → 编辑标签；设置 → **标签** 集中管理（改名级联到全部文档）；
+- **主题**：顶栏切换 浅色 / 深色 / 跟随系统，全站即时生效并记忆；
+- 移动端（≤768px）自动切换为「内容全屏 + 侧滑抽屉目录树 + 面包屑 + 底部操作菜单」布局；
 - 进入任意文档的 owner 查看页 `/d/<id>`；
 - 设置 → **分享链接**：查看 / 撤销分享（撤销后 `/s/<token>` 立即 404）；
-- 设置 → **API Token**：创建 / 撤销。
+- 设置 → **API Token**：创建 / 撤销；
+- 设置 → **邀请码**（仅 admin）：生成 / 撤销注册邀请码。
 
 ---
 
@@ -277,7 +284,7 @@ Response 200: { "id": "...", "url": "https://<host>/s/<share-token>" }
 
 | 现象 | 排查 |
 |---|---|
-| 生产启动报 `SESSION_SECRET must be set in production` | 设置 `SESSION_SECRET`（长随机串） |
+| 生产启动报「SESSION_SECRET 生产环境必填」 | 设置 `SESSION_SECRET`（长随机串） |
 | 生产启动报 BODY_SIZE_LIMIT 须 ≥ max(...) | 提升到达标字节数（默认配置下如 `25165824`）；systemd 部署跑 `sudo ./scripts/update.sh` 会自动迁移 |
 | `better-sqlite3 ... not supported` / `ERR_DLOPEN_FAILED` | 你在用 `bun run` 启服务——改用 `node apps/web/build/index.js` |
 | `bun run test` 报 better-sqlite3 加载失败 | 不应使用 `bun test`；测试用 vitest，跑 `bun run test`（经 node） |

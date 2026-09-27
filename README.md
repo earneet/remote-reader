@@ -13,7 +13,7 @@ Remote Reader 是 Agent 的「文档交付窗口」——写入侧用 MCP，阅�
 - **完整 Markdown 渲染** —— GFM 表格、[Shiki](https://shiki.style) 代码高亮（39 种语言）、Mermaid 流程图、KaTeX 数学公式（按需懒加载，纯文本零下载）
 - **图片支持** —— `content` 里的本地图片引用自动上传并改写（png/jpeg/gif/webp，SVG 拒收）；sha256 内容寻址去重、无引用自动回收；s3 后端 presigned URL CDN 直连，本地后端走免登录代理；查看页点击图片打开 **Lightbox 图集**（滚轮/pinch 缩放、拖动、双击、全屏、←/→ 切图）
 - **幂等上传** —— 同路径同内容不重复生成；内容更新时**链接不变**、自动指向最新版本
-- **管理 UI** —— 文件管理器（目录树 / 移动 / 重命名 / 删除；行首私有/共享状态图标、复制分享链接、转为私有）、API token 管理（创建 / 撤销 / 一次性 reveal）、分享链接撤销
+- **管理 UI** —— 文件管理器（目录树 / 移动 / 重命名 / 删除；行首私有/共享状态图标、复制分享链接、转为私有；目录内容 / 最近文档 / 最近浏览三视图 + 无限滚动）、**全文搜索与标签**（FTS5 摘要高亮 + 标签集中管理）、浅色/深色/自动三档**主题**、API token 管理（创建 / 撤销 / 一次性 reveal）、分享链接撤销
 - **多用户隔离** —— 文档按 owner 存于独立目录树，SQLite 外键约束保证完整
 - **安全默认** —— argon2id 密码哈希、HMAC session + 常量时间比较 + 过期校验、路径穿越防护、`html:false` 防 XSS、API token 仅存 sha256 哈希
 - **生产就绪** —— 多阶段 Docker 镜像、非 root 运行、HEALTHCHECK、Docker Compose 一键部署
@@ -49,7 +49,7 @@ sequenceDiagram
 ### 方式一：Docker（推荐生产）
 
 ```bash
-cp .env.example .env            # 至少改 SESSION_SECRET、INITIAL_INVITE_CODE
+cp .env.example .env            # 至少改 4 项：SESSION_SECRET、INITIAL_INVITE_CODE、BASE_URL（改为你访问用的地址）、ORIGIN（与 BASE_URL 同值）
 docker compose up -d --build    # → http://localhost:3000
 ```
 
@@ -110,7 +110,7 @@ Agent 读取登录页 SSR 输出的 `<details id="agent-guide">` 指引块（对
 
 本地 MCP 桥让 Agent 以 MCP 工具调用上传，桥在本地持有 token、不暴露给 Agent。配置好后 Agent 调 `upload_document({ name, content, path? })` 即可拿到查看链接。
 
-**带图文档零额外参数**：`content` 里的本地图片引用（`![alt](本地路径)`，相对路径按桥工作目录解析）会被自动上传并改写——png/jpeg/gif/webp（SVG 不支持），单图建议 ≤10MB、单文档 ≤50 张（服务端限流约束）；同字节图片 sha256 去重复用，预检问题（文件不存在/格式不支持/超大）一次性全部列出。
+**带图文档零额外参数**：`content` 里的本地图片引用（`![alt](本地路径)`，相对路径按桥工作目录解析）会被自动上传并改写——png/jpeg/gif/webp（SVG 不支持），单图建议 ≤10MB、单文档硬上限 500 张（超出 413；中转走独立限流 60/min，超出会 429 退避重试、无需干预）；同字节图片 sha256 去重复用，预检问题（文件不存在/格式不支持/超大）一次性全部列出。
 
 安装桥（二选一）：
 

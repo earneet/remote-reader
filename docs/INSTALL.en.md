@@ -27,7 +27,7 @@ Image features: multi-stage build, prod-only node_modules (~423MB), **non-root r
 
 ```bash
 git clone <repo> && cd remote-reader
-cp .env.example .env            # At minimum change these two:
+cp .env.example .env            # At minimum change these four:
 ```
 
 Edit `.env`:
@@ -35,6 +35,8 @@ Edit `.env`:
 ```bash
 SESSION_SECRET=<a long random string of 32+ bytes>   # Required in production; missing fails fast
 INITIAL_INVITE_CODE=<your invite code>               # Needed to register the first admin
+BASE_URL=http://your-host                            # The address you actually visit (localhost is rejected by the production check)
+ORIGIN=http://your-host                              # Must share the origin with BASE_URL (CSRF baseline; mismatch rejects startup)
 ```
 
 Optional overrides (`docker-compose.yml` ships with sane defaults):
@@ -144,7 +146,9 @@ server {
     server_name your-domain;
     # ssl_certificate ...
 
-    client_max_body_size 8m;     # Must be > MAX_UPLOAD_BYTES
+    # Must be >= BODY_SIZE_LIMIT (image relay is base64 JSON: a 10MB image ~= 13.7MB body;
+    # the default 5MB doc + 10MB image app config means 24M; raise together with MAX_*)
+    client_max_body_size 24m;
 
     location / {
         proxy_pass http://127.0.0.1:3000;
@@ -161,7 +165,8 @@ server {
 ```
 your-domain {
     reverse_proxy 127.0.0.1:3000
-    request_body { max_size 8MB }
+    # Same rationale as nginx: must be >= BODY_SIZE_LIMIT (24MB for the default config)
+    request_body { max_size 24MB }
 }
 ```
 
@@ -275,7 +280,7 @@ Docker deployments: migrations are already executed at image build time; a schem
 
 | Symptom | What to check |
 |---|---|
-| Production startup reports `SESSION_SECRET must be set in production` | Set `SESSION_SECRET` (a long random string) |
+| Production startup reports 「SESSION_SECRET 生产环境必填」 (Chinese message) | Set `SESSION_SECRET` (a long random string) |
 | Production startup reports BODY_SIZE_LIMIT must be ≥ max(...) | Use a byte count ≥ `max(MAX_UPLOAD_BYTES×1.5, MAX_IMAGE_BYTES×1.37×1.5)` (with 5M docs + 10M images the floor is 21548237, e.g. `25165824`); on systemd deployments `update.sh` migrates it automatically |
 | `better-sqlite3 ... not supported` / `ERR_DLOPEN_FAILED` | Starting with `bun run` fails to load it — switch to `node apps/web/build/index.js`; if node reports a `NODE_MODULE_VERSION` mismatch: bun's prebuilt follows bun's bundled-node ABI — `install.sh`/`update.sh` auto-detect and swap in the matching-ABI prebuilt, for manual deploys run `npm rebuild better-sqlite3` at the repo root |
 | Upload >512K returns 413 but you're sure it's < `MAX_UPLOAD_BYTES` | `BODY_SIZE_LIMIT` is smaller than the content size (adapter-node default is only 512K) |

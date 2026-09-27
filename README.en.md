@@ -13,7 +13,7 @@ Remote Reader is the "document delivery window" for agents — MCP on the write 
 - **Complete Markdown rendering** —— GFM tables, [Shiki](https://shiki.style) code highlighting (39 languages), Mermaid flowcharts, KaTeX math (lazy-loaded on demand; zero downloads for plain text)
 - **Image support** —— Local image references in `content` are auto-uploaded and rewritten (png/jpeg/gif/webp; SVG rejected); sha256 content-addressed dedup with automatic reclamation once unreferenced; presigned-URL CDN delivery on the s3 backend, login-free proxy on the local backend; clicking an image in the view page opens a **Lightbox gallery** (wheel/pinch zoom, pan, double-click, fullscreen, ←/→ navigation)
 - **Idempotent uploads** —— Same path + same content never duplicates; on content update the **link stays the same** and auto-points to the latest version
-- **Management UI** —— File manager (directory tree / move / rename / delete; private/shared state icons, copy share link, make private), API token management (create / revoke / one-time reveal), share link revocation
+- **Management UI** —— File manager (directory tree / move / rename / delete; private/shared state icons, copy share link, make private; directory / recent / recently-viewed views with infinite scrolling), **full-text search & tags** (FTS5 highlighted snippets + centralized tag management), light/dark/auto **theming**, API token management (create / revoke / one-time reveal), share link revocation
 - **Multi-user isolation** —— Documents live in per-owner directory trees; SQLite foreign-key constraints enforce integrity
 - **Secure by default** —— argon2id password hashing, HMAC sessions + constant-time comparison + expiry check, path-traversal protection, `html:false` for XSS defense, API tokens stored only as sha256 hashes
 - **Production-ready** —— Multi-stage Docker image, non-root runtime, HEALTHCHECK, one-command Docker Compose deployment
@@ -49,7 +49,7 @@ Three components:
 ### Option 1: Docker (recommended for production)
 
 ```bash
-cp .env.example .env            # At minimum, change SESSION_SECRET and INITIAL_INVITE_CODE
+cp .env.example .env            # Change at least 4 values: SESSION_SECRET, INITIAL_INVITE_CODE, BASE_URL (the address you will visit), ORIGIN (same value as BASE_URL)
 docker compose up -d --build    # → http://localhost:3000
 ```
 
@@ -110,7 +110,7 @@ The agent reads the `<details id="agent-guide">` block in the login page's SSR H
 
 The local MCP bridge lets an agent upload via an MCP tool call; the bridge holds the token locally and never exposes it to the agent. Once configured, the agent just calls `upload_document({ name, content, path? })` to get the view link.
 
-**Image documents need zero extra parameters**: local image references in `content` (`![alt](local path)`, relative paths resolved against the bridge working directory) are auto-uploaded and rewritten — png/jpeg/gif/webp (SVG not supported), ≤10MB per image and ≤50 per document recommended (server rate-limit constraints); identical bytes dedup by sha256, and preflight problems (missing files / unsupported formats / oversize) are all reported at once.
+**Image documents need zero extra parameters**: local image references in `content` (`![alt](local path)`, relative paths resolved against the bridge working directory) are auto-uploaded and rewritten — png/jpeg/gif/webp (SVG not supported), ≤10MB per image and a hard cap of 500 images per document (413 beyond that; image relay has an independent 60/min bucket — 429s are retried with backoff automatically); identical bytes dedup by sha256, and preflight problems (missing files / unsupported formats / oversize) are all reported at once.
 
 Install the bridge (choose one):
 
