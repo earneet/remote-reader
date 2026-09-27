@@ -67,7 +67,7 @@ export function searchDocuments(ownerId: string, query: string, tagNames: string
             let ftsRows: { id: string; raw: string }[] = [];
             try {
                 ftsRows = sqlite.prepare(`
-                    SELECT d.id, highlight(docs_fts, 2, char(57344), char(57345)) AS raw
+                    SELECT d.id, snippet(docs_fts, 2, char(57344), char(57345), '…', 32) AS raw
                     FROM docs_fts JOIN documents d ON d.id = docs_fts.doc_id
                     WHERE d.owner_id = ? AND docs_fts MATCH ?
                     ORDER BY bm25(docs_fts)
