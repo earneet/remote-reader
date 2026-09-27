@@ -9,22 +9,27 @@ import { listTagsForDoc, setDocTags, SetTagsError } from '$server/tags';
 
 export const load: PageServerLoad = async ({ locals, params, setHeaders }) => {
     if (!locals.user) redirect(302, '/login');
-    const doc = getOwnedDocument(params.id, locals.user.id);
+    const userId = locals.user.id;
+    const doc = getOwnedDocument(params.id, userId);
     // 冷热分层：storage_tier 是内容位置事实源，storagePath 冷态保留 → 不再作为 404 条件
     if (!doc || doc.type !== 'file') error(404, '文档不存在');
 
-    let content: string;
-    try {
-        content = await readDocumentContent(doc);
-    } catch (e) {
-        if (e instanceof FileNotFoundError || e instanceof ObjectNotFoundError) error(404, '文档内容缺失');
-        if (e instanceof ArchiveUnavailableError) error(503, '归档存储暂时不可达，请稍后重试');
-        throw e;
-    }
-    const { html: rawHtml, names, contentHash } = await renderMarkdown(content);
-    const html = await resolveImages(rawHtml, names, {
-        kind: 'owner', ownerId: locals.user.id, docId: doc.id, contentHash
-    });
+    const renderDoc = async (): Promise<string> => {
+        let content: string;
+        try {
+            content = await readDocumentContent(doc);
+        } catch (e) {
+            if (e instanceof FileNotFoundError || e instanceof ObjectNotFoundError) error(404, '文档内容缺失');
+            if (e instanceof ArchiveUnavailableError) error(503, '归档存储暂时不可达，请稍后重试');
+            throw e;
+        }
+        const { html: rawHtml, names, contentHash } = await renderMarkdown(content);
+        return resolveImages(rawHtml, names, {
+            kind: 'owner', ownerId: userId, docId: doc.id, contentHash
+        });
+    };
+    // R-19：同 /s/——冷文档流式 promise + 骨架屏，热文档同步字符串
+    const html = doc.storageTier === 'cold' ? renderDoc() : await renderDoc();
     const tags = listTagsForDoc(doc.id, locals.user.id);
     setHeaders({ 'cache-control': 'no-store' });
     return { id: doc.id, title: doc.name, html, tags, updatedAt: doc.updatedAt, sizeBytes: doc.sizeBytes };
