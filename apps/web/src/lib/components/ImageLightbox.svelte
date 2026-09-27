@@ -1,9 +1,11 @@
 <script lang="ts">
+    import { onMount } from 'svelte';
     import { overlayOnMount } from '$lib/shared/overlay-mount';
     import { overlayGestures } from '$lib/shared/overlay-gestures';
     import type { GestureOpts } from '$lib/shared/overlay-gestures';
     import { nextZoom, formatZoom, ZOOM_STEP, clampZoom, ZOOM_WHEEL_FACTOR } from '$lib/shared/zoom';
     import { trapTabKey } from '$lib/shared/focus-trap';
+    import { createOverlayHistory } from '$lib/shared/overlay-history';
     import { browserFullscreen, type BrowserFullscreenCtl } from '$lib/shared/browser-fullscreen';
 
     // props：图集（当前文档全部正文 <img> 的 src/alt 列表——MarkdownViewer 收集传入）+ 初始索引
@@ -30,15 +32,20 @@
     let loading = $state(true);
     let imgLoaded = $state(false);
 
-    // 切图重置（spec：每图独立状态 100%）
+    // 切图重置（spec：每图独立状态 100%）。加载态只在 idx 真变化时重置——
+    // {#key idx} 不重建 img、src 不变时浏览器不再派发 load，idx 不变的 show()（双击复位、
+    // 单图图集取模回绕）若置 loading=true 将失去唯一复位出口 → 永久 spinner 死锁（R-37）
     function show(n: number): void {
-        idx = (n + images.length) % images.length;
+        const next = (n + images.length) % images.length;
+        if (next !== idx) {
+            loading = true;
+            imgLoaded = false;
+            idx = next;
+        }
         zoom = 1;
         x = 0;
         y = 0;
         origin = null;
-        loading = true;
-        imgLoaded = false;
     }
 
     // 将 transform-origin 归一到中心（表示变换，视觉不变）：origin != null 时
@@ -138,6 +145,17 @@
         fsCtl.exit();
         onClose();
     }
+
+    // 返回键编排（R-09）：组件随每次打开重建——挂载即推条目，卸载（任意关闭路径）消费；
+    // 返回键经 setOnPop 仅通知栈顶（堆叠场景一次返回只关最上层，验收第 2 轮修复）
+    const overlayHistory = createOverlayHistory();
+    onMount(() => {
+        overlayHistory.setOnPop(() => onClose());
+        overlayHistory.push();
+        return () => {
+            void overlayHistory.consume();
+        };
+    });
 
     function handleKey(e: KeyboardEvent): boolean {
         if (e.key === 'Escape') {

@@ -5,6 +5,7 @@
     "": {
       "name": "remote-reader",
       "devDependencies": {
+        "@sveltejs/vite-plugin-svelte": "^4.0.0",
         "vitest": "^4.1.10",
       },
     },
@@ -63,7 +64,7 @@
       },
       "devDependencies": {
         "@types/markdown-it": "^14.1.0",
-        "@types/node": "^26.1.1",
+        "@types/node": "^22.0.0",
       },
     },
   },
@@ -452,7 +453,7 @@
 
     "@types/mdurl": ["@types/mdurl@2.0.0", "https://mirrors.tencent.com/npm/@types/mdurl/-/mdurl-2.0.0.tgz", {}, "sha512-RGdgjQUZba5p6QEFAVx2OGb8rQDL/cPRG7GiedRzMcJ1tYnUANBncjbSB1NRGwbvjcPeikRABz2nshyPk1bhWg=="],
 
-    "@types/node": ["@types/node@26.1.1", "https://mirrors.tencent.com/npm/@types/node/-/node-26.1.1.tgz", { "dependencies": { "undici-types": "~8.3.0" } }, "sha512-nxAkRSVkN1Y0JC1W8ky/fTfkGsMmcrRsbx+3XoZE+rMOX71kLYTV7fLXpqud1GpbpP5TuffXFqfX7fH2GgZREw=="],
+    "@types/node": ["@types/node@22.20.1", "https://mirrors.tencent.com/npm/@types/node/-/node-22.20.1.tgz", { "dependencies": { "undici-types": "~6.21.0" } }, "sha512-EANqOCF9QFyra+4pfxUcX9STKJpCLjMbObVzljIJomAWSnuSIEAvyzEU53GaajbXJEgdh0iEcPL+DGvpUd4k1Q=="],
 
     "@types/resolve": ["@types/resolve@1.20.2", "https://mirrors.tencent.com/npm/@types/resolve/-/resolve-1.20.2.tgz", {}, "sha512-60BCwRFOZCQhDncwQdxxeOEEkbc5dIMccYLwbxsS4TUNeVECQ/pBJ0j09mrHOl/JJvpRPGwO9SvE4nR2Nb/a4Q=="],
 
@@ -1056,7 +1057,7 @@
 
     "uc.micro": ["uc.micro@2.1.0", "https://mirrors.tencent.com/npm/uc.micro/-/uc.micro-2.1.0.tgz", {}, "sha512-ARDJmphmdvUk6Glw7y9DQ2bFkKBHwQHLi2lsaH6PPmz/Ka9sFOBsBluozhDltWmnv9u/cF6Rt87znRTPV+yp/A=="],
 
-    "undici-types": ["undici-types@8.3.0", "https://mirrors.tencent.com/npm/undici-types/-/undici-types-8.3.0.tgz", {}, "sha512-j375ScV60dom+YkPFIfTLcOiPxkN/buHz5GobjLhixFuANaNs3C9l4GmrWqejgXWJ7BbJcFYpTEUkS1Ge8bpZQ=="],
+    "undici-types": ["undici-types@6.21.0", "https://mirrors.tencent.com/npm/undici-types/-/undici-types-6.21.0.tgz", {}, "sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ=="],
 
     "unist-util-is": ["unist-util-is@6.0.1", "https://mirrors.tencent.com/npm/unist-util-is/-/unist-util-is-6.0.1.tgz", { "dependencies": { "@types/unist": "^3.0.0" } }, "sha512-LsiILbtBETkDz8I9p1dQ0uyRUWuaQzd/cuEeS1hoRSyW5E5XGmTzlwY1OrNzzakGowI9Dr/I8HVaw4hTtnxy8g=="],
 
@@ -1116,8 +1117,6 @@
 
     "@rollup/pluginutils/estree-walker": ["estree-walker@2.0.2", "https://mirrors.tencent.com/npm/estree-walker/-/estree-walker-2.0.2.tgz", {}, "sha512-Rfkk/Mp/DL7JVje3u18FxFujQlTNR2q6QfMSMB7AvCBx91NGj/ba3kCfza0f6dVDbw7YlRf/nDrn7pQrCCyQ/w=="],
 
-    "@types/better-sqlite3/@types/node": ["@types/node@22.20.1", "https://mirrors.tencent.com/npm/@types/node/-/node-22.20.1.tgz", { "dependencies": { "undici-types": "~6.21.0" } }, "sha512-EANqOCF9QFyra+4pfxUcX9STKJpCLjMbObVzljIJomAWSnuSIEAvyzEU53GaajbXJEgdh0iEcPL+DGvpUd4k1Q=="],
-
     "body-parser/content-type": ["content-type@2.0.0", "https://mirrors.tencent.com/npm/content-type/-/content-type-2.0.0.tgz", {}, "sha512-j/O/d7GcZCyNl7/hwZAb606rzqkyvaDctLmckbxLzHvFBzTJHuGEdodATcP3yIRoDrLHkIATJuvzbFlp/ki2cQ=="],
 
     "cytoscape-fcose/cose-base": ["cose-base@2.2.0", "https://mirrors.tencent.com/npm/cose-base/-/cose-base-2.2.0.tgz", { "dependencies": { "layout-base": "^2.0.0" } }, "sha512-AzlgcsCbUMymkADOJtQm3wO9S3ltPfYOFD5033keQn9NJzIbtnZj+UdBJe7DYml/8TdbtHJW3j58SOnKhWY/5g=="],
@@ -1135,10 +1134,6 @@
     "express/cookie": ["cookie@0.7.2", "https://mirrors.tencent.com/npm/cookie/-/cookie-0.7.2.tgz", {}, "sha512-yki5XnKuf750l50uGTllt6kKILY4nQ1eNIQatoXEByZ5dWgnKqbnqmTrBE5B4N7lrMJKQ2ytWMiTO2o0v6Ew/w=="],
 
     "mermaid/katex": ["katex@0.16.47", "https://mirrors.tencent.com/npm/katex/-/katex-0.16.47.tgz", { "dependencies": { "commander": "^8.3.0" }, "bin": { "katex": "cli.js" } }, "sha512-Eeo8Ys1doU1z+x8AZsPpQu+p/QcZBI5PeOo7QGQdy2x2m0MU/hYagBbGOmXwr5KVbEfVuWv9LpnQWeehogurjg=="],
-
-    "remote-reader-bridge/@types/node": ["@types/node@22.20.1", "https://mirrors.tencent.com/npm/@types/node/-/node-22.20.1.tgz", { "dependencies": { "undici-types": "~6.21.0" } }, "sha512-EANqOCF9QFyra+4pfxUcX9STKJpCLjMbObVzljIJomAWSnuSIEAvyzEU53GaajbXJEgdh0iEcPL+DGvpUd4k1Q=="],
-
-    "remote-reader-web/@types/node": ["@types/node@22.20.1", "https://mirrors.tencent.com/npm/@types/node/-/node-22.20.1.tgz", { "dependencies": { "undici-types": "~6.21.0" } }, "sha512-EANqOCF9QFyra+4pfxUcX9STKJpCLjMbObVzljIJomAWSnuSIEAvyzEU53GaajbXJEgdh0iEcPL+DGvpUd4k1Q=="],
 
     "type-is/content-type": ["content-type@2.0.0", "https://mirrors.tencent.com/npm/content-type/-/content-type-2.0.0.tgz", {}, "sha512-j/O/d7GcZCyNl7/hwZAb606rzqkyvaDctLmckbxLzHvFBzTJHuGEdodATcP3yIRoDrLHkIATJuvzbFlp/ki2cQ=="],
 
@@ -1190,8 +1185,6 @@
 
     "@esbuild-kit/core-utils/esbuild/@esbuild/win32-x64": ["@esbuild/win32-x64@0.18.20", "https://mirrors.tencent.com/npm/@esbuild/win32-x64/-/win32-x64-0.18.20.tgz", { "os": "win32", "cpu": "x64" }, "sha512-kTdfRcSiDfQca/y9QIkng02avJ+NCaQvrMejlsB3RRv5sE9rRoeBPISaZpKxHELzRxZyLvNts1P27W3wV+8geQ=="],
 
-    "@types/better-sqlite3/@types/node/undici-types": ["undici-types@6.21.0", "https://mirrors.tencent.com/npm/undici-types/-/undici-types-6.21.0.tgz", {}, "sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ=="],
-
     "cytoscape-fcose/cose-base/layout-base": ["layout-base@2.0.1", "https://mirrors.tencent.com/npm/layout-base/-/layout-base-2.0.1.tgz", {}, "sha512-dp3s92+uNI1hWIpPGH3jK2kxE2lMjdXdr+DH8ynZHpd6PUlH6x6cbuXnoMmiNumznqaNO31xu9e79F0uuZ0JFg=="],
 
     "d3-sankey/d3-shape/d3-path": ["d3-path@1.0.9", "https://mirrors.tencent.com/npm/d3-path/-/d3-path-1.0.9.tgz", {}, "sha512-VLaYcn81dtHVTjEHd8B+pbe9yHWpXKZUC87PzoFmsFrJqgFwDe/qxfp5MlfsfM1V5E/iVt0MmEbWQ7FVIXh/bg=="],
@@ -1241,10 +1234,6 @@
     "drizzle-kit/esbuild/@esbuild/win32-ia32": ["@esbuild/win32-ia32@0.19.12", "https://mirrors.tencent.com/npm/@esbuild/win32-ia32/-/win32-ia32-0.19.12.tgz", { "os": "win32", "cpu": "ia32" }, "sha512-+ZOE6pUkMOJfmxmBZElNOx72NKpIa/HFOMGzu8fqzQJ5kgf6aTGrcJaFsNiVMH4JKpMipyK+7k0n2UXN7a8YKQ=="],
 
     "drizzle-kit/esbuild/@esbuild/win32-x64": ["@esbuild/win32-x64@0.19.12", "https://mirrors.tencent.com/npm/@esbuild/win32-x64/-/win32-x64-0.19.12.tgz", { "os": "win32", "cpu": "x64" }, "sha512-T1QyPSDCyMXaO3pzBkF96E8xMkiRYbUEZADd29SyPGabqxMViNoii+NcK7eWJAEoU6RZyEm5lVSIjTmcdoB9HA=="],
-
-    "remote-reader-bridge/@types/node/undici-types": ["undici-types@6.21.0", "https://mirrors.tencent.com/npm/undici-types/-/undici-types-6.21.0.tgz", {}, "sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ=="],
-
-    "remote-reader-web/@types/node/undici-types": ["undici-types@6.21.0", "https://mirrors.tencent.com/npm/undici-types/-/undici-types-6.21.0.tgz", {}, "sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ=="],
 
     "vite/esbuild/@esbuild/aix-ppc64": ["@esbuild/aix-ppc64@0.21.5", "https://mirrors.tencent.com/npm/@esbuild/aix-ppc64/-/aix-ppc64-0.21.5.tgz", { "os": "aix", "cpu": "ppc64" }, "sha512-1SDgH6ZSPTlggy1yI6+Dbkiz8xzpHJEVAlF/AM1tHPLsf5STom9rwtjE4hKAF20FfXXNTFqEYXyJNWh1GiZedQ=="],
 

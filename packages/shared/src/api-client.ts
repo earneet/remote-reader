@@ -45,7 +45,9 @@ function mapMessage(status: number, msg: string | undefined): string {
         case 401:
             return 'API token 无效或已撤销';
         case 413:
-            return '内容超过大小上限';
+            // 服务端 413 带具体上限值（如图片 init 的「图片超过上限（10485760B）」）——
+            // 丢弃会让 Agent 拿不到上限无法自愈（与 409 透传同因，R-31）
+            return msg ? `内容超过大小上限：${msg}` : '内容超过大小上限';
         case 429:
             return '上传过于频繁，请稍后重试';
         default:

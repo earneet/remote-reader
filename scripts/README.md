@@ -28,7 +28,7 @@
 5. `bun install` + `bun --filter remote-reader-web build` + 二次 `install --production` 剥离 devDeps（保留 bun.lock 防依赖漂移；剥离后自动检测 better-sqlite3 与系统 node 的 ABI 匹配，不匹配则换对应 ABI 的 prebuilt）
 6. `openssl rand` 生成 `SESSION_SECRET`（base64 48）与 `INITIAL_INVITE_CODE`（hex 6）
 7. 写 `/etc/remote-reader/env`（权限 640 root:remote-reader）
-8. 写 `/etc/systemd/system/remote-reader.service`（含 17 项安全加固）
+8. 写 `/etc/systemd/system/remote-reader.service`（含 22 项安全加固 + 3 条资源上限）
 9. `systemctl daemon-reload && systemctl enable --now`
 10. 等待 `/api/health` 通过（最多 15s），打印访问 URL + 邀请码
 
@@ -215,7 +215,7 @@ sudo rm -rf /opt/remote-reader /var/lib/remote-reader /etc/remote-reader
 
 ### 安全加固清单
 
-systemd unit 启用的 17 项 hardening：
+systemd unit 启用的 22 项 hardening（另加 MemoryMax/TasksMax/LimitNOFILE 三条资源上限；MemoryDenyWriteExecute 显式关闭——JIT 与 argon2 需要）：
 
 | 加固项 | 作用 |
 |---|---|

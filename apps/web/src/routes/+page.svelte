@@ -12,25 +12,18 @@
     import { lockBodyScroll, unlockBodyScroll } from '$lib/shared/body-scroll';
     import { createOverlayHistory } from '$lib/shared/overlay-history';
     import { submitAction, actionErrorMessage } from '$lib/shared/form-action';
+    import { formatBytes } from '$lib/shared/format';
     import { rowActions } from '$lib/shared/row-menu';
-    import { fetchShareUrl, revokeDocShares } from '$lib/shared/share-api';
+    import { RowActionOrchestrator } from '$lib/shared/row-orchestrator.svelte';
     import { enhance } from '$app/forms';
     import { goto, invalidateAll } from '$app/navigation';
-    let { data } = $props();
+    let { data, form } = $props();
     let currentDir = $derived(data.currentDir);
     let movingId = $state<string | null>(null);
     let moveError = $state<string | null>(null);
-    let editingId = $state<string | null>(null);
-    let taggingId = $state<string | null>(null);
-    let tagInput = $state('');
     let rightPane = $state<HTMLElement | null>(null);
     let recentRef = $state<{ reSync: () => Promise<void> } | null>(null);
     let showCreate = $state(false);
-    let sheet = $state<ActionSheet | null>(null);
-    let actionMenu = $state<ActionMenu | null>(null);
-    let shareDialog = $state<ShareDialog | null>(null);
-    // 菜单上下文（移动 sheet 与桌面下拉共用）：构造条件菜单项（转私有仅 shared 时出）
-    let menuCtx = $state<{ id: string; type: string; shared: boolean } | null>(null);
     let drawerOpen = $state(false);
     let drawerRef = $state<HTMLDialogElement | null>(null);
     let menuBtn = $state<HTMLButtonElement | null>(null);
@@ -136,106 +129,20 @@
         else { moveError = actionErrorMessage(status) + '，请重选目标或取消'; }
     }
 
-    function startRename(id: string) { editingId = id; renameError = null; }
-    function cancelRename() { editingId = null; renameError = null; }
+    // 行操作编排单源（R-06）：重命名/标签/分享/转私有/删除的 confirm→提交→刷新→错误反馈
+    // 全部收敛在 RowActionOrchestrator（与 RecentList 共用本实例）；浮层三件套本页持有一份
+    const ro = new RowActionOrchestrator({
+        isMobile: () => isMobile,
+        refresh: async () => { await invalidateAll(); await recentRef?.reSync(); },
+        onStartMove: startMove
+    });
 
     // P2-10：动作失败给出可见反馈（此前 enhance 只处理 success，409 冲突静默无感）
-    let actionError = $state<string | null>(null);
-    let renameError = $state<string | null>(null);
-    let tagError = $state<string | null>(null);
     let createError = $state<string | null>(null);
-    // 行内表单防重复提交（SvelteKit 2.x enhance 无自动禁用，已核实 forms.js）
-    let busyId = $state<string | null>(null);
 
     function failureMessage(result: { type: string; status?: number; data?: { error?: string } }): string {
         if (result.type === 'failure' && result.data?.error) return String(result.data.error);
         return actionErrorMessage(result.status ?? 0);
-    }
-
-    async function doRename(id: string, name: string): Promise<void> {
-        busyId = id; renameError = null;
-        const status = await submitAction('rename', { id, name });
-        busyId = null;
-        if (status === 200) { editingId = null; await invalidateAll(); }
-        else renameError = actionErrorMessage(status);
-    }
-
-    async function doSetTags(id: string, tags: string): Promise<void> {
-        busyId = id; tagError = null;
-        const status = await submitAction('setTags', { id, tags });
-        busyId = null;
-        if (status === 200) { taggingId = null; tagInput = ''; await invalidateAll(); }
-        else tagError = actionErrorMessage(status);
-    }
-
-    // 菜单项来自 lib/shared/row-menu 单源（评审跟进：与 RecentList 收敛，防两份漂移）
-    // ⋯ 入口路由：移动端底部 sheet，桌面锚定下拉
-    function openRowMenu(anchor: HTMLElement, id: string, type: string, shared: boolean): void {
-        menuCtx = { id, type, shared };
-        if (isMobile) sheet?.show();
-        else actionMenu?.toggle(anchor);
-    }
-
-    function onRowAction(key: string): void {
-        const it = menuCtx;
-        if (!it) return;
-        menuCtx = null;
-        if (key === 'rename') startRename(it.id);
-        else if (key === 'tags') { taggingId = it.id; tagInput = ''; tagError = null; }
-        else if (key === 'move') startMove(it.id);
-        else if (key === 'share') void doShare(it.id);
-        else if (key === 'unshare') void doUnshare(it.id);
-        else if (key === 'delete') void doDelete(it.id, it.type);
-    }
-
-    // 复制分享链接（get-or-create）：成功后刷新（私有→共享图标翻转）再弹浮层
-    async function doShare(id: string): Promise<void> {
-        busyId = id;
-        try {
-            const url = await fetchShareUrl(id);
-            if (!url) throw new Error('share failed');
-            await invalidateAll();
-            await recentRef?.reSync();
-            shareDialog?.show(url);
-        } catch {
-            actionError = '获取分享链接失败，请重试';
-        } finally {
-            busyId = null;
-        }
-    }
-
-    // 转为私有：撤销该文档全部分享链接（404=文档已不在也算完成，幂等）
-    async function doUnshare(id: string): Promise<void> {
-        if (!confirm('转为私有后，该文档的所有分享链接立即失效（已发出的链接将无法再打开），且不可恢复。继续？')) return;
-        busyId = id;
-        try {
-            if (!(await revokeDocShares(id))) throw new Error('unshare failed');
-            actionError = null;
-            await invalidateAll();
-            await recentRef?.reSync();
-        } catch {
-            actionError = '转为私有失败，请重试';
-        } finally {
-            busyId = null;
-        }
-    }
-
-    // 移动端 ⋯ 菜单与桌面行内删除的统一入口：确认后 fetch 直调 form action
-    async function doDelete(id: string, type: string): Promise<void> {
-        const msg = type === 'folder'
-            ? '确认删除该文件夹？将级联删除其全部内容，且不可恢复。'
-            : '确认删除该文件？此操作不可恢复。';
-        if (!confirm(msg)) return;
-        busyId = id;
-        const status = await submitAction('delete', { id });
-        busyId = null;
-        if (status === 200 || status === 404) {
-            actionError = null;
-            await invalidateAll();
-            await recentRef?.reSync();
-        } else {
-            actionError = actionErrorMessage(status);
-        }
     }
 </script>
 
@@ -304,7 +211,7 @@
                         aria-pressed={view === 'viewed'} onclick={() => switchView('/?view=viewed')}>最近浏览</button>
                 </div>
             </div>
-            {#if createError && view === 'dir'}<p class="error create-error">{createError}</p>{/if}
+            {#if (createError ?? form?.error) && view === 'dir'}<p class="error create-error">{createError ?? form?.error}</p>{/if}
             {#if showCreate && view === 'dir'}
                 <form class="create-folder mobile-only" method="POST"
                     action={currentDir ? `?dir=${encodeURIComponent(currentDir)}&/createFolder` : '?/createFolder'}
@@ -318,34 +225,30 @@
                 </form>
             {/if}
         </div>
-        {#if actionError}
+        {#if ro.actionError}
             <div class="action-error-banner" role="alert">
-                {actionError}
-                <button type="button" class="link" aria-label="关闭提示" onclick={() => (actionError = null)}>×</button>
+                {ro.actionError}
+                <button type="button" class="link" aria-label="关闭提示" onclick={() => (ro.actionError = null)}>×</button>
             </div>
         {/if}
         {#if view === 'recent'}
             <RecentList
                 bind:this={recentRef}
-                isMobile={isMobile}
+                orchestrator={ro}
                 initialRows={data.recent}
                 sort="updated"
                 folderById={folderById}
-                scrollRoot={rightPane}
                 movingId={movingId}
-                onStartMove={startMove}
                 onCancelMove={() => (movingId = null)}
             />
         {:else if view === 'viewed'}
             <RecentList
                 bind:this={recentRef}
-                isMobile={isMobile}
+                orchestrator={ro}
                 initialRows={data.viewed}
                 sort="viewed"
                 folderById={folderById}
-                scrollRoot={rightPane}
                 movingId={movingId}
-                onStartMove={startMove}
                 onCancelMove={() => (movingId = null)}
             />
         {:else}
@@ -353,15 +256,15 @@
                 <p class="muted empty">空空如也。让 Agent 通过 MCP 上传文档吧。</p>
             {:else}
                 <ul class="items">
-                    {#each data.children as item (item.id)}
-                        <li class="item" class:editing={editingId === item.id}>
-                            {#if editingId === item.id}
+                    {#each data.children.filter((item) => !ro.isRemoved(item.id)) as item (item.id)}
+                        <li class="item" class:editing={ro.editingId === item.id}>
+                            {#if ro.editingId === item.id}
                                 <InlineNameForm
-                                    initialName={item.name}
-                                    busy={busyId === item.id}
-                                    error={renameError}
-                                    onSave={(name) => void doRename(item.id, name)}
-                                    onCancel={cancelRename}
+                                    initialName={ro.renameValue}
+                                    busy={ro.busyId === item.id}
+                                    error={ro.renameError}
+                                    onSave={(name) => void ro.doRename(item.id, name)}
+                                    onCancel={() => ro.cancelRename()}
                                 />
                             {:else}
                                 <span class="name">
@@ -372,7 +275,7 @@
                                         {#if item.storageTier === 'cold'}<span class="chip-static cold-chip">☁️ 已归档</span>{/if}
                                     {/if}
                                     {#if item.type !== 'folder' && item.sizeBytes != null}
-                                        <span class="size">{item.sizeBytes} B</span>
+                                        <span class="size">{formatBytes(item.sizeBytes)}</span>
                                     {/if}
                                 </span>
                                 {#if item.type === 'file'}
@@ -380,20 +283,23 @@
                                         {#each (data.tagsByDoc.get(item.id) ?? []) as tg (tg.id)}
                                             <span class="chip-static">{tg.name}</span>
                                         {/each}
-                                        {#if taggingId === item.id}
+                                        {#if ro.taggingId === item.id}
                                             <InlineTagForm
-                                                initialValue={tagInput || (data.tagsByDoc.get(item.id) ?? []).map(t => t.name).join(', ')}
-                                                busy={busyId === item.id}
-                                                error={tagError}
-                                                onSave={(tags) => void doSetTags(item.id, tags)}
-                                                onCancel={() => (taggingId = null)}
+                                                initialValue={ro.tagInput}
+                                                busy={ro.busyId === item.id}
+                                                error={ro.tagError}
+                                                onSave={(tags) => void ro.doSetTags(item.id, tags)}
+                                                onCancel={() => (ro.taggingId = null)}
                                             />
                                         {/if}
                                     </span>
                                 {/if}
                                 <RowActions
                                     moving={movingId === item.id}
-                                    onMore={(btn) => openRowMenu(btn, item.id, item.type, item.shared)}
+                                    onMore={(btn) => ro.openRowMenu(btn, {
+                                        id: item.id, name: item.name, type: item.type, shared: item.shared,
+                                        tags: data.tagsByDoc.get(item.id) ?? []
+                                    })}
                                     onCancelMove={() => (movingId = null)}
                                 />
                             {/if}
@@ -406,18 +312,18 @@
 </div>
 
 <ActionSheet
-    bind:this={sheet}
+    bind:this={ro.sheet}
     label="文档操作"
-    actions={menuCtx ? rowActions(menuCtx) : []}
-    onSelect={onRowAction}
+    actions={ro.menuCtx ? rowActions(ro.menuCtx) : []}
+    onSelect={(key) => ro.onRowAction(key)}
 />
 <ActionMenu
-    bind:this={actionMenu}
+    bind:this={ro.actionMenu}
     label="文档操作"
-    actions={menuCtx ? rowActions(menuCtx) : []}
-    onSelect={onRowAction}
+    actions={ro.menuCtx ? rowActions(ro.menuCtx) : []}
+    onSelect={(key) => ro.onRowAction(key)}
 />
-<ShareDialog bind:this={shareDialog} />
+<ShareDialog bind:this={ro.shareDialog} />
 
 <dialog class="drawer" bind:this={drawerRef} onclose={onDrawerClose} aria-label="目录导航"
     onclick={(e) => { if (e.target === drawerRef) void closeDrawer(); }}>
@@ -536,6 +442,4 @@
     .drawer[open] { animation: drawer-in 180ms ease-out; }
     @keyframes drawer-in { from { transform: translateX(-100%); } }
     @media (min-width: 769px) { .drawer { display: none !important; } }
-
-    .doc-tags { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.25rem; }
 </style>

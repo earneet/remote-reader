@@ -2,7 +2,7 @@ import { error, fail, redirect } from '@sveltejs/kit';
 import type { PageServerLoad, Actions } from './$types';
 import {
     listInvites, createInviteCode, revokeInvite,
-    INVITE_EXPIRY_DAYS, type InviteExpiryDays
+    INVITE_EXPIRY_DAYS, MAX_INVITE_NOTE, type InviteExpiryDays
 } from '$server/invites';
 
 // 邀请码管理为 admin 专属（首个注册用户即 admin）；member 一律 403
@@ -24,6 +24,7 @@ export const actions: Actions = {
         const note = String(form.get('note') ?? '').trim();
         const days = Number(form.get('days'));
         if (!note) return fail(400, { error: '备注必填' });
+        if (note.length > MAX_INVITE_NOTE) return fail(400, { error: `备注过长（≤${MAX_INVITE_NOTE} 字符）` });
         if (!INVITE_EXPIRY_DAYS.includes(days as InviteExpiryDays)) return fail(400, { error: '有效期不合法' });
         const { plaintext } = await createInviteCode(admin.id, note, days as InviteExpiryDays);
         return { plaintext };

@@ -1,12 +1,14 @@
 import { test, expect, beforeEach, afterEach } from 'vitest';
-import { rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { db, schema, sqlite } from '../src/lib/server/db';
 import { generateId } from '../src/lib/server/auth';
 import { indexDoc, unindexDocs, backfillFts } from '../src/lib/server/fts';
 
 import { resetDb } from './helpers';
 let ownerId: string;
-const TMP = `./data/test-fts-${Date.now().toString(36)}`;
+const TMP = mkdtempSync(path.join(os.tmpdir(), 'rr-fts-'));
 
 beforeEach(() => {
     process.env.DATA_DIR = TMP;

@@ -318,3 +318,10 @@ test('uploadDocument body.warnings 非字符串数组 → 不透传（防脏数�
 test('图片方法超时 = IMAGE_TIMEOUT_MS 300s（spec §6.2 慢链路常量锁定）', async () => {
     expect(IMAGE_TIMEOUT_MS).toBe(300_000);
 });
+
+test('413 透传服务端 message（Agent 需具体上限值自愈，R-31）', async () => {
+    mockFetch(413, { message: '图片超过上限（10485760B）' });
+    await expect(
+        createApiClient({ baseUrl: 'http://x', token: 't' }).uploadDocument({ name: 'n', content: 'c' })
+    ).rejects.toMatchObject({ status: 413, message: expect.stringContaining('10485760') });
+});

@@ -129,6 +129,19 @@ test('标签交集为空（某标签无文档）返回 []', async () => {
     expect(r).toEqual([]);
 });
 
+test('大文档摘要 SQL 层截断（R-24：不得携带整篇正文）', async () => {
+    // 夹具刻意放大：highlight() 返回整列原文，短文下「全文==摘要」恒过拦不住（缺陷成因）
+    const filler = 'ordinary filler sentence for padding. '.repeat(120);
+    const content = `${filler}\n\ntargetkeyword appears here in the middle of the document.\n\n${filler}`;
+    await uploadDocument(ownerId, 'big.md', content, []);
+    const r = searchDocuments(ownerId, 'targetkeyword', []);
+    expect(r.length).toBe(1);
+    // snippet(...) 32 token 窗口：远小于全文（~4600 字符），且含命中标记
+    expect(r[0].snippet.length).toBeLessThan(content.length / 2);
+    expect(r[0].snippet.length).toBeLessThanOrEqual(400);
+    expect(r[0].snippet).toContain('<mark>targetkeyword</mark>');
+});
+
 test('getDocPath 返回祖先链（根→父，不含文档本身）', async () => {
     const r = await uploadDocument(ownerId, 'a.md', 'x', ['rep', '2026']);
     const path = getDocPath(ownerId, r.id);

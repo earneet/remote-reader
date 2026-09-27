@@ -1,5 +1,7 @@
 import { test, expect, beforeEach, afterEach } from 'vitest';
-import { rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { db, schema } from '../src/lib/server/db';
 import { generateId } from '../src/lib/server/auth';
 import { uploadDocument } from '../src/lib/server/documents';
@@ -12,7 +14,7 @@ import { resetDb } from './helpers';
 const DAY = 86_400_000;
 let ownerId: string;
 let store: MemoryObjectStore;
-const TMP_DOCS = `./data/test-view-${Date.now().toString(36)}`;
+const TMP_DOCS = mkdtempSync(path.join(os.tmpdir(), 'rr-view-'));
 
 const shareLoad = (await import('../src/routes/s/[token]/+page.server')).load;
 
@@ -50,10 +52,12 @@ async function makeColdWithShare(content: string): Promise<string> {
     return token;
 }
 
-test('冷文档 + 有效 token → 正常渲染（内容来自远端）且触发异步回热', async () => {
+test('冷文档 + 有效 token → load 快速返回流式 promise（R-19 骨架屏契约），内容与回热正常', async () => {
     const token = await makeColdWithShare('# Cold View');
-    const result = (await callShareLoad(token)) as { title: string; html: string };
-    expect(result.html).toContain('<h1 id="cold-view" tabindex="-1">Cold View</h1>');
+    const result = (await callShareLoad(token)) as { title: string; html: string | Promise<string> };
+    // 冷文档：html 是未决 promise（页面先出骨架屏，SvelteKit 流式渲染）；内容 await 后一致
+    expect(result.html).toBeInstanceOf(Promise);
+    expect(await result.html).toContain('<h1 id="cold-view" tabindex="-1">Cold View</h1>');
     // 回热 fire-and-forget：轮询等待翻转（固定 sleep 在 CI 负载下会假红，回热链含 3 次真实磁盘 I/O）
     for (let i = 0; i < 100 && getDocRow().storageTier !== 'hot'; i++) {
         await new Promise((r) => setTimeout(r, 20));
@@ -62,16 +66,26 @@ test('冷文档 + 有效 token → 正常渲染（内容来自远端）且触发
     expect(store.data.size).toBe(0);
 });
 
-test('冷文档 + 远端不可达 → 503（区别于 404）', async () => {
+test('冷文档 + 远端不可达 → 流式 promise 以 503 拒绝（R-19 后状态码走 promise 语义）', async () => {
     const token = await makeColdWithShare('# x');
     store.failGet = true;
-    await expect(callShareLoad(token)).rejects.toMatchObject({ status: 503 });
+    const result = (await callShareLoad(token)) as { html: Promise<string> };
+    await expect(result.html).rejects.toMatchObject({ status: 503 });
 });
 
-test('冷文档 + 远端对象缺失 → 404 内容缺失', async () => {
+test('冷文档 + 远端对象缺失 → 流式 promise 以 404 拒绝', async () => {
     const token = await makeColdWithShare('# x');
     store.data.clear(); // 对象被误删
-    await expect(callShareLoad(token)).rejects.toMatchObject({ status: 404 });
+    const result = (await callShareLoad(token)) as { html: Promise<string> };
+    await expect(result.html).rejects.toMatchObject({ status: 404 });
+});
+
+test('热文档 → html 仍为同步字符串（R-19 流式仅冷文档启用，热路径零开销契约）', async () => {
+    const r = await uploadDocument(ownerId, 'hot-sync.md', '# HotSync', []);
+    const { token } = await createShareLink(r.id);
+    const result = (await callShareLoad(token)) as { html: string | Promise<string> };
+    expect(typeof result.html).toBe('string');
+    expect(result.html).toContain('<h1 id="hotsync" tabindex="-1">HotSync</h1>');
 });
 
 test('热文档访问 → last_viewed_at 刷新', async () => {
@@ -85,8 +99,8 @@ test('热文档访问 → last_viewed_at 刷新', async () => {
 
 test('冷文档 storagePath 保留不再是 404 条件（守卫放宽）', async () => {
     const token = await makeColdWithShare('# guard');
-    const result = (await callShareLoad(token)) as { html: string };
-    expect(result.html).toContain('<h1 id="guard" tabindex="-1">guard</h1>');
+    const result = (await callShareLoad(token)) as { html: string | Promise<string> };
+    expect(await result.html).toContain('<h1 id="guard" tabindex="-1">guard</h1>');
 });
 
 // ── 自愈兜底（spec §7，双 Agent 交叉审查发现：陈旧行判定与实际状态竞态防假 404）──

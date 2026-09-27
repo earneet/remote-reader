@@ -62,7 +62,10 @@ export const actions: Actions = {
             return fail(400, { error: (e as Error).message });
         }
         const r = createFolder(locals.user.id, parentId, name);
-        if (!r.ok) return fail(409, { error: r.reason });
+        if (!r.ok) {
+            if (r.code === 'not_found') return fail(404, { error: r.reason });
+            return fail(409, { error: r.reason });
+        }
         return { ok: true };
     },
     rename: async ({ request, locals }) => {
@@ -80,6 +83,9 @@ export const actions: Actions = {
         const r = renameNode(locals.user.id, id, name);
         if (!r.ok) {
             if (r.code === 'conflict') return fail(409, { error: r.reason ?? '重名' });
+            // invalid（如磁盘 rename 失败）是客户端不可修复的服务端问题，400 引导重试而非
+            // 404「文档不存在」误导排障方向（与 move 的 invalid → 400 对齐，R-10）
+            if (r.code === 'invalid') return fail(400, { error: r.reason ?? '重命名失败' });
             return fail(404, { error: r.reason ?? '文档不存在' });
         }
         return { ok: true };

@@ -6,10 +6,27 @@
     import type { GestureOpts } from '$lib/shared/overlay-gestures';
     import { trapTabKey } from '$lib/shared/focus-trap';
     import { browserFullscreen, type BrowserFullscreenCtl } from '$lib/shared/browser-fullscreen';
+    import { createOverlayHistory } from '$lib/shared/overlay-history';
 
     let { container, html }: { container: HTMLDivElement | undefined; html: string } = $props();
 
-    let fullscreen = $state<{ svg: string; zoom: number; x: number; y: number } | null>(null);
+    let fullscreen = $state<{ svg: string; raw: string; zoom: number; x: number; y: number } | null>(null);
+    // 大图浮层参与返回键编排（R-09）：开 = 推浅路由条目，系统返回键 = 关浮层而非退出页面
+    const fsHistory = createOverlayHistory();
+
+    function openFullscreen(svg: string, raw: string): void {
+        fullscreen = { svg, raw, zoom: 1, x: 0, y: 0 };
+        fsHistory.setOnPop(() => {
+            fullscreen = null; // 直改状态（非返回键路径的 consume 由 closeFullscreen 负责）
+        });
+        fsHistory.push();
+    }
+
+    function closeFullscreen(): void {
+        if (!fullscreen) return;
+        fullscreen = null;
+        void fsHistory.consume();
+    }
     // 挂载时由 use:browserFullscreen 装入实现（组件侧零全屏状态）
     let fsCtl: BrowserFullscreenCtl = { toggle: () => {}, exit: () => {} };
     let themeObserver: MutationObserver | null = null;
@@ -65,8 +82,17 @@
         wrap.dataset.rrRaw = encodeURIComponent(raw);
         wrap.title = '点击查看大图';
         wrap.innerHTML = svgMarkup;
+        // 键盘可达（R-21）：Enter/Space 等价点击
+        wrap.tabIndex = 0;
+        wrap.role = 'button';
         wrap.addEventListener('click', () => {
-            fullscreen = { svg: wrap.innerHTML, zoom: 1, x: 0, y: 0 };
+            openFullscreen(wrap.innerHTML, decodeURIComponent(wrap.dataset.rrRaw ?? ''));
+        });
+        wrap.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                openFullscreen(wrap.innerHTML, decodeURIComponent(wrap.dataset.rrRaw ?? ''));
+            }
         });
         return wrap;
     }
@@ -75,18 +101,27 @@
         const root = container;
         if (!root) return;
         const inlines = Array.from(root.querySelectorAll<HTMLElement>('.rr-mermaid-inline'));
-        if (inlines.length === 0) return;
+        if (inlines.length === 0 && !fullscreen) return;
         const mermaid = await loadMermaid();
+        const renderRaw = async (raw: string): Promise<string | null> => {
+            try {
+                const id = 'mmd-' + Math.random().toString(36).slice(2, 9);
+                return (await mermaid.render(id, raw)).svg;
+            } catch (e) {
+                console.warn('[mermaid] rerender failed', e);
+                return null;
+            }
+        };
         for (const el of inlines) {
             const raw = decodeURIComponent(el.dataset.rrRaw ?? '');
             if (!raw) continue;
-            try {
-                const id = 'mmd-' + Math.random().toString(36).slice(2, 9);
-                const { svg } = await mermaid.render(id, raw);
-                el.innerHTML = svg;
-            } catch (e) {
-                console.warn('[mermaid] rerender failed', e);
-            }
+            const svg = await renderRaw(raw);
+            if (svg !== null) el.innerHTML = svg;
+        }
+        // 打开中的大图浮层同步刷新（R-36：mermaid 主题色是 SVG 内联字面量，非 CSS 变量）
+        if (fullscreen?.raw) {
+            const svg = await renderRaw(fullscreen.raw);
+            if (svg !== null && fullscreen) fullscreen = { ...fullscreen, svg };
         }
     }
 
@@ -103,7 +138,7 @@
     }
 
     function onKey(e: KeyboardEvent): void {
-        if (e.key === 'Escape' && fullscreen) fullscreen = null;
+        if (e.key === 'Escape' && fullscreen) closeFullscreen();
     }
 
     // 手势快照（overlay-gestures 上报增量/累计比，消费方组合绝对值）：
@@ -160,11 +195,11 @@
         use:overlayOnMount
         use:browserFullscreen={fsCtl}
         onclick={(e) => {
-            if (e.target === e.currentTarget) fullscreen = null;
+            if (e.target === e.currentTarget) closeFullscreen();
         }}
         onkeydown={(e) => {
             // Enter 仅在浮层自身聚焦时作为快捷关闭——不判 target 会吞掉按钮的键盘激活（P2-12）
-            if ((e.key === 'Escape' || e.key === 'Enter') && e.target === e.currentTarget) fullscreen = null;
+            if ((e.key === 'Escape' || e.key === 'Enter') && e.target === e.currentTarget) closeFullscreen();
             trapTabKey(e, e.currentTarget);
         }}
     >
@@ -180,7 +215,7 @@
                         type="button"
                         class="rr-mermaid-btn"
                         onclick={() => {
-                            fullscreen = null;
+                            closeFullscreen();
                         }}
                         title="关闭"
                     >✕</button>
@@ -203,6 +238,11 @@
         text-align: center;
         margin: 1rem 0;
         cursor: zoom-in;
+    }
+    :global(.rr-mermaid-inline:focus-visible) {
+        outline: 2px solid var(--rr-accent);
+        outline-offset: 4px;
+        border-radius: 8px;
     }
     :global(.rr-mermaid-inline svg) {
         max-width: 100%;

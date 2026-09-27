@@ -88,3 +88,20 @@ test('isInviteCodeValid 预检不核销（P2-5）', async () => {
     expect(isInviteCodeValid(plaintext)).toBe(true);
     expect(db.select().from(schema.inviteCodes).all()[0].usedCount).toBe(0);
 });
+
+
+test('create action：note 超长 → 400（R-27，与 MAX_TOKEN_NAME 卫生模式对齐）', async () => {
+    const mod = await import('../src/routes/settings/invites/+page.server');
+    const admin = generateId();
+    db.insert(schema.users).values(
+        { id: admin, email: `adm-${Date.now()}@x.com`, passwordHash: 'x', role: 'admin', createdAt: Date.now() }
+    ).run();
+    const fd = new FormData();
+    fd.append('note', 'x'.repeat(201));
+    fd.append('days', '7');
+    const r = await mod.actions.create({
+        locals: { user: { id: admin, role: 'admin' } },
+        request: new Request('http://localhost/x', { method: 'POST', body: fd })
+    } as unknown as Parameters<typeof mod.actions.create>[0]);
+    expect((r as { status?: number })?.status).toBe(400);
+});

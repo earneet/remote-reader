@@ -1,5 +1,7 @@
 import { test, expect, beforeEach, afterEach } from 'vitest';
-import { rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '../src/lib/server/db';
 import { generateId } from '../src/lib/server/auth';
@@ -10,7 +12,7 @@ import { revokeAllShares } from '../src/lib/server/shares';
 import { resetDb } from './helpers';
 const { GET } = await import('../src/routes/api/recent/+server');
 
-const TMP = `./data/test-recent-${Date.now().toString(36)}`;
+const TMP = mkdtempSync(path.join(os.tmpdir(), 'rr-recent-'));
 let ownerId: string;
 
 beforeEach(() => {

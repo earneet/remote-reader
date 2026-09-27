@@ -116,7 +116,14 @@ describe('resolveImages——代理 URL（local 后端）', () => {
 
     it('危险字符（P1-1，spec §13）：#/%/& 全编码进 URL，src 值无裸 #/&（引用侧 %23/%25 编码经 decode 对齐行名）', async () => {
         mkUser('u1');
-        await mkReadyImage('u1', 'shot#a.png', pngBytes(1));
+        // R-41 后 `#` 名在 initImage 注册侧被拒——渲染侧对存量脏行（旧部署已落库）仍须全编码。
+        // shot#a.png 直插行模拟存量；% / & 名仍属合法域走正路（新策略安全边界回归）
+        const legacy = pngBytes(1);
+        const legacyKey = `u1/blobs/${sha256(legacy).slice(0, 2)}/${sha256(legacy)}`;
+        fs.mkdirSync(path.join(DIR, ...legacyKey.split('/').slice(0, -1)), { recursive: true });
+        fs.writeFileSync(path.join(DIR, ...legacyKey.split('/')), legacy);
+        sqlite.exec(`INSERT INTO images (id, owner_id, name, content_hash, content_md5, mime_type, size_bytes, status, storage_backend, storage_key, created_at, ready_at)
+            VALUES ('img-legacy-hash', 'u1', 'shot#a.png', '${sha256(legacy)}', '${md5(legacy)}', 'image/png', ${legacy.length}, 'ready', 'local', '${legacyKey}', 0, 0)`);
         await mkReadyImage('u1', 'a%b.png', pngBytes(2));
         await mkReadyImage('u1', 'a&b.png', pngBytes(3));
         mkDoc('d1', 'u1');

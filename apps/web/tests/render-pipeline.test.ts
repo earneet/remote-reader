@@ -1,5 +1,7 @@
 import { test, expect, beforeEach, afterEach, afterAll } from 'vitest';
-import { rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { createHash } from 'node:crypto';
 import { db, schema } from '../src/lib/server/db';
 import { generateId } from '../src/lib/server/auth';
@@ -14,7 +16,7 @@ import { resetDb } from './helpers';
 const shareLoad = (await import('../src/routes/s/[token]/+page.server')).load;
 const ownerLoad = (await import('../src/routes/d/[id]/+page.server')).load;
 
-const TMP = `./data/test-renderpipe-${Date.now().toString(36)}`;
+const TMP = mkdtempSync(path.join(os.tmpdir(), 'rr-renderpipe-'));
 let ownerId: string;
 
 beforeEach(() => {

@@ -4,33 +4,63 @@
     import ImageLightbox from '$components/ImageLightbox.svelte';
     let { html }: { html: string } = $props();
     let container: HTMLDivElement | undefined = $state(undefined);
+    // 表格全屏浮层根（R-40）：overlay 渲染在容器子树外，图片行为须同样挂到浮层子树
+    let tableFs: TableFullscreen | null = $state(null);
 
     $effect(() => {
         if (container && html) enhanceKatex(container);
     });
 
-    // 正文图片点击 → 图集 lightbox（spec §10.2）：事件委托收集全部 <img>（不含 .rr-img-missing
-    // 裂图占位——它是 span 天然不命中 img 选择器）
+    // 正文图片点击/键盘 → 图集 lightbox（spec §10.2）：事件委托收集全部 <img>（不含
+    // .rr-img-missing 裂图占位——它是 span 天然不命中 img 选择器）。键盘可达（R-21）：
+    // 挂载后图片可聚焦，Enter/Space 等价点击
     let lightbox = $state<{ images: Array<{ src: string; alt: string }>; start: number } | null>(null);
-    $effect(() => {
-        const root = container;
-        if (!root) return;
-        const onClick = (e: Event): void => {
-            const img = e.target;
-            if (!(img instanceof HTMLImageElement)) return;
-            const all = Array.from(root.querySelectorAll<HTMLImageElement>('.markdown-body img, img'));
+    function attachImageInteractions(root: HTMLElement): () => void {
+        const openLightboxFrom = (img: HTMLImageElement): void => {
+            const all = Array.from(root.querySelectorAll<HTMLImageElement>('img'));
             const list = all.map((el) => ({ src: el.getAttribute('src') ?? '', alt: el.alt }));
             const i = all.indexOf(img);
             if (i >= 0) lightbox = { images: list, start: i };
         };
+        const onClick = (e: Event): void => {
+            let img = e.target instanceof HTMLImageElement ? e.target : null;
+            if (!img && e instanceof MouseEvent) {
+                // 表格全屏 stage 的 pointer capture 会把 click 目标劫持到 capture 元素——
+                // 按坐标 hit-test 找回真实图片（容器路径 target 已是 img，不受影响）
+                const el = document.elementFromPoint(e.clientX, e.clientY);
+                if (el instanceof HTMLImageElement) img = el;
+            }
+            if (img) openLightboxFrom(img as HTMLImageElement);
+        };
+        const onKeydown = (e: KeyboardEvent): void => {
+            if (!(e.target instanceof HTMLImageElement)) return;
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                openLightboxFrom(e.target);
+            }
+        };
+        const makeFocusable = (): void => {
+            root.querySelectorAll('img').forEach((el) => {
+                if (!el.hasAttribute('tabindex')) el.tabIndex = 0;
+            });
+        };
+        const onClickCaptureImg = (e: Event): void => {
+            // 点击后补聚焦（click 也走键盘链路时焦点已在；鼠标路径补上，键盘随后可用）
+            if (e.target instanceof HTMLImageElement) e.target.tabIndex = 0;
+        };
+        makeFocusable();
         root.addEventListener('click', onClick);
-        return () => root.removeEventListener('click', onClick);
-    });
+        root.addEventListener('click', onClickCaptureImg);
+        root.addEventListener('keydown', onKeydown);
+        return () => {
+            root.removeEventListener('click', onClick);
+            root.removeEventListener('click', onClickCaptureImg);
+            root.removeEventListener('keydown', onKeydown);
+        };
+    }
 
     // 直连图客户端兜底（spec §7.5）：CDN 失败/签名过期的运行时错误 → 统一 rr-img-missing 占位（带原因 title）
-    $effect(() => {
-        const root = container;
-        if (!root) return;
+    function attachImageErrorFallback(root: HTMLElement): () => void {
         const onError = (e: Event): void => {
             const img = e.target as HTMLElement | null;
             if (!(img instanceof HTMLImageElement) || img.dataset.rrImgFallback === '1') return;
@@ -43,6 +73,29 @@
         };
         root.addEventListener('error', onError, true); // error 不冒泡——capture 必需
         return () => root.removeEventListener('error', onError, true);
+    }
+
+    $effect(() => {
+        const root = container;
+        const _ = html; // R-21 回归修复：{@html} 全量替换子树后新 img 无 tabindex——依赖 html 重挂
+        if (!root) return;
+        return attachImageInteractions(root);
+    });
+    $effect(() => {
+        const root = container;
+        if (!root) return;
+        return attachImageErrorFallback(root);
+    });
+    // 表格全屏浮层打开时把同款图片行为挂到浮层子树（R-40：浮层内图片可点开 lightbox、裂图有兜底）
+    $effect(() => {
+        const overlayRoot = tableFs?.getOverlayEl();
+        if (!overlayRoot) return;
+        return attachImageInteractions(overlayRoot);
+    });
+    $effect(() => {
+        const overlayRoot = tableFs?.getOverlayEl();
+        if (!overlayRoot) return;
+        return attachImageErrorFallback(overlayRoot);
     });
 
     async function enhanceKatex(root: HTMLElement): Promise<void> {
@@ -71,7 +124,7 @@
     {@html html}
 </div>
 <MermaidViewer {container} {html} />
-<TableFullscreen {container} {html} />
+<TableFullscreen bind:this={tableFs} {container} {html} />
 {#if lightbox}
     <ImageLightbox images={lightbox.images} start={lightbox.start} onClose={() => (lightbox = null)} />
 {/if}
@@ -217,6 +270,10 @@
         max-width: 100%;
         border-radius: 6px;
         cursor: zoom-in;
+    }
+    .markdown-body :global(img:focus-visible) {
+        outline: 2px solid var(--rr-accent);
+        outline-offset: 2px;
     }
     .markdown-body :global(.rr-img-missing) {
         display: inline-block;

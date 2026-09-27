@@ -18,7 +18,7 @@
 <div class="search-page">
     <h1>查找文档</h1>
     <form method="GET" action="/search" class="search-form">
-        <input name="q" value={data.q} placeholder="搜索文件名或正文…" autofocus>
+        <input name="q" value={data.q} placeholder="搜索文件名或正文…" aria-label="搜索关键词" autofocus>
         {#each data.selectedTags as t}
             <input type="hidden" name="tag" value={t}>
         {/each}

@@ -53,25 +53,43 @@ sequenceDiagram
 
 ## 5. 功能清单
 
-### ✅ 当前已实现（子计划 1 + 2 + 3 全部完成）
+### ✅ 当前已实现
+
+**核心链路**
 
 - **上传 API**：`POST /api/v1/documents`，API token 认证，content_hash 幂等，自动生成查看链接。
-- **免登录查看页** `/s/<token>`：服务端渲染 Markdown（GFM 表格、Shiki 代码高亮 ~38 语言（未覆盖语言 text 保底降级）、链接化），默认不渲染原始 HTML（XSS 防护）。
-- **Markdown 增强**：Mermaid 流程图、KaTeX 数学公式（客户端按需懒加载，纯文本零下载）。
-- **注册 / 登录**：邀请码注册（首用户自动管理员），argon2id 密码哈希，登录限流。
-- **安全会话**：HMAC-SHA256 + 常量时间比较 + 过期校验；生产缺密钥启动期 fail-fast。
-- **路径安全**：上传的 `path` 与 `name` 都经 `parsePath` 过滤，防目录穿越。
-- **多用户隔离**：文档按 owner 存在独立目录树；SQLite 外键约束保数据完整。
-- **文件管理器**：双栏（目录树 + 列表），浏览 / 新建文件夹 / 移动（含环路检测）/ 重命名 / 删除（级联 + 磁盘 + share 清理）；owner 查看页 `/d/<id>`。
-- **API token 管理 UI**：创建 / 撤销，明文一次性 reveal。
-- **分享链接管理 UI**：查看 / 撤销（撤销后 `/s/<token>` 立即 404）。
-- **本地 MCP 桥**（`apps/mcp-bridge`）：stdio MCP server，暴露 `upload_document` 工具，本地持有 token 转发到 Web API；配置 = 文件默认 + env 覆盖。
-- **Docker 部署**：多阶段镜像、prod-only node_modules、非 root 运行、HEALTHCHECK、Docker Compose 一键。
+- **免登录查看页** `/s/<token>`：服务端渲染 Markdown（GFM 表格、Shiki 代码高亮 39 种语言（未覆盖语言 text 保底降级）、链接化、**GitHub 风格标题锚点**——文档目录链接与页内跳转可用），默认不渲染原始 HTML（XSS 防护）。
+- **Markdown 增强**：Mermaid 流程图（点击放大、随主题重渲）、KaTeX 数学公式（按需懒加载）、宽表全屏查看、**图片 Lightbox 图集**（缩放 / 平移 / 双击 / 切图 / 全屏）。
+- **本地 MCP 桥**（`apps/mcp-bridge`）：stdio MCP server，暴露 `upload_document` 工具，本地持有 token 转发到 Web API；已发布 npm 包 `remote-reader-bridge`（`npx -y remote-reader-bridge` 零克隆直跑）；配置 = 文件默认 + env 覆盖。
 
-### 📋 规划中（Phase 3，低优先）
+**账号与多用户**
+
+- **注册 / 登录**：邀请码注册（首用户自动管理员），argon2id 密码哈希，双桶登录限流。
+- **邀请码管理**（admin，`/settings/invites`）：生成（1/7/30 天有效期）/ 软撤销 / 核销计数。
+- **Agent 自助接入**：登录页内置 Agent 指引块（SSR 可抓取）+ 注册 / 登录 / 建 token JSON API——发给 Agent 一句话即可自助完成接入。
+- **安全会话**：HMAC-SHA256 + 常量时间比较 + 过期校验；生产缺密钥启动期 fail-fast。
+- **多用户隔离**：文档按 owner 存在独立目录树；SQLite 外键约束保数据完整。
+
+**文件管理器**
+
+- 双栏（目录树 + 列表），浏览 / 新建文件夹 / 移动（含环路检测）/ 重命名 / 删除（级联 + 磁盘 + share 清理）；折叠记忆、当前路径自动展开定位。
+- **三个视图**：目录内容 ⇄ 最近文档（全局更新序）⇄ 最近浏览（本人浏览序），无限滚动。
+- **搜索与标签**：FTS5 全文搜索（`/search`，摘要带命中标记）+ 文件名 / 标签过滤；文档标签（`/settings/tags` 集中管理、改名级联）。
+- **分享状态可视化**：行首私有 / 共享图标、一键复制分享链接 / 转私有；分享链接管理 UI（`/settings/shares`，撤销后 `/s/<token>` 立即 404）。
+- **移动端**（≤768px）：内容全屏 + 侧滑抽屉目录树 + 面包屑 + action sheet 行操作。
+- **主题**：浅色 / 深色 / 跟随系统三档，全站单源 CSS 变量。
+- **API token 管理 UI**：创建 / 撤销，明文一次性 reveal。
+
+**存储与部署**
+
+- **路径安全**：上传的 `path` 与 `name` 都经 `parsePath` 过滤，防目录穿越。
+- **图片支持**：`content` 里的本地图片引用自动上传并改写（png/jpeg/gif/webp，SVG 拒收）；sha256 内容寻址全库去重、无引用自动回收；s3 后端 presigned URL CDN 直连，本地后端免登录代理。
+- **冷热分层（可选）**：配置 `OBJECT_STORE_*` 后超期冷文档自动归档 S3 兼容对象存储，同步拉取可看 + 后台回热、标题可搜；默认关闭、行为不变。
+- **部署**：systemd 三脚本（install / update / uninstall，unit 安全加固 + 升级失败自动回滚）+ Docker（多阶段镜像、非 root 运行、HEALTHCHECK、Compose 一键）。
+
+### 📋 规划中（低优先）
 
 - 远程 MCP server（Streamable HTTP，复用 `packages/shared` 工具，免本地桥）
-- 文档标签 + FTS5 全文搜索
 - 指定用户分享（`document_readers` 表）
 
 ## 6. 设计理念（与同类区别）
@@ -88,7 +106,8 @@ sequenceDiagram
 | **Phase 1 · MVP** | Web 核心（上传 API + 免登录查看页 + 认证） | ✅ 子计划 1 完成 |
 | **Phase 1 · MVP** | 本地 MCP 桥（`upload_document` 工具） | ✅ 子计划 2 完成 |
 | **Phase 2** | 文件管理器 + token / 分享管理 UI + md 增强（Mermaid / KaTeX）+ Docker | ✅ 子计划 3 完成 |
-| **Phase 3** | 远程 MCP server、标签、全文搜索、指定分享 | 📋 低优先级 |
+| **Phase 2+** | 标签 + 全文搜索、冷热分层、最近文档 / 浏览视图、主题三档、移动端 FM、邀请码管理、分享可视化、Agent 自助接入、图片支持、标题锚点 | ✅ 已交付（2026-08 ~ 2026-09） |
+| **Phase 3** | 远程 MCP server、指定用户分享 | 📋 低优先级 |
 
 ## 相关文档
 

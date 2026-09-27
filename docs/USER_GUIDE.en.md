@@ -11,7 +11,7 @@ This guide is organized by role: **Deployer / Administrator**, **Agent Operator*
 ## 0. Quick Start (5-minute local trial)
 
 ```bash
-git clone <repo> && cd remote_reader
+git clone <repo> && cd remote-reader
 cp .env.example .env            # At minimum change SESSION_SECRET and INITIAL_INVITE_CODE
 ```
 
@@ -169,7 +169,7 @@ If configuration is missing (neither env nor file), the bridge exits at startup 
 
 - **Path resolution**: relative paths in `![alt](path)` are resolved against the bridge process working directory (Windows drive-letter absolute paths included); remote URLs (`http(s)://`), `data:` URIs, and multi-segment paths containing `/` `\` are **not** treated as local images and are preserved as-is.
 - **Formats**: png / jpeg / gif / webp (magic-number detection; the extension must match the real format — a JPEG named `.png` is rejected). **SVG is not supported** (can carry scripts; security decision) — export as png/webp instead.
-- **Size**: ≤ `MAX_IMAGE_BYTES` per image (default 10MB; double-checked at init preflight and by relay byte measurement); ≤50 images per document recommended (server rate-limit constraint).
+- **Size**: ≤ `MAX_IMAGE_BYTES` per image (default 10MB; double-checked at init preflight and by relay byte measurement); hard cap of 500 images per document (413 beyond that); the relay bucket (60/min) returns 429s that the bridge retries with backoff automatically.
 - **Dedup and reclamation**: images are content-addressed by sha256 — identical bytes are stored once per library (re-uploads reuse directly); an image no longer referenced by any document is reclaimed automatically (after an overwrite drops the reference / the document is deleted). No manual cleanup needed.
 - **Preflight**: all problems (missing files / unsupported formats / oversize) are listed up front in one pass, never mid-upload.
 
@@ -225,6 +225,7 @@ Documents are located by `(owner, path, name)`, and the sha256 of `content` deci
 | 200 | Upload succeeded | Send the `url` to the user |
 | 400 | Invalid request body / JSON parse failure / `name` or `path` contains illegal characters (including `..` traversal) | Fix parameters and retry; do **not** retry as a server fault |
 | 401 | Missing token, or token invalid/revoked | Check `Authorization: Bearer` |
+| 409 | Location conflict: a `path` segment is occupied by a same-named file, or the target position collides with an existing name | Change `path` or resolve the name collision first (message names the exact location) |
 | 413 | Content exceeds `MAX_UPLOAD_BYTES` (default 5MB) / image exceeds `MAX_IMAGE_BYTES` (default 10MB) | Split or trim the document |
 | 429 | Rate limit triggered (document upload default 60/min per token; image relay has an independent same-size bucket; init/confirm light bucket default 120/min) | Retry with backoff |
 
@@ -244,9 +245,15 @@ To browse / delete / organize your own document library: visit the site home →
 
 - Browse the directory tree, create folders, move (with cycle detection), rename, delete (cascade deletes descendants + disk files + share links);
 - Row-start icons distinguish **private / shared** (shared = an active share link exists); the ⋯ menu at row end (desktop dropdown / mobile bottom sheet) hosts all row actions, including **Copy share link** (on a private doc this creates a link and flips it to shared) and **Make private** (revokes every link of that doc at once, irreversible after confirm);
+- **Three views** (right-pane tabs): directory contents ⇄ **Recent documents** (global flat list by update time) ⇄ **Recently viewed** (by your own view time), the latter two with infinite scrolling;
+- **Search**: the top-bar search box → `/search`, filtering by full text (FTS5 with highlighted snippets), filename, and tags;
+- **Tags**: edit tags from the ⋯ menu of any document (file manager or the `/d/<id>` page); Settings → **Tags** for centralized management (renames cascade to all documents);
+- **Theming**: switch light / dark / follow-system from the top bar — applies site-wide instantly and is remembered;
+- On mobile (≤768px) the layout automatically becomes fullscreen content + slide-in drawer tree + breadcrumbs + bottom action sheet;
 - Open the owner view page `/d/<id>` for any document;
 - Settings → **Share links**: view / revoke shares (once revoked, `/s/<token>` returns 404 immediately);
-- Settings → **API Token**: create / revoke.
+- Settings → **API Token**: create / revoke;
+- Settings → **Invite codes** (admin only): generate / revoke registration invites.
 
 ---
 
@@ -278,7 +285,7 @@ To browse / delete / organize your own document library: visit the site home →
 
 | Symptom | Troubleshooting |
 |---|---|
-| Production startup reports `SESSION_SECRET must be set in production` | Set `SESSION_SECRET` (a long random string) |
+| Production startup reports 「SESSION_SECRET 生产环境必填」 (Chinese message) | Set `SESSION_SECRET` (a long random string) |
 | Production startup reports BODY_SIZE_LIMIT must be ≥ max(...) | Raise it to a compliant byte count (e.g. `25165824` with defaults); on systemd deployments `sudo ./scripts/update.sh` migrates it automatically |
 | `better-sqlite3 ... not supported` / `ERR_DLOPEN_FAILED` | You are starting the service with `bun run` — switch to `node apps/web/build/index.js` |
 | `bun run test` reports better-sqlite3 load failure | Don't use `bun test`; tests run under vitest via `bun run test` (through node) |

@@ -4,7 +4,9 @@
 
 # 与 adapter-node files/utils.js parse_as_bytes 及 startup-check.ts parseBodySizeLimitBytes 同语义：
 # 尾字符 K/M/G（大小写不敏感）按 1024 进制，其余按纯数字字节。
-# 空或非法输入按 adapter-node 默认值 512K（524288）返回——与启动校验的兜底一致。
+# 空输入按 adapter-node 默认值 512K（524288）返回。非空非法值（如 20.5M 小数）同回落 512K：
+# 方向安全（只会触发一次有备份的 BODY_SIZE_LIMIT 迁移）——注意与生产端语义不同，
+# startup-check 对非法值是 NaN fail-fast 拒启（而非兜底），最终一致由服务端守门。
 parse_size_bytes() {
     local raw="${1:-}"
     raw="$(printf '%s' "${raw}" | tr -d '[:space:]')"
@@ -20,12 +22,16 @@ parse_size_bytes() {
 }
 
 # BODY_SIZE_LIMIT 启动校验下限，与 apps/web/src/lib/server/startup-check.ts 同公式：
-#   max(MAX_UPLOAD_BYTES × 1.5, ceil(MAX_IMAGE_BYTES × 1.37 × 1.5))
-# 全程整数算术：×1.5 = ×3/2；×1.37×1.5 = ×2055/1000 后向上取整。
+#   max(MAX_UPLOAD_BYTES × 1.5, Math.ceil(MAX_IMAGE_BYTES × 1.37 × 1.5))
+# 全程整数算术：×1.5 = ×3/2 后向上取整；×1.37×1.5 = ×2055/1000 后**再 +1** 取整。
+# +1 的必要性（验收第 2 轮数值扫描实证）：JS 侧是 double 运算，image×1.37×1.5 的浮点积在
+# 精确有理数恰为整数时可上偏（如 i=600：822.0000000000001×1.5 → ceil 1234 > 精确 ceil 1233，
+# 1746 万组合中 18284 对差 1）——bash 精确 ceil 可能比 JS Math.ceil 少 1，env 恰设为 bash 值时
+# 服务端仍拒启。+1 使 bash 恒 ≥ JS（误差上界恰为 1），round_up_mib 的 MiB 富余吸收这 1 字节。
 required_body_size_limit() {
     local upload="$1" image="$2"
-    local a=$(( upload * 3 / 2 ))
-    local b=$(( (image * 2055 + 999) / 1000 ))
+    local a=$(( (upload * 3 + 1) / 2 ))
+    local b=$(( (image * 2055 + 1999) / 1000 ))
     (( a >= b )) && echo "${a}" || echo "${b}"
 }
 
@@ -119,4 +125,45 @@ fix_better_sqlite3_abi() {
     fi
     warn "替换后仍无法加载 better-sqlite3"
     return 1
+}
+
+
+# rsync 排除清单（R-11 单源）：install.sh 与 update.sh 原先逐字两份——新增 workspace 或
+# 改构建产物路径漏改一处即 install 与 update 部署出不同产物（BODY_SIZE_LIMIT 公式当年漂移同险）。
+rsync_source_tree() {
+    rsync -a --delete \
+        --exclude '/data' \
+        --exclude '/node_modules' \
+        --exclude '/apps/web/node_modules' \
+        --exclude '/apps/web/build' \
+        --exclude '/apps/web/.svelte-kit' \
+        --exclude '/packages/shared/node_modules' \
+        --exclude '/apps/mcp-bridge/node_modules' \
+        --exclude '/apps/mcp-bridge/dist' \
+        --exclude '/.git' \
+        --exclude '/.env' \
+        --exclude '/.env.local' \
+        "$1/" "$2/"
+}
+
+# 构建 + 剥离 devDeps + ABI 自修（R-11 单源）：与 rsync 同因的两份 ~20 行重复序列。
+# 调用方保留自己的 log/die 文案；返回值 = 0 全链成功 / 1 任一步失败（调用方 die + 回滚）。
+# ⚠️ 各步骤必须显式 || return 1：本函数被调用方置于 `if !` 条件上下文，bash 对条件上下文中
+# 调用的函数体整体抑制 errexit（bash FAQ E4）——set -e 不再兜底。审查实证：无显式判失败时
+# bun install/构建瞬态失败会带谎 ✓ 日志继续跑，update.sh 场景可至「旧 build 残留 + health 跑
+# 旧代码通过」的静默假升级（rsync 排除项同时保护旧 build 与旧 node_modules 不被 --delete 清除）。
+build_and_prune() {
+    local install_dir="$1" bun_bin="$2" node_bin="$3"
+    export BUN_INSTALL_CACHE_DIR=/tmp/.bun-cache
+    mkdir -p "${BUN_INSTALL_CACHE_DIR}" || return 1
+    (cd "${install_dir}" && "${bun_bin}" install) || { warn "bun install 失败"; return 1; }
+    ok "依赖已安装"
+    (cd "${install_dir}" && "${bun_bin}" --filter remote-reader-web build) || { warn "web 构建失败"; return 1; }
+    ok "构建完成"
+    # 剥离 devDependencies（vite build 已把 workspace 依赖内联到 build/server）；
+    # 保留 bun.lock：删了它二次 install 会重新解析依赖树，结果随 registry 漂移且慢
+    (cd "${install_dir}" && rm -rf node_modules apps/web/node_modules packages/shared/node_modules apps/mcp-bridge/node_modules) || { warn "devDeps 剥离失败"; return 1; }
+    (cd "${install_dir}" && "${bun_bin}" install --production) || { warn "生产依赖安装失败"; return 1; }
+    ok "生产依赖就绪"
+    fix_better_sqlite3_abi "${install_dir}" "${node_bin}"
 }

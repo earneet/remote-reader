@@ -1,5 +1,6 @@
 import { test, expect, beforeEach, afterEach } from 'vitest';
-import { rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import * as os from 'node:os';
 import { db, schema, sqlite } from '../src/lib/server/db';
 import { hashPassword, generateId, sha256Hex } from '../src/lib/server/auth';
 import {
@@ -29,7 +30,7 @@ import { resetDb } from './helpers';
 let ownerId: string;
 let store: MemoryObjectStore;
 const DAY = 86_400_000;
-const TMP_DOCS = `./data/test-docs-${Date.now().toString(36)}`;
+const TMP_DOCS = mkdtempSync(join(os.tmpdir(), 'rr-docs-'));
 
 beforeEach(async () => {
     process.env.DATA_DIR = TMP_DOCS;
@@ -787,4 +788,20 @@ test('覆盖上传分支同样自愈陈旧占位行——pre-fix 双陈旧行互
     // R 在根，内容正确
     const rRow = db.select().from(schema.documents).where(eq(schema.documents.id, r.id)).get()!;
     expect(await readFile(rRow.storagePath!)).toBe('r-content');
+});
+
+
+test('删除文件夹清空物理空目录树且保留 owner 根（R-28：全库原无 rmdir）', async () => {
+    await uploadDocument(ownerId, 'f1.md', 'x', ['a', 'b']);
+    await uploadDocument(ownerId, 'f2.md', 'y', ['a', 'c']);
+    const aFolder = db.select().from(schema.documents)
+        .where(and(eq(schema.documents.ownerId, ownerId), eq(schema.documents.name, 'a'), eq(schema.documents.type, 'folder'))).get()!;
+    const f1 = db.select().from(schema.documents)
+        .where(and(eq(schema.documents.ownerId, ownerId), eq(schema.documents.name, 'f1.md'))).get()!;
+    const dirB = dirname(f1.storagePath!); // …/<owner>/a/b
+    expect(existsSync(dirB)).toBe(true);
+    deleteNode(ownerId, aFolder.id);
+    expect(existsSync(dirB)).toBe(false);
+    expect(existsSync(dirname(dirB))).toBe(false); // a 整树清除
+    expect(existsSync(dirname(dirname(dirB)))).toBe(true); // owner 根保留（后续上传仍可写）
 });

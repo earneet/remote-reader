@@ -17,6 +17,11 @@ STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$URL")
 echo "status=$STATUS"
 [ "$STATUS" = "200" ] || { echo "FAIL: 查看页不可达"; exit 1; }
 
+echo "→ 匿名查看页不含 owner 视角返回链接（R-03）"
+if curl -s "$URL" | grep '返回我的文档库' >/dev/null; then
+  echo "FAIL: 匿名 /s/ 页渲染了「返回我的文档库」（owner 专属文案）"; exit 1
+fi
+
 echo "→ 验证错误场景"
 S=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE/api/v1/documents" \
   -H "Content-Type: application/json" -d '{"name":"x.md","content":"x"}')
@@ -136,7 +141,7 @@ IMG_DOC_URL=$(printf '%s' "$RESP" | grep -o '"url":"[^"]*"' | sed 's/"url":"//;s
 [ -n "$IMG_DOC_URL" ] || img_fail "带图文档上传未返回 url：$RESP"
 
 # 5) 查看页 200 且 SSR HTML 含图片代理 URL（local 后端走 /s/<token>/i/<name>）
-curl -sf "$IMG_DOC_URL" | grep -q "/i/e2e-shot.png" || img_fail "查看页 HTML 应含代理 URL /i/e2e-shot.png"
+curl -sf "$IMG_DOC_URL" | grep "/i/e2e-shot.png" >/dev/null || img_fail "查看页 HTML 应含代理 URL /i/e2e-shot.png"
 
 # 6) 代理 GET → 200 + Content-Type image/png + 字节与原图逐字节一致
 S=$(curl -s -D "$IMG_HDR" -o "$IMG_GET" -w "%{http_code}" "$IMG_DOC_URL/i/e2e-shot.png")
@@ -186,7 +191,18 @@ rm -f "$IMG_PNG" "$IMG_META" "$IMG_GET" "$IMG_HDR"
 
 
 echo "→ 验证登录页 Agent 指引块在 SSR HTML 中"
-curl -sf "$BASE/login" | grep -q 'id="agent-guide"' || { echo "FAIL: 登录页缺少 agent-guide 指引块"; exit 1; }
+# R-15（根因已实证，验收第 2 轮）：`curl | grep -q` + pipefail 的 SIGPIPE 竞态——grep -q
+# 首个匹配行即退出，curl 余量写入无读者管道 → EPIPE → pipefail 判整管道失败（沙箱 300/300
+# 复现；去 -q 后 0/300）。三处 curl 管道断言已全部改 `grep … >/dev/null` 读完整流；重试保留作纵深
+guide_ok=0
+for _attempt in 1 2; do
+    if curl -sf "$BASE/login" | grep 'id="agent-guide"' >/dev/null; then
+        guide_ok=1
+        break
+    fi
+    [ "$_attempt" -eq 1 ] && sleep 1
+done
+[ "$guide_ok" -eq 1 ] || { echo "FAIL: 登录页缺少 agent-guide 指引块"; exit 1; }
 
 # 可选全链路：提供 E2E_INVITE_CODE 时验证 Agent 自助注册→建 token→上传
 if [ -n "${E2E_INVITE_CODE:-}" ]; then

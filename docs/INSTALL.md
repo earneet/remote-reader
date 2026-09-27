@@ -37,7 +37,7 @@
 
 ## 2. 方式一：systemd 一键安装（最简）
 
-执行仓库内的 `scripts/install.sh`，一条命令完成：复制代码 → build → 生成密钥 → 写 systemd unit（含 17 项安全加固）→ 启动并验证健康。
+执行仓库内的 `scripts/install.sh`，一条命令完成：复制代码 → build → 生成密钥 → 写 systemd unit（含 22 项安全加固 + 3 条资源上限）→ 启动并验证健康。
 
 ### 2.1 装依赖（一次性）
 
@@ -85,7 +85,7 @@ curl http://localhost:3000/api/health            # → {"ok":true}
 
 ```bash
 git clone <repo> && cd remote-reader
-cp .env.example .env            # 至少改这两项：
+cp .env.example .env            # 至少改这四项：
 ```
 
 编辑 `.env`：
@@ -93,6 +93,8 @@ cp .env.example .env            # 至少改这两项：
 ```bash
 SESSION_SECRET=<32 字节以上长随机串>   # 生产必填，缺失 fail-fast
 INITIAL_INVITE_CODE=<你的邀请码>       # 注册首个管理员所需
+BASE_URL=http://your-host              # 你实际访问的地址（不可用 localhost，生产校验会拒启）
+ORIGIN=http://your-host                # 必须与 BASE_URL 同源（跨站表单防护基准，不同源拒启）
 ```
 
 可选覆盖（`docker-compose.yml` 已设合理默认）：
@@ -222,7 +224,9 @@ server {
     server_name your-domain;
     # ssl_certificate ...
 
-    client_max_body_size 8m;     # 须 > MAX_UPLOAD_BYTES
+    # 须 ≥ BODY_SIZE_LIMIT（图片中转走 base64 JSON：10MB 图 ≈ 13.7MB body；
+    # 按默认 5MB 文档 + 10MB 图片的应用配置即 24M，改 MAX_* 后同步调大）
+    client_max_body_size 24m;
 
     location / {
         proxy_pass http://127.0.0.1:3000;
@@ -239,7 +243,8 @@ server {
 ```
 your-domain {
     reverse_proxy 127.0.0.1:3000
-    request_body { max_size 8MB }
+    # 与 nginx 同理：须 ≥ BODY_SIZE_LIMIT（默认配置 24MB）
+    request_body { max_size 24MB }
 }
 ```
 
@@ -379,7 +384,7 @@ bun --filter remote-reader-web db:migrate    # 应用（生产在停服/维护�
 
 | 现象 | 排查 |
 |---|---|
-| 生产启动报 `SESSION_SECRET must be set in production` | 设置 `SESSION_SECRET`（长随机串） |
+| 生产启动报「SESSION_SECRET 生产环境必填」 | 设置 `SESSION_SECRET`（长随机串） |
 | 生产启动报 BODY_SIZE_LIMIT 须 ≥ max(...) | 改成 ≥ `max(MAX_UPLOAD_BYTES×1.5, MAX_IMAGE_BYTES×1.37×1.5)` 的字节数（默认 5M 文档+10M 图片时下限 21548237，如 `25165824`）；systemd 部署跑 `update.sh` 会自动迁移达标 |
 | `better-sqlite3 ... not supported` / `ERR_DLOPEN_FAILED` | 用 `bun run` 启服务会加载失败——改用 `node apps/web/build/index.js`；若 node 下报 `NODE_MODULE_VERSION` 不匹配：bun install 的 prebuilt 跟随 bun 内置 node 的 ABI——`install.sh`/`update.sh` 已自动检测并换对应 ABI 的 prebuilt，手动部署则在仓库根 `npm rebuild better-sqlite3` |
 | 上传 >512K 返回 413 但你确定 < `MAX_UPLOAD_BYTES` | `BODY_SIZE_LIMIT` < 内容大小（adapter-node 默认仅 512K） |
@@ -396,7 +401,7 @@ bun --filter remote-reader-web db:migrate    # 应用（生产在停服/维护�
 | 服务起来但 `/api/health` 一直没过 | `sudo journalctl -u remote-reader -n 100`；最常见是端口冲突 / 数据目录权限错（应是 `remote-reader:remote-reader`） |
 | 改了端口后访问不到 | 改完 `/etc/remote-reader/env` 后 `sudo systemctl restart remote-reader`；防火墙 `sudo ufw allow <port>` |
 | 想看实时日志 | `sudo journalctl -u remote-reader -f` |
-| `systemd-analyze security` 评分不理想 | 评分约 4.0–4.5 属正常（已经 17 项加固）；评分到 10.0 才需要警惕 |
+| `systemd-analyze security` 评分不理想 | 评分约 4.0–4.5 属正常（已经 22 项加固 + 3 条资源上限）；评分到 10.0 才需要警惕 |
 
 ### 方式二（Docker）专属
 

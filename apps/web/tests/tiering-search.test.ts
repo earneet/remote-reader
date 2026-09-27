@@ -1,5 +1,7 @@
 import { test, expect, beforeEach, afterEach } from 'vitest';
-import { rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { db, schema } from '../src/lib/server/db';
 import { generateId } from '../src/lib/server/auth';
 import { uploadDocument } from '../src/lib/server/documents';
@@ -12,7 +14,7 @@ import { resetDb } from './helpers';
 const DAY = 86_400_000;
 let ownerId: string;
 let store: MemoryObjectStore;
-const TMP_DOCS = `./data/test-srch-${Date.now().toString(36)}`;
+const TMP_DOCS = mkdtempSync(path.join(os.tmpdir(), 'rr-srch-'));
 
 beforeEach(async () => {
     process.env.DATA_DIR = TMP_DOCS;

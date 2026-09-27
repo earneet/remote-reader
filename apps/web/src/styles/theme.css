@@ -148,3 +148,15 @@ pre.shiki {
     display: inline-block; padding: 0 0.4rem; background: var(--rr-accent-soft);
     color: var(--rr-link); border-radius: 999px; font-size: 0.72rem;
 }
+
+/* prefers-reduced-motion（R-23 最小版）：非核心动画（抽屉滑入/lightbox 淡入/浮层转场等）归零。
+   纯 CSS 全局处置；svelte transition:fade 等 JS 驱动的 80ms 短暂过渡不在处置面（不影响可达性） */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    ::before,
+    ::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}
