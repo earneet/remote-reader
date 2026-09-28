@@ -126,14 +126,6 @@
                         {#if item.storageTier === 'cold'}<span class="chip-static cold-chip">☁️ 已归档</span>{/if}
                         {#if item.sizeBytes != null}<span class="size">{formatBytes(item.sizeBytes)}</span>{/if}
                     </span>
-                    {#if pathOf(item)}
-                        <span class="path" title={pathOf(item)}>{pathOf(item)}</span>
-                    {/if}
-                    {#if sort === 'viewed'}
-                        <span class="time" title={new Date(item.ownerViewedAt ?? item.updatedAt).toLocaleString()}>看过 · {formatRelative(item.ownerViewedAt ?? item.updatedAt)}</span>
-                    {:else}
-                        <span class="time" title={new Date(item.updatedAt).toLocaleString()}>{formatRelative(item.updatedAt)}</span>
-                    {/if}
                     <span class="doc-tags">
                         {#each item.tags as tg (tg.id)}
                             <span class="chip-static">{tg.name}</span>
@@ -148,6 +140,14 @@
                             />
                         {/if}
                     </span>
+                    {#if pathOf(item)}
+                        <span class="path" title={pathOf(item)}>{pathOf(item)}</span>
+                    {/if}
+                    {#if sort === 'viewed'}
+                        <span class="time" title={new Date(item.ownerViewedAt ?? item.updatedAt).toLocaleString()}>看过 · {formatRelative(item.ownerViewedAt ?? item.updatedAt)}</span>
+                    {:else}
+                        <span class="time" title={new Date(item.updatedAt).toLocaleString()}>{formatRelative(item.updatedAt)}</span>
+                    {/if}
                     <RowActions
                         moving={movingId === item.id}
                         onMore={(btn) => orchestrator.openRowMenu(btn, item)}
@@ -200,6 +200,8 @@
     @media (max-width: 768px) {
         .item { flex-wrap: wrap; }
         .item:active { background: var(--rr-hover-bg); }
+        /* order:5 必要非冗余：path 在 DOM 中位于 time/actions 之前，删掉此规则会把
+           time/⋯ 挤到 path 的第二行之后（标签重排进 .doc-tags 之后引入的语义翻转） */
         .path { order: 5; flex-basis: 100%; max-width: none; white-space: normal; }
     }
 </style>
