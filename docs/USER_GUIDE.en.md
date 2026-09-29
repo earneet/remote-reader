@@ -46,8 +46,8 @@ curl -X POST http://localhost:3000/api/v1/documents \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"name":"hello.md","content":"# 你好\n\n这是 **Remote Reader**.\n\n```ts\nconst x: number = 1;\n```","path":"demo"}'
 # Returns {"id":"...","url":"http://localhost:3000/s/<token>"} (plus "warnings": ["..."] if
-# unuploaded local image refs are detected; header X-Remote-Reader-Min-Bridge carries the
-# recommended minimum bridge version)
+# content issues are detected — unuploaded local image refs, raw HTML anchors, etc.;
+# header X-Remote-Reader-Min-Bridge carries the recommended minimum bridge version)
 
 # 4) Open the returned url — login-free, rendered immediately (heading, bold, code highlighting)
 ```
@@ -196,7 +196,12 @@ Body:   { "name": "<filename>", "content": "<markdown body>", "path": "<optional
 Response 200: { "id": "...", "url": "https://<host>/s/<share-token>" }
 ```
 
-Conditional field `warnings?: string[]`: present when local image references were not uploaded along with the document (usually an outdated bridge); the agent should upgrade the bridge and re-upload. Every successful response carries the `X-Remote-Reader-Min-Bridge` header with the recommended minimum bridge version.
+Conditional field `warnings?: string[]` (one entry per issue type):
+
+- Unuploaded local image references detected (usually an outdated bridge) — the agent should upgrade the bridge and re-upload.
+- Raw HTML anchors detected (`<a id/name=…>`, straight or curly quotes) — inline HTML is not rendered, so in-document `#fragment` links will not jump; the agent should use automatic heading anchors instead (headings get GitHub-style ids: CJK preserved, spaces to hyphens) and re-upload (same location, link unchanged).
+
+Every successful response carries the `X-Remote-Reader-Min-Bridge` header with the recommended minimum bridge version.
 
 **Parameters**:
 
@@ -214,7 +219,7 @@ Documents are located by `(owner, path, name)`, and the sha256 of `content` deci
 | Exists, identical content | **Does not write to disk, does not update timestamp** | `{ id, url }` (same) |
 | Exists, different content | Overwrite on disk + update hash/size | `{ id, url }` (**id and url unchanged**) |
 
-> All three cases return `{ id, url }`; `warnings?: string[]` is a conditional field (present when unuploaded local image references are detected, see §2.3).
+> All three cases return `{ id, url }`; `warnings?: string[]` is a conditional field (present when content issues such as unuploaded local image refs or raw HTML anchors are detected, see §2.3).
 
 → **The view link for the same document remains stable over time**; when the content updates, the link stays the same and points to the latest version automatically. Agents can safely re-upload.
 
