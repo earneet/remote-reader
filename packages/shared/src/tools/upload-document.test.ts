@@ -26,6 +26,12 @@ test('description 非空且引导把 url 发给用户', () => {
     expect(uploadDocumentDescription).toContain('url');
 });
 
+test('description 声明渲染约定（内嵌 HTML 不渲染 + 标题自动锚点——Agent 组织目录的信息源）', () => {
+    expect(uploadDocumentDescription).toContain('内嵌 HTML 不渲染');
+    expect(uploadDocumentDescription).toContain('锚点');
+    expect(uploadDocumentDescription).toContain('[标题](#锚点id)');
+});
+
 test('schema 接受 name+content（无 path）', () => {
     expect(uploadDocumentSchema.safeParse({ name: 'a.md', content: 'x' }).success).toBe(true);
 });
