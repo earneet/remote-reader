@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { extractImageNames, normalizeImageRef, imageTokenLines, extractLocalImageSrcs } from './image-extract';
+import { extractImageNames, normalizeImageRef, imageTokenLines, extractLocalImageSrcs, extractRawHtmlAnchorIds, extractUploadSignals } from './image-extract';
 
 describe('extractImageNames（裸名提取单源）', () => {
     it('本地裸名提取', () => {
@@ -140,5 +140,76 @@ describe('imageTokenLines / extractLocalImageSrcs（桥编排单源）', () => {
         expect(imageTokenLines('![截图](截图.png)')).toEqual([{ src: '%E6%88%AA%E5%9B%BE.png', line: 0 }]);
         // 范围内未命中后的全文兜底同样双形态；空格编码形态同理
         expect(imageTokenLines('![a](<a b.png>)')).toEqual([{ src: 'a%20b.png', line: 0 }]);
+    });
+});
+
+describe('extractRawHtmlAnchorIds（手写 HTML 锚点提取——服务端 warnings 检测单源）', () => {
+    it('四种引号形态全识别：直双/直单/弯双/弯单（AI 中文文档常见弯引号病）', () => {
+        expect(extractRawHtmlAnchorIds('<a id="ch1"></a>')).toEqual(['ch1']);
+        expect(extractRawHtmlAnchorIds("<a id='ch2'></a>")).toEqual(['ch2']);
+        expect(extractRawHtmlAnchorIds('<a id=“ch3”></a>')).toEqual(['ch3']);
+        expect(extractRawHtmlAnchorIds('<a id=‘ch4’></a>')).toEqual(['ch4']);
+    });
+    it('name 属性（老式 HTML）与大小写不敏感同样命中', () => {
+        expect(extractRawHtmlAnchorIds('<a name="top"></a>')).toEqual(['top']);
+        expect(extractRawHtmlAnchorIds('<A ID="SEC-1"></A>')).toEqual(['SEC-1']);
+    });
+    it('标签间带可见文本的锚点形态命中（<a id="x">第一章</a>）', () => {
+        expect(extractRawHtmlAnchorIds('<a id="ch1">第一章</a>')).toEqual(['ch1']);
+    });
+    it('正文中多处锚点去重保序（#top 常见多处出现）', () => {
+        const md = '# 手册\n\n<a id="top"></a>\n\n## 一\n\n<a id="ch1"></a>\n\n回顶 <a id="top"></a>';
+        expect(extractRawHtmlAnchorIds(md)).toEqual(['top', 'ch1']);
+    });
+    it('代码块 / 行内代码 / math 内不提取（教学文档的锚点示例不算问题——与 extractImageNames 的 code/math 内不提取语义一致）', () => {
+        const md = [
+            '# 教 HTML 锚点',
+            '',
+            '```html',
+            '<a id="demo"></a>',
+            '```',
+            '',
+            '行内 `<a id="inline-demo"></a>` 示例',
+            '',
+            '$<a id="math-demo"></a>$'
+        ].join('\n');
+        expect(extractRawHtmlAnchorIds(md)).toEqual([]);
+    });
+    it('普通手写链接 <a href> 不匹配（只锚 id/name——href 失效是可见的原文显示，不告警防噪音）', () => {
+        expect(extractRawHtmlAnchorIds('<a href="https://x.com">点我</a>')).toEqual([]);
+    });
+    it('空 id 不产出；无锚点文本返回 []', () => {
+        expect(extractRawHtmlAnchorIds('<a id=""></a>')).toEqual([]);
+        expect(extractRawHtmlAnchorIds('# 纯文档\n正文 [目录](#ch1) 链接')).toEqual([]);
+    });
+    it('表格 cell 内的锚点命中（cell inline children 递归——事故文档表格形态的回归锁）', () => {
+        const md = '| 章 | 锚点 |\n|---|---|\n| 1 | <a id="ch1"></a> |';
+        expect(extractRawHtmlAnchorIds(md)).toEqual(['ch1']);
+    });
+    it('直/弯同 id 去重（smartquotes 弯化后两形态提取值相同）', () => {
+        expect(extractRawHtmlAnchorIds('<a id="top"></a>\n\n<a id=“top”></a>')).toEqual(['top']);
+    });
+});
+
+describe('extractUploadSignals（上传路径单次 parse 双 walk）', () => {
+    it('组合入口与两个独立导出输出逐字节等价（防双 walk 漂移——桥走独立导出、服务端走组合）', () => {
+        const md = [
+            '# 手册',
+            '',
+            '![首段](first.png) 与 ![外](https://x.com/e.png)',
+            '',
+            '| a | b |',
+            '|---|---|',
+            '| ![表内](sub/t.png) | <a id="cell-anchor"></a> |',
+            '',
+            '<a id=“ch1”></a>',
+            '',
+            '```html',
+            '<a id="fenced"></a>',
+            '```'
+        ].join('\n');
+        const sig = extractUploadSignals(md);
+        expect(sig.imageSrcs).toEqual(extractLocalImageSrcs(md));
+        expect(sig.anchorIds).toEqual(extractRawHtmlAnchorIds(md));
     });
 });

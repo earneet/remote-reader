@@ -55,6 +55,43 @@ export function extractImageNames(src: string): string[] {
     return out;
 }
 
+// 手写 HTML 锚点形态（服务端 warnings 检测用）：html:false 渲染下 <a id/name=...></a> 按原文转义显示、
+// 文档内 #fragment 链接落空。引号覆盖直双/直单/弯双/弯单——AI 中文文档常把 " 写成 “（本次事故形态）；
+// 标签间允许纯文本（<a id="x">第一章</a> 带可见文本的变体）。只锚 id/name 且要求其为唯一属性：
+// <a href> 失效是可见的原文显示不告警防噪音；id 前后带其他属性（class 等）的变体不匹配——检测是
+// 反馈回路非正确性闸门，罕见形态漏检仅少一条提醒。i 标志顺带覆盖 <A ID=...> 老式大写。
+const ANCHOR_TAG_RE = /<a\s+(?:id|name)\s*=\s*(?:"([^"]*)"|'([^']*)'|“([^”]*)”|‘([^’]*)’)\s*>([^<]*)<\/a\s*>/gi;
+
+/** token → 手写锚点 id（去重保序）。code（fence/行内）/math 内不提取——教学文档的锚点示例是合法
+ *  内容，不构成问题信号。html:false 下锚点完整落在 text token content；⚠️ smartquotes（core 链，
+ *  parse 时原地改写 text token）会把 `id=` 后的直引号弯化（探针实证：各上下文中 `id="ch1"` 到达
+ *  walk 时已是 `id=“ch1”`）——弯引号分支才是直引号输入的主要命中路径，四分支缺一不可，按直觉
+ *  「直引号输入走直引号分支」删弯引号分支会全量漏检。直引号分支仅兜 smartquotes 配对失败的角落
+ *  （如纯空白 id 实测保持直引号）。 */
+function anchorIdsOf(toks: MdToken[]): string[] {
+    const out: string[] = [];
+    const seen = new Set<string>();
+    const push = (id: string): void => {
+        if (id && !seen.has(id)) { seen.add(id); out.push(id); }
+    };
+    const walk = (list: MdToken[]): void => {
+        for (const t of list) {
+            if (t.type === 'text') {
+                for (const m of t.content.matchAll(ANCHOR_TAG_RE)) {
+                    push(m[1] ?? m[2] ?? m[3] ?? m[4] ?? '');
+                }
+            }
+            if (t.children) walk(t.children);
+        }
+    };
+    walk(toks);
+    return out;
+}
+
+export function extractRawHtmlAnchorIds(src: string): string[] {
+    return anchorIdsOf(parser().parse(src, {}));
+}
+
 export interface ImageTokenLine { src: string; line: number }
 
 /** token 级图片引用（含所在行号）：桥预检收集与改写定位共用（spec §6.1/§6.3）。
@@ -113,14 +150,15 @@ export function imageTokenLines(src: string): ImageTokenLine[] {
  *  %5C，raw 恒不含字面反斜杠（探针实测），且盘符已是绝对路径，decode 后即文件系统可用形态。 */
 const WINDOWS_DRIVE = /^[a-zA-Z]:[\\/]/;
 
-export function extractLocalImageSrcs(src: string): string[] {
+/** token → 本地图片引用（去重保序，原始 src 编码形态）。
+ *  免行号 walk：不经 imageTokenLines——其行定位在表格上下文（父 inline map 为 null）退化为
+ *  全文 findIndex，O(引用数×全文)，认证用户可用大表格+海量引用单请求阻塞事件循环（审查 P1 DoS）。
+ *  遍历序与 imageTokenLines 的 DFS 同构，输出序列逐字节等价（对照快照用例锁定）。 */
+function localImageSrcsOf(toks: MdToken[]): string[] {
     const seen = new Set<string>();
     const out: string[] = [];
-    // 免行号 walk：不再经 imageTokenLines——其行定位在表格上下文（父 inline map 为 null）退化为
-    // 全文 findIndex，O(引用数×全文)，认证用户可用大表格+海量引用单请求阻塞事件循环（审查 P1 DoS）。
-    // 遍历序与 imageTokenLines 的 DFS 同构，输出序列逐字节等价（对照快照用例锁定）
-    const walk = (toks: MdToken[]): void => {
-        for (const t of toks) {
+    const walk = (list: MdToken[]): void => {
+        for (const t of list) {
             if (t.type === 'image') {
                 const raw = t.attrGet('src') ?? '';
                 if (!raw) continue;
@@ -132,8 +170,21 @@ export function extractLocalImageSrcs(src: string): string[] {
             if (t.children) walk(t.children);
         }
     };
-    walk(parser().parse(src, {}));
+    walk(toks);
     return out;
+}
+
+export function extractLocalImageSrcs(src: string): string[] {
+    return localImageSrcsOf(parser().parse(src, {}));
+}
+
+/** 上传路径双检测单入口：一次 parse，双 walk（本地图片 src + 手写锚点 id）。
+ *  之前图片/锚点两个检测各自 parse 同一 content，5MB 上限文档把事件循环同步阻塞翻倍
+ *  （~2.4s→~5.2s，node 实测）——本仓库对上传路径阻塞面的历轮加固（MAX_IMAGE_REFS、
+ *  免行号化）均以此为标准，故上传侧统一走本入口；桥侧单检测继续用各自的独立导出。 */
+export function extractUploadSignals(src: string): { imageSrcs: string[]; anchorIds: string[] } {
+    const toks = parser().parse(src, {});
+    return { imageSrcs: localImageSrcsOf(toks), anchorIds: anchorIdsOf(toks) };
 }
 
 /** 桥侧读盘用：编码形态 src → 本地路径（decode + cwd join，P1-1） */
