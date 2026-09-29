@@ -138,3 +138,66 @@ test('可疑引用超 5 个 → warnings 计数报全量 7 处、仅列前 5（�
     expect(msg).not.toContain('imgs/i5.png');
     expect(msg).not.toContain('imgs/i6.png');
 });
+
+test('弯引号手写锚点文档（2026-09-28 事故形态）→ 200 + warnings 提及锚点 id 与标题锚点修正指引', async () => {
+    const content = [
+        '# 手册',
+        '',
+        '## 章节地图',
+        '',
+        '| 章 | 链接 |',
+        '|---|---|',
+        '| 1 | [第一章](#ch1) |',
+        '',
+        '<a id=“ch1”></a>',
+        '',
+        '## 第一章 概述'
+    ].join('\n');
+    const r = await call({ authorization: validAuth }, { name: 'anchors.md', content });
+    expect(r.status).toBe(200);
+    const warnings = (r.body as { warnings?: string[] }).warnings;
+    expect(warnings).toHaveLength(1);
+    expect(warnings![0]).toContain('ch1');
+    expect(warnings![0]).toContain('标题');
+    expect(warnings![0]).toContain('重新上传');
+});
+
+test('锚点 + 未上传图片引用同时存在 → warnings 2 条（各检测器独立成条，不合并）', async () => {
+    const r = await call({ authorization: validAuth }, {
+        name: 'both.md',
+        content: '<a id="top"></a>\n\n![x](imgs/red.png)'
+    });
+    expect(r.status).toBe(200);
+    const warnings = (r.body as { warnings?: string[] }).warnings;
+    expect(warnings).toHaveLength(2);
+    expect(warnings!.some((w) => w.includes('imgs/red.png'))).toBe(true);
+    expect(warnings!.some((w) => w.includes('top') && w.includes('锚点'))).toBe(true);
+});
+
+test('锚点超 5 个 → 计数报全量 7 处、仅列前 5（与图片检测同款截断语义）', async () => {
+    const content = Array.from({ length: 7 }, (_, i) => `<a id="sec${i}"></a>`).join('\n');
+    const r = await call({ authorization: validAuth }, { name: 'many-a.md', content });
+    expect(r.status).toBe(200);
+    const msg = ((r.body as { warnings?: string[] }).warnings ?? [])[0] ?? '';
+    expect(msg).toContain('检测到 7 处');
+    expect(msg).toContain('sec0');
+    expect(msg).toContain('sec4');
+    expect(msg).not.toContain('sec5');
+});
+
+test('代码块内的锚点教学示例 → 无 warnings 键（不误报，响应形状零变化）', async () => {
+    const content = '# 教学\n\n```html\n<a id="demo"></a>\n```\n\n行内 `<a id="x"></a>` 也不算';
+    const r = await call({ authorization: validAuth }, { name: 'teach.md', content });
+    expect(r.status).toBe(200);
+    expect('warnings' in (r.body ?? {})).toBe(false);
+});
+
+test('幂等重传同内容 → warnings 每次响应都携带（修正前的每次上传都被提醒）', async () => {
+    const body = { name: 'idem.md', content: '<a id="top"></a>' };
+    const first = await call({ authorization: validAuth }, body);
+    const second = await call({ authorization: validAuth }, body);
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect((first.body as { warnings?: string[] }).warnings).toHaveLength(1);
+    expect((second.body as { warnings?: string[] }).warnings).toHaveLength(1);
+});

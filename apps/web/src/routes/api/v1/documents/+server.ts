@@ -4,7 +4,7 @@ import { authenticateApiToken } from '$server/apitoken-auth';
 import { checkRateLimit } from '$server/ratelimit';
 import { uploadDocument, NameConflictError } from '$server/documents';
 import { TooManyImageRefsError } from '$server/image-refs';
-import { detectUnuploadedLocalImageRefs } from '$server/upload-warnings';
+import { detectUploadIssues } from '$server/upload-warnings';
 import { MIN_BRIDGE_VERSION } from '$server/bridge-compat';
 import { parsePath } from '@remote-reader/shared/paths';
 import { envInt } from '$server/env';
@@ -71,13 +71,16 @@ export const POST: RequestHandler = async ({ request, getClientAddress }) => {
     }
     // Layer ③：最低桥版本建议随响应头下发（桥 compareVersions 自检）；无 warnings 时响应形状零变化
     const headers = { 'X-Remote-Reader-Min-Bridge': MIN_BRIDGE_VERSION };
-    // Layer ②：内容兜底检测（旧桥不发 UA）——本地图片引用未随文档上传 → warnings 提示升级
-    const { total, listed } = detectUnuploadedLocalImageRefs(auth.userId, result.id, content);
-    if (total > 0) {
-        return json({
-            ...result,
-            warnings: [`检测到 ${total} 处本地图片引用未随文档上传（查看页将显示裂图）：${listed.join('、')}${total > listed.length ? '（仅列前 5 处）' : ''}——这通常意味着桥版本过旧（≥0.2.0 起支持图片自动上传），请升级桥后重新上传`]
-        }, { headers });
+    // Layer ②：内容兜底检测（桥不预处理的内容问题 → warnings 转告 Agent，修正重传幂等覆盖链接不变）。
+    // 图片 warning 兜旧桥（不发 UA）；锚点 warning 面向全部桥版本（手写 HTML 锚点在 html:false 下失效）
+    const warnings: string[] = [];
+    const { images, anchors } = detectUploadIssues(auth.userId, result.id, content);
+    if (images.total > 0) {
+        warnings.push(`检测到 ${images.total} 处本地图片引用未随文档上传（查看页将显示裂图）：${images.listed.join('、')}${images.total > images.listed.length ? '（仅列前 5 处）' : ''}——这通常意味着桥版本过旧（≥0.2.0 起支持图片自动上传），请升级桥后重新上传`);
     }
+    if (anchors.total > 0) {
+        warnings.push(`检测到 ${anchors.total} 处手写 HTML 锚点（<a id/name=…>，如：${anchors.listed.join('、')}${anchors.total > anchors.listed.length ? '（仅列前 5 处）' : ''}）——渲染器不渲染内嵌 HTML，锚点会按原文显示、文档内链接无法跳转。请改用标题自动锚点：标题（#~######）自动生成 GitHub 风格 id（中文原样保留、空格转连字符），文档内跳转用 [标题](#标题锚点) 链接；修正后重新上传即可（同位置覆盖，链接不变）`);
+    }
+    if (warnings.length > 0) return json({ ...result, warnings }, { headers });
     return json(result, { headers });
 };
